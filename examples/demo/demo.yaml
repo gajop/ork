@@ -1,0 +1,21 @@
+name: local_demo
+
+tasks:
+  greet:
+    executor: python
+    file: tasks/hello.py
+    input:
+      name: "Ork dev"
+      delay: 5
+
+  compliment:
+    executor: python
+    file: tasks/compliment.py
+    depends_on: [greet]
+    input:
+      adjective: "ridiculously fast"
+
+  shell_echo:
+    executor: python
+    file: tasks/shell_echo.py
+    depends_on: [compliment]

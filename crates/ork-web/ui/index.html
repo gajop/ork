@@ -1,0 +1,293 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Ork Runs</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #0e0e12; color: #e8e8ec; }
+    header { padding: 12px 16px; background: #14141a; border-bottom: 1px solid #22232b; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
+    header .controls { display: flex; gap: 8px; align-items: center; }
+    header input { background:#1a1b23; color:#e8e8ec; border:1px solid #22232b; border-radius:6px; padding:6px 8px; width:280px; }
+    header button { background:#3a89ff; border:none; color:#0c1220; padding:6px 10px; border-radius:6px; font-weight:700; cursor:pointer; }
+    main { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 52px); }
+    #runs { border-right: 1px solid #22232b; overflow-y: auto; }
+    .run { padding: 12px 14px; border-bottom: 1px solid #22232b; cursor: pointer; }
+    .run:hover { background: #1a1b23; }
+    .run.selected { background: #1a1b23; }
+    .run .id { font-weight: 600; }
+    .run .meta { font-size: 12px; color: #a8a8b3; }
+    #detail { padding: 16px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { padding: 8px; border-bottom: 1px solid #22232b; text-align: left; font-size: 13px; }
+    .badge { padding: 2px 6px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .ok { background: #143018; color: #8ff0a0; }
+    .fail { background: #3a1116; color: #ff9da4; }
+    .pending { background: #31313d; color: #d1d1dd; }
+    code { background: #16161d; padding: 2px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ork Runs</h1>
+    <div class="controls">
+      <input id="workflow-path" placeholder="path to workflow yaml" />
+      <button id="run-btn">Run</button>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+  <main>
+    <div id="runs"></div>
+    <div id="detail">
+      <div id="workflow-panel">
+        <div style="display:flex;align-items:center;justify-content:space-between; gap:8px;">
+          <h2 style="margin:0;">Workflow graph</h2>
+          <span style="color:#a8a8b3;font-size:12px;">static structure</span>
+        </div>
+        <div id="workflow-graph" style="margin-top:8px;"></div>
+      </div>
+      <div id="run-detail"><p style="color:#a8a8b3;">Select a run to view details.</p></div>
+    </div>
+  </main>
+
+  <script>
+    let selectedRunId = null;
+    let detailInterval = null;
+    let lastRuns = [];
+    let currentWorkflow = 'examples/demo/workflows/demo.yaml';
+    let lastRunsHash = '';
+    let workflowGraph = [];
+
+    const runsEl = document.getElementById('runs');
+    document.getElementById('refresh').onclick = () => fetchRuns();
+    document.getElementById('run-btn').onclick = () => triggerRun();
+    document.getElementById('workflow-path').value = currentWorkflow;
+    runsEl.addEventListener('click', (e) => {
+      const target = e.target.closest('.run');
+      if (target && target.dataset.id) {
+        selectRun(target.dataset.id);
+      }
+    });
+    document.getElementById('workflow-path').addEventListener('change', (e) => {
+      currentWorkflow = e.target.value || currentWorkflow;
+      fetchWorkflowGraph(currentWorkflow);
+    });
+    fetchRuns();
+    fetchWorkflowGraph(currentWorkflow);
+    setInterval(fetchRuns, 100);
+
+    function fetchRuns() {
+      fetch('/api/runs').then(r => r.json()).then(renderRuns).catch(() => {});
+    }
+
+    function fetchWorkflowGraph(path) {
+      fetch('/api/workflow?path=' + encodeURIComponent(path))
+        .then(r => r.json())
+        .then(data => {
+          workflowGraph = data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
+          renderWorkflowGraph();
+        })
+        .catch(() => {});
+    }
+
+    function renderRuns(runs) {
+      lastRuns = runs;
+      const hash = runs.map(r => `${r.id}|${r.status}|${r.created_at}`).join(',');
+      const el = document.getElementById('runs');
+      if (hash === lastRunsHash && el.children.length === runs.length) {
+        highlightRuns();
+        return;
+      }
+      lastRunsHash = hash;
+      const list = runs.map(run => {
+        return `
+          <div class="run ${run.id === selectedRunId ? 'selected' : ''}" data-id="${run.id}">
+            <div class="id">${run.id}</div>
+            <div class="meta">${run.workflow} · ${run.status} · ${run.created_at}</div>
+          </div>
+        `;
+      }).join('');
+      el.innerHTML = list || '<p style="color:#a8a8b3;padding:12px;">No runs yet.</p>';
+      if (!selectedRunId && runs.length > 0) {
+        selectRun(runs[0].id);
+      } else {
+        highlightRuns();
+      }
+    }
+
+    function selectRun(id) {
+      selectedRunId = id;
+      highlightRuns();
+      fetchRunDetail(selectedRunId);
+      if (detailInterval) clearInterval(detailInterval);
+      detailInterval = setInterval(() => fetchRunDetail(selectedRunId), 100);
+    }
+
+    function highlightRuns() {
+      document.querySelectorAll('.run').forEach(el => {
+        if (el.dataset.id === selectedRunId) {
+          el.classList.add('selected');
+        } else {
+          el.classList.remove('selected');
+        }
+      });
+    }
+
+    function fetchRunDetail(id) {
+      fetch('/api/runs/' + id).then(r => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      }).then(showDetail).catch(() => {});
+    }
+
+    function triggerRun() {
+      const wf = document.getElementById('workflow-path').value || currentWorkflow;
+      currentWorkflow = wf;
+      fetch('/api/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow: wf })
+      }).then(r => r.json()).then(resp => {
+        const id = resp.run_id;
+        if (id) {
+          selectedRunId = id;
+          highlightRuns();
+          fetchRuns();
+          fetchRunDetail(id);
+        }
+      }).catch(() => {});
+    }
+
+    function badge(status) {
+      const lower = (status || '').toLowerCase();
+      const cls = lower === 'success' ? 'ok' : (lower === 'running' || lower === 'pending' ? 'pending' : 'fail');
+      return `<span class="badge ${cls}">${status}</span>`;
+    }
+    function fmtTime(val) {
+      if (!val) return '';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return val;
+      return d.toLocaleTimeString([], { hour12: false });
+    }
+    function fmtDuration(start, end) {
+      const s = start ? new Date(start) : null;
+      const e = end ? new Date(end) : new Date();
+      if (!s || !e || isNaN(s.getTime()) || isNaN(e.getTime())) return '';
+      const ms = e - s;
+      if (ms < 0) return '';
+      return (ms / 1000).toFixed(2) + 's';
+    }
+    function renderWorkflowGraph() {
+      const target = document.getElementById('workflow-graph');
+      if (!target) return;
+      if (!workflowGraph.length) {
+        target.innerHTML = '<p style="color:#a8a8b3;">No workflow loaded.</p>';
+        return;
+      }
+      target.innerHTML = renderGraph(workflowGraph, {});
+    }
+    function showDetail(data) {
+      const statusMap = Object.fromEntries(data.tasks.map(t => [t.task.task, t.task.status]));
+      const graphNodes = workflowGraph.length ? workflowGraph : data.tasks.map(t => ({ id: t.task.task, deps: t.deps || [] }));
+      const graphSvg = renderGraph(graphNodes, statusMap);
+      const taskRows = data.tasks.map(t => `
+        <tr>
+          <td>${t.task.task}</td>
+          <td>${badge(t.task.status)}</td>
+          <td>${fmtTime(t.task.started_at)}</td>
+          <td>${fmtTime(t.task.finished_at)}</td>
+          <td>${fmtDuration(t.task.started_at, t.task.finished_at)}</td>
+          <td><code>${truncate(JSON.stringify(t.output ?? {}), 120)}</code></td>
+        </tr>
+      `).join('');
+      const html = `
+        <div>
+          <h2 style="margin:0 0 8px 0;">Run ${data.run.id}</h2>
+          <div style="color:#a8a8b3; font-size:13px;">workflow=${data.run.workflow} · status=${data.run.status}</div>
+          <div style="margin:12px 0;">${graphSvg}</div>
+          <table>
+            <thead><tr><th>Task</th><th>Status</th><th>Started</th><th>Finished</th><th>Duration</th><th>Output</th></tr></thead>
+            <tbody>${taskRows}</tbody>
+          </table>
+        </div>
+      `;
+      document.getElementById('run-detail').innerHTML = html;
+    }
+    function truncate(str, len) {
+      return str.length > len ? str.slice(0, len) + '…' : str;
+    }
+
+    // simple layered DAG drawing
+    function renderGraph(nodes, statusMap = {}) {
+      if (!nodes.length) return '';
+      // compute layers by distance from roots
+      const indeg = Object.fromEntries(nodes.map(n => [n.id, 0]));
+      nodes.forEach(n => n.deps.forEach(d => indeg[n.id] = (indeg[n.id] || 0) + 0));
+      const depsMap = Object.fromEntries(nodes.map(n => [n.id, n.deps || []]));
+      const layerMap = {};
+      const visited = new Set();
+      function dfs(id) {
+        if (layerMap[id] !== undefined) return layerMap[id];
+        const deps = depsMap[id] || [];
+        if (deps.length === 0) {
+          layerMap[id] = 0;
+        } else {
+          layerMap[id] = Math.max(...deps.map(d => dfs(d))) + 1;
+        }
+        visited.add(id);
+        return layerMap[id];
+      }
+      nodes.forEach(n => dfs(n.id));
+      const layers = {};
+      Object.entries(layerMap).forEach(([id, layer]) => {
+        layers[layer] = layers[layer] || [];
+        layers[layer].push(id);
+      });
+      const layerKeys = Object.keys(layers).map(Number).sort((a, b) => a - b);
+      const width = 140 * (layerKeys.length || 1);
+      const height = 80 * Math.max(...Object.values(layers).map(v => v.length), 1);
+      let svg = `<svg width="${width}" height="${height}" style="border:1px solid #22232b; border-radius:8px; background:#0f1016;">`;
+      const positions = {};
+      layerKeys.forEach((layer, idx) => {
+        const items = layers[layer];
+        items.forEach((id, i) => {
+          const x = 80 + idx * 120;
+          const y = 40 + i * 80;
+          positions[id] = { x, y };
+        });
+      });
+      // edges
+      nodes.forEach(n => {
+        (n.deps || []).forEach(dep => {
+          if (positions[dep] && positions[n.id]) {
+            const a = positions[dep];
+            const b = positions[n.id];
+            svg += `<line x1="${a.x+30}" y1="${a.y}" x2="${b.x-30}" y2="${b.y}" stroke="#3a89ff" stroke-width="2" marker-end="url(#arrow)"/>`;
+          }
+        });
+      });
+      svg += `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3a89ff"/></marker></defs>`;
+      // nodes
+      nodes.forEach(n => {
+        const pos = positions[n.id];
+        if (!pos) return;
+        const status = (statusMap[n.id] || '').toLowerCase();
+        const fill = status === 'success' ? '#12331b' :
+                     status === 'running' || status === 'dispatched' ? '#2c2c1a' :
+                     status === 'failed' || status === 'skipped' ? '#33181c' :
+                     '#1b1c25';
+        const stroke = status === 'success' ? '#63e6a1' :
+                       status === 'running' || status === 'dispatched' ? '#f0c674' :
+                       status === 'failed' || status === 'skipped' ? '#ff7373' :
+                       '#3a89ff';
+        svg += `<g>
+          <rect x="${pos.x-40}" y="${pos.y-16}" rx="8" ry="8" width="80" height="32" fill="${fill}" stroke="${stroke}" stroke-width="2"></rect>
+          <text x="${pos.x}" y="${pos.y+4}" fill="#e8e8ec" font-size="12" text-anchor="middle" font-family="system-ui,sans-serif">${n.id}</text>
+        </g>`;
+      });
+      svg += `</svg>`;
+      return svg;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+# Google Cloud Workflows Implementation of Demo Workflow
+# Same as examples/demo - greeting followed by compliment
+#
+# Installation:
+#   gcloud auth login
+#   gcloud config set project YOUR_PROJECT_ID
+#
+# Deploy:
+#   gcloud workflows deploy demo-workflow --source=5_gcp_workflows_demo.yaml
+#
+# Run:
+#   gcloud workflows run demo-workflow
+
+main:
+  steps:
+    - greet:
+        call: greet_step
+        args:
+          name: "Ork dev"
+          delay: 5
+        result: greet_output
+
+    - compliment:
+        call: compliment_step
+        args:
+          greet_output: ${greet_output}
+          adjective: "ridiculously fast"
+        result: compliment_output
+
+    - shell_echo:
+        call: sys.log
+        args:
+          text: ${"Final: " + compliment_output.line}
+
+    - return_result:
+        return: ${compliment_output}
+
+# Subworkflows (like functions)
+greet_step:
+  params: [name, delay]
+  steps:
+    - wait:
+        call: sys.sleep
+        args:
+          seconds: ${delay}
+
+    - create_message:
+        assign:
+          - message: ${"Hello, " + name + "!"}
+          - timestamp: ${sys.now()}
+
+    - log_message:
+        call: sys.log
+        args:
+          text: ${message}
+
+    - return_output:
+        return:
+          message: ${message}
+          timestamp: ${timestamp}
+
+compliment_step:
+  params: [greet_output, adjective]
+  steps:
+    - wait:
+        call: sys.sleep
+        args:
+          seconds: 5
+
+    - create_compliment:
+        assign:
+          - line: ${greet_output.message + " — you built Ork to be " + adjective + "!"}
+
+    - log_compliment:
+        call: sys.log
+        args:
+          text: ${line}
+
+    - return_output:
+        return:
+          line: ${line}
+          adjective: ${adjective}
+
+# PROS:
+# + Fully managed (no servers to run)
+# + Pay per execution (very cheap at low volume)
+# + Pure YAML (no code needed)
+# + Integrated with GCP services
+# + Good for simple orchestration
+# + Can call any HTTP API
+# + Built-in retry/error handling
+#
+# CONS:
+# - GCP vendor lock-in (can't run locally)
+# - YAML gets messy for complex logic
+# - Limited to 60s per step (use Connector for longer)
+# - Expression syntax is clunky (${...})
+# - No local development (must deploy to test)
+# - Debugging is harder (no step-through)
+# - ~60 lines for simple workflow (verbose subworkflows)

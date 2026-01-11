@@ -1,0 +1,82 @@
+# Proposed Ork Implementation - Enhanced YAML
+# Same as examples/demo - greeting followed by compliment
+#
+# This shows a PROPOSED approach with built-in task types
+# to reduce the need for custom Python tasks.
+#
+# Run:
+#   ork run 10_ork_proposed_yaml.yaml
+
+name: demo_workflow
+
+tasks:
+  # Option 1: Inline shell script (no Python file needed)
+  greet:
+    executor: shell
+    script: |
+      name="Ork dev"
+      delay=5
+      sleep $delay
+      message="Hello, $name!"
+      echo "$message"
+      # Return JSON for downstream tasks
+      echo "{\"message\": \"$message\", \"timestamp\": $(date +%s)}"
+    outputs:
+      message: "{{ script.stdout.message }}"
+      timestamp: "{{ script.stdout.timestamp }}"
+
+  # Option 2: Inline Python (no file needed for simple tasks)
+  compliment:
+    executor: python
+    script: |
+      import time
+      message = inputs.greet.message
+      adjective = inputs.adjective
+      time.sleep(5)
+      line = f"{message} — you built Ork to be {adjective}!"
+      print(line)
+      return {"line": line, "adjective": adjective}
+    depends_on: [greet]
+    inputs:
+      adjective: "ridiculously fast"
+
+  # Option 3: Built-in task type for HTTP calls
+  notify_slack:
+    type: http
+    method: POST
+    url: "{{ secrets.slack_webhook }}"
+    body:
+      text: "{{ tasks.compliment.outputs.line }}"
+    depends_on: [compliment]
+
+  # Option 4: Still support file references for complex tasks
+  complex_analytics:
+    executor: python
+    file: tasks/analytics.py
+    depends_on: [greet, compliment]
+
+# PROS:
+# + No Python files needed for simple tasks
+# + Templating makes it powerful (Jinja2-style)
+# + Built-in types for common operations (http, sql, dbt)
+# + Still supports file references for complex logic
+# + Very declarative
+# + Can mix executors easily
+#
+# CONS:
+# - YAML can get messy with inline scripts
+# - Templating in strings is less type-safe
+# - Need to build many task types
+# - Debugging inline scripts is harder
+
+# BUILT-IN TYPES TO CONSIDER:
+# - http: Make HTTP requests
+# - sql: Run SQL queries
+# - dbt: Run dbt models
+# - slack: Send Slack messages
+# - email: Send emails
+# - gcs/s3: Cloud storage operations
+# - bigquery: BigQuery operations
+# - dataform: Google Dataform
+# - fivetran: Trigger Fivetran syncs
+# - census: Trigger Census syncs

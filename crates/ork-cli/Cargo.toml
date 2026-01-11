@@ -1,0 +1,14 @@
+[package]
+name = "ork-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+chrono = { workspace = true }
+serde = { workspace = true }
+ork-core = { path = "../ork-core" }
+ork-state = { path = "../ork-state" }
+ork-runner = { path = "../ork-runner" }

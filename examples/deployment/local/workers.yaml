@@ -1,0 +1,5 @@
+workers:
+  default:
+    cpu: 1
+    memory: 2Gi
+    timeout: 3600

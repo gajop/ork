@@ -1,0 +1,6 @@
+workers:
+  default:
+    service_account: ork-worker@my-project.iam.gserviceaccount.com
+    cpu: 1
+    memory: 2Gi
+    timeout: 3600
