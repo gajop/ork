@@ -1,0 +1,23 @@
+name: parallel_demo
+
+tasks:
+  hello_left:
+    executor: python
+    file: tasks/hello.py
+    input:
+      name: "left branch"
+      delay: 5
+
+  hello_right:
+    executor: python
+    file: tasks/hello.py
+    input:
+      name: "right branch"
+      delay: 5
+
+  combine:
+    executor: python
+    file: tasks/compliment.py
+    depends_on: [hello_left, hello_right]
+    input:
+      adjective: "running in parallel"

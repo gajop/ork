@@ -1,0 +1,63 @@
+name: elt_pipeline
+
+tasks:
+  bronze_posts:
+    executor: python
+    file: tasks/load_bronze.py
+    input:
+      source: posts
+      date: "2024-01-15"
+      db_path: data/warehouse.db
+    timeout: 600
+    retries: 1
+
+  bronze_comments:
+    executor: python
+    file: tasks/load_bronze.py
+    input:
+      source: comments
+      date: "2024-01-15"
+      db_path: data/warehouse.db
+    timeout: 600
+    retries: 1
+
+  bronze_users:
+    executor: python
+    file: tasks/load_bronze.py
+    input:
+      source: users
+      date: "2024-01-15"
+      db_path: data/warehouse.db
+    timeout: 600
+    retries: 1
+
+  silver_posts:
+    executor: python
+    file: tasks/transform_silver.py
+    input:
+      source: posts
+      db_path: data/warehouse.db
+    depends_on: [bronze_posts]
+
+  silver_comments:
+    executor: python
+    file: tasks/transform_silver.py
+    input:
+      source: comments
+      db_path: data/warehouse.db
+    depends_on: [bronze_comments]
+
+  silver_users:
+    executor: python
+    file: tasks/transform_silver.py
+    input:
+      source: users
+      db_path: data/warehouse.db
+    depends_on: [bronze_users]
+
+  gold_analytics:
+    executor: python
+    file: tasks/gold_analytics.py
+    input:
+      db_path: data/warehouse.db
+    depends_on: [silver_posts, silver_comments, silver_users]

@@ -1,0 +1,17 @@
+name: retries_demo
+
+tasks:
+  flakey:
+    executor: python
+    file: tasks/flakey.py
+    retries: 2
+    input:
+      fail_times: 1
+
+  greet_after_retry:
+    executor: python
+    file: tasks/hello.py
+    depends_on: [flakey]
+    input:
+      name: "after retry"
+      delay: 2

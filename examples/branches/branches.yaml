@@ -1,0 +1,32 @@
+name: branches_demo
+
+tasks:
+  start:
+    executor: python
+    file: tasks/hello.py
+    input:
+      name: "branch root"
+      delay: 2
+
+  left:
+    executor: python
+    file: tasks/hello.py
+    depends_on: [start]
+    input:
+      name: "left path"
+      delay: 5
+
+  right:
+    executor: python
+    file: tasks/hello.py
+    depends_on: [start]
+    input:
+      name: "right path"
+      delay: 5
+
+  join:
+    executor: python
+    file: tasks/compliment.py
+    depends_on: [left, right]
+    input:
+      adjective: "joined outputs"

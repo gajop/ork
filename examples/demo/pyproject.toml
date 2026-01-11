@@ -1,0 +1,8 @@
+[tool.uv]
+package = false
+
+[project]
+name = "ork-demo"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.0"]

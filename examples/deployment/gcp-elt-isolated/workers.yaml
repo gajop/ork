@@ -1,0 +1,23 @@
+workers:
+  extract:
+    service_account: extract-worker@my-project.iam.gserviceaccount.com
+    vpc_connector: projects/my-project/locations/us-central1/connectors/external
+    cpu: 1
+    memory: 2Gi
+    timeout: 3600
+
+  transform:
+    service_account: transform-worker@my-project.iam.gserviceaccount.com
+    vpc_connector: projects/my-project/locations/us-central1/connectors/internal
+    cpu: 2
+    memory: 4Gi
+    timeout: 7200
+
+  load:
+    service_account: load-worker@my-project.iam.gserviceaccount.com
+    vpc_connector: projects/my-project/locations/us-central1/connectors/internal
+    cpu: 1
+    memory: 2Gi
+    timeout: 3600
+
+default: extract

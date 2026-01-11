@@ -1,0 +1,4 @@
+locations:
+  - name: local
+    image: my-workflows:latest
+    refresh: "*/15 * * * *"

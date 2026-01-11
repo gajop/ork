@@ -1,0 +1,20 @@
+services:
+  firestore:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command: gcloud emulators firestore start --host-port=0.0.0.0:8080
+    ports:
+      - "8080:8080"
+
+  scheduler:
+    build: .
+    command: ork scheduler
+    environment:
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - ORK_WORKERS_CONFIG=/etc/ork/workers.yaml
+      - ORK_LOCATIONS_CONFIG=/etc/ork/locations.yaml
+      - EXECUTOR=subprocess
+    volumes:
+      - ./workers.yaml:/etc/ork/workers.yaml
+      - ./locations.yaml:/etc/ork/locations.yaml
+    depends_on:
+      - firestore
