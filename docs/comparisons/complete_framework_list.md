@@ -5,7 +5,7 @@ Comprehensive list of data engineering, MLOps, and workflow orchestration framew
 ## Summary Statistics
 
 - **Total frameworks surveyed:** 24
-- **Categories:** General Orchestration (8), MLOps-Specific (6), Data Engineering (4), CI/CD (3), Low-Code/Visual (3)
+- **Categories:** General Orchestration (8), Data Engineering (6), MLOps-Specific (4), CI/CD (3), Low-Code/Visual (3)
 - **Star range:** 4.1k - 168k stars
 - **Most popular:** n8n (168k), Airflow (43.8k), Kestra (26.2k)
 
@@ -24,25 +24,25 @@ Comprehensive list of data engineering, MLOps, and workflow orchestration framew
 | **Argo Workflows** | [argoproj/argo-workflows](https://github.com/argoproj/argo-workflows) | ⭐ 16.3k | Go | 2017 | Kubernetes-native workflow engine, CNCF graduated project |
 | **Dagster** | [dagster-io/dagster](https://github.com/dagster-io/dagster) | ⭐ 14.7k | Python | 2018 | Asset-based orchestration focused on data lineage and observability |
 
-### MLOps-Specific Orchestration
-
-| Framework | GitHub | Stars | Language | Year | Description |
-|-----------|--------|-------|----------|------|-------------|
-| **Kedro** | [kedro-org/kedro](https://github.com/kedro-org/kedro) | ⭐ 10.7k | Python | 2019 | Production-ready data science pipelines, LF AI & Data Foundation |
-| **Metaflow** | [Netflix/metaflow](https://github.com/Netflix/metaflow) | ⭐ 8.8k | Python | 2019 | Netflix's ML/AI workflow framework, now maintained by Outerbounds |
-| **Mage** | [mage-ai/mage-ai](https://github.com/mage-ai/mage-ai) | ⭐ 8.6k | Python | 2021 | Notebook-style data pipelines with modern UI, supports Python/SQL/R |
-| **Flyte** | [flyteorg/flyte](https://github.com/flyteorg/flyte) | ⭐ 6.7k | Go | 2020 | Kubernetes-native ML orchestration, built for scalability |
-| **ZenML** | [zenml-io/zenml](https://github.com/zenml-io/zenml) | ⭐ ~5k* | Python | 2021 | MLOps framework from pipelines to agents, modular and extensible |
-| **Kubeflow Pipelines** | [kubeflow/pipelines](https://github.com/kubeflow/pipelines) | ⭐ 4.0k | Python | 2018 | Google-originated ML pipelines for Kubernetes |
-
 ### Data Engineering Focused
 
 | Framework | GitHub | Stars | Language | Year | Description |
 |-----------|--------|-------|----------|------|-------------|
+| **Kedro** | [kedro-org/kedro](https://github.com/kedro-org/kedro) | ⭐ 10.7k | Python | 2019 | Production-ready data science pipelines, LF AI & Data Foundation |
+| **Mage** | [mage-ai/mage-ai](https://github.com/mage-ai/mage-ai) | ⭐ 8.6k | Python | 2021 | Data engineering + MLOps, notebook-style pipelines, modern UI |
 | **Apache NiFi** | [apache/nifi](https://github.com/apache/nifi) | ⭐ 5.9k | Java | 2014 | Dataflow automation with visual drag-and-drop interface |
 | **Orchest** | [orchest/orchest](https://github.com/orchest/orchest) | ⭐ 4.1k | Python | 2020 | Visual pipeline builder for data science workflows |
 | **dbt** | [dbt-labs/dbt-core](https://github.com/dbt-labs/dbt-core) | ⭐ ~35k* | Python | 2016 | SQL transformation framework, not orchestration but often used with orchestrators |
 | **SQLMesh** | [TobikoData/sqlmesh](https://github.com/TobikoData/sqlmesh) | ⭐ ~2k* | Python | 2022 | dbt alternative with stronger testing, now owned by Fivetran |
+
+### MLOps-Specific Orchestration
+
+| Framework | GitHub | Stars | Language | Year | Description |
+|-----------|--------|-------|----------|------|-------------|
+| **Metaflow** | [Netflix/metaflow](https://github.com/Netflix/metaflow) | ⭐ 8.8k | Python | 2019 | Netflix's ML/AI workflow framework, now maintained by Outerbounds |
+| **Flyte** | [flyteorg/flyte](https://github.com/flyteorg/flyte) | ⭐ 6.7k | Go | 2020 | Kubernetes-native ML orchestration, built for scalability |
+| **ZenML** | [zenml-io/zenml](https://github.com/zenml-io/zenml) | ⭐ ~5k* | Python | 2021 | MLOps framework from pipelines to agents, modular and extensible |
+| **Kubeflow Pipelines** | [kubeflow/pipelines](https://github.com/kubeflow/pipelines) | ⭐ 4.0k | Python | 2018 | Google-originated ML pipelines for Kubernetes |
 
 ### CI/CD and Code-First Orchestration
 
