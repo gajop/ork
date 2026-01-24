@@ -273,12 +273,16 @@ OrchestratorConfig {
 
 ### Setup
 ```bash
-# Start with optimized config
+# Run automated load test (recommended)
+just test-load
+
+# Or manually:
+# 1. Start with optimized config
 just run-optimized
 
-# Generate load
+# 2. In another terminal, generate load
 for i in {1..100}; do
-  cargo run -- trigger test-workflow &
+  cargo run -- trigger example-process &
 done
 ```
 

@@ -1,11 +1,15 @@
 # Rust Cloud Run Orchestrator - Justfile
 # Run `just --list` to see all available commands
 
-# Default recipe - show help
+# Show all available commands
 default:
     @just --list
 
-# Build the project
+# ============================================================================
+# Build & Development
+# ============================================================================
+
+# Build the project (debug)
 build:
     cargo build
 
@@ -13,13 +17,13 @@ build:
 build-release:
     cargo build --release
 
-# Run tests
-test:
-    cargo test
-
 # Check compilation without building
 check:
     cargo check
+
+# Run tests
+test:
+    cargo test
 
 # Format code
 fmt:
@@ -29,26 +33,76 @@ fmt:
 lint:
     cargo clippy
 
+# Development workflow - rebuild and restart
+dev: build run
+
+# ============================================================================
+# Database
+# ============================================================================
+
 # Start PostgreSQL with Docker Compose
 db-start:
-    docker-compose up -d postgres
+    docker compose up -d postgres
     @echo "Waiting for PostgreSQL to be ready..."
     @sleep 3
 
 # Stop PostgreSQL
 db-stop:
-    docker-compose down
+    docker compose down
 
 # Initialize database (run migrations)
-init: db-start
+db-init: db-start
     cargo run -- init
 
-# Run the orchestrator scheduler
+# Reset database (WARNING: deletes all data)
+db-reset: db-stop
+    docker compose down -v
+    @echo "Database reset complete"
+
+# Show database tables
+db-tables:
+    docker compose exec postgres psql -U postgres -d orchestrator -c "\dt"
+
+# Query workflows table
+db-workflows:
+    docker compose exec postgres psql -U postgres -d orchestrator -c "SELECT id, name, cloud_run_job_name, executor_type FROM workflows;"
+
+# Query runs table
+db-runs:
+    docker compose exec postgres psql -U postgres -d orchestrator -c "SELECT id, workflow_id, status, created_at FROM runs ORDER BY created_at DESC LIMIT 10;"
+
+# Query tasks for a specific run
+db-tasks run_id:
+    docker compose exec postgres psql -U postgres -d orchestrator -c "SELECT task_index, status, cloud_run_execution_name, finished_at FROM tasks WHERE run_id = '{{run_id}}' ORDER BY task_index;"
+
+# ============================================================================
+# Orchestrator
+# ============================================================================
+
+# Run the orchestrator (default config)
 run: db-start
     cargo run -- run
 
-# Create an example workflow (process executor)
-create-example-workflow:
+# Run with optimized config (low-latency, low-memory)
+run-optimized: db-start
+    @echo "Running with optimized config (2s poll, 50 batch, 5 concurrent)"
+    RUST_LOG=info cargo run --release -- run
+
+# Run with high-throughput config
+run-high-throughput: db-start
+    @echo "Running with high-throughput config (5s poll, 500 batch, 50 concurrent)"
+    RUST_LOG=info cargo run --release -- run
+
+# ============================================================================
+# Workflows & Runs
+# ============================================================================
+
+# List all workflows
+workflows:
+    cargo run -- list-workflows
+
+# Create example workflow (process executor)
+workflow-create-example:
     cargo run -- create-workflow \
         --name "example-process" \
         --description "Example workflow with process executor" \
@@ -58,8 +112,8 @@ create-example-workflow:
         --task-count 5 \
         --executor process
 
-# Create a Cloud Run workflow
-create-cloudrun-workflow name job project="my-project" region="us-central1" tasks="3":
+# Create Cloud Run workflow
+workflow-create name job project="my-project" region="us-central1" tasks="3":
     cargo run -- create-workflow \
         --name {{name}} \
         --job-name {{job}} \
@@ -68,23 +122,19 @@ create-cloudrun-workflow name job project="my-project" region="us-central1" task
         --task-count {{tasks}} \
         --executor cloudrun
 
-# List all workflows
-list-workflows:
-    cargo run -- list-workflows
-
-# Trigger a workflow by name
+# Trigger a workflow
 trigger workflow:
     cargo run -- trigger {{workflow}}
 
-# Show status of all runs
+# Show all run statuses
 status:
     cargo run -- status
 
-# Show status of a specific run
+# Show status of specific run
 status-run run_id:
     cargo run -- status {{run_id}}
 
-# Show status of runs for a workflow
+# Show runs for a workflow
 status-workflow workflow:
     cargo run -- status --workflow {{workflow}}
 
@@ -92,31 +142,108 @@ status-workflow workflow:
 tasks run_id:
     cargo run -- tasks {{run_id}}
 
-# Full stack up with Docker Compose
-up:
-    docker-compose up -d
+# ============================================================================
+# Docker
+# ============================================================================
 
-# Full stack down
-down:
-    docker-compose down
+# Build Docker image
+docker-build:
+    docker build -t rust-orchestrator .
+
+# Start all services with Docker Compose
+docker-up:
+    docker compose up -d
+    @echo "Waiting for services to start..."
+    @sleep 5
+    docker compose exec orchestrator /app/rust-orchestrator init
+
+# Stop all Docker services
+docker-down:
+    docker compose down
+
+# Execute command in orchestrator container
+docker-exec *ARGS:
+    docker compose exec orchestrator /app/rust-orchestrator {{ARGS}}
 
 # View orchestrator logs
-logs:
-    docker-compose logs -f orchestrator
+docker-logs:
+    docker compose logs -f orchestrator
 
-# Run end-to-end test with process executor
-test-e2e: init create-example-workflow
+# Create example workflow in Docker
+docker-workflow-create:
+    docker compose exec orchestrator /app/rust-orchestrator create-workflow \
+        --name "docker-example" \
+        --job-name "example-task" \
+        --project "my-project" \
+        --task-count 3 \
+        --executor process
+
+# Trigger workflow in Docker
+docker-trigger workflow:
+    docker compose exec orchestrator /app/rust-orchestrator trigger {{workflow}}
+
+# View status in Docker
+docker-status:
+    docker compose exec orchestrator /app/rust-orchestrator status
+
+# ============================================================================
+# Testing & Setup
+# ============================================================================
+
+# Complete first-time setup
+setup: db-start db-init test-script-create workflow-create-example
+    @echo ""
+    @echo "✓ Setup complete!"
+    @echo ""
+    @echo "Next steps:"
+    @echo "  just trigger example-process  # Trigger the example workflow"
+    @echo "  just run                      # Start the orchestrator"
+    @echo "  just status                   # Check run status"
+
+# Create test script for process executor
+test-script-create:
+    #!/usr/bin/env bash
+    mkdir -p test-scripts
+    cat > test-scripts/example-task.sh << 'EOF'
+    #!/bin/bash
+    echo "=========================================="
+    echo "Task Execution Started"
+    echo "=========================================="
+    echo "Task index: ${task_index}"
+    echo "Run ID: ${run_id}"
+    echo "Workflow: ${workflow_name}"
+    echo "Execution ID: ${EXECUTION_ID}"
+    echo ""
+
+    # Simulate some work
+    echo "Processing data..."
+    sleep 2
+
+    echo "Task processing complete!"
+    echo ""
+
+    # Output result as JSON
+    echo "Result:"
+    echo '{"status": "success", "processed_items": 42, "task_index": "'${task_index}'"}'
+
+    echo "=========================================="
+    echo "Task Execution Completed"
+    echo "=========================================="
+    EOF
+    chmod +x test-scripts/example-task.sh
+    @echo "✓ Created test-scripts/example-task.sh"
+
+# Run end-to-end test
+test-e2e: db-start db-init test-script-create workflow-create-example
     #!/usr/bin/env bash
     set -e
-    echo "Creating example test script..."
-    just create-test-script
 
     echo "Starting orchestrator in background..."
     cargo run -- run &
     ORCH_PID=$!
 
     echo "Waiting for orchestrator to start..."
-    sleep 2
+    sleep 3
 
     echo "Triggering workflow..."
     RUN_ID=$(cargo run -- trigger example-process | grep "Run ID:" | awk '{print $3}')
@@ -132,105 +259,46 @@ test-e2e: init create-example-workflow
     echo "Stopping orchestrator..."
     kill $ORCH_PID || true
 
-    echo "Test complete!"
+    echo ""
+    echo "✓ Test complete!"
 
-# Create test script for process executor
-create-test-script:
+# Run load test (100 workflows)
+test-load: db-start db-init workflow-create-example
     #!/usr/bin/env bash
-    mkdir -p test-scripts
-    cat > test-scripts/example-task.sh << 'EOF'
-    #!/bin/bash
-    echo "Starting task execution..."
-    echo "Task index: ${TASK_INDEX}"
-    echo "Run ID: ${RUN_ID}"
-    echo "Workflow: ${WORKFLOW_NAME}"
+    set -e
 
-    # Simulate some work
+    echo "Starting orchestrator..."
+    cargo run --release -- run &
+    ORCH_PID=$!
     sleep 2
 
-    echo "Task completed successfully!"
+    echo "Triggering 100 workflows..."
+    for i in {1..100}; do
+        cargo run -- trigger example-process &
+    done
+    wait
 
-    # Output result as JSON
-    echo '{"status": "success", "processed_items": 42}'
-    EOF
-    chmod +x test-scripts/example-task.sh
-    echo "Created test-scripts/example-task.sh"
+    echo "Monitoring for 30 seconds..."
+    sleep 30
 
-# Clean up test artifacts
-clean-test:
-    rm -rf test-scripts
-    cargo run -- status --workflow example-process || true
+    cargo run -- status
+
+    kill $ORCH_PID || true
+    echo "✓ Load test complete"
+
+# ============================================================================
+# Cleanup
+# ============================================================================
 
 # Clean build artifacts
 clean:
     cargo clean
     rm -rf target
 
-# Reset database (WARNING: deletes all data)
-reset-db: db-stop
-    docker-compose down -v
-    @echo "Database reset complete"
+# Clean test artifacts
+clean-test:
+    rm -rf test-scripts
 
-# Development workflow - rebuild and restart
-dev: build
-    just run
-
-# Docker: Build the image
-docker-build:
-    docker build -t rust-orchestrator .
-
-# Docker: Run with compose
-docker-up:
-    docker-compose up -d
-    @echo "Waiting for services to start..."
-    @sleep 5
-    docker-compose exec orchestrator /app/rust-orchestrator init
-
-# Docker: Execute command in orchestrator container
-docker-exec *ARGS:
-    docker-compose exec orchestrator /app/rust-orchestrator {{ARGS}}
-
-# Docker: Create example workflow in Docker
-docker-create-example:
-    docker-compose exec orchestrator /app/rust-orchestrator create-workflow \
-        --name "docker-example" \
-        --job-name "example-task" \
-        --project "my-project" \
-        --task-count 3 \
-        --executor process
-
-# Docker: Trigger workflow in Docker
-docker-trigger workflow:
-    docker-compose exec orchestrator /app/rust-orchestrator trigger {{workflow}}
-
-# Docker: View status in Docker
-docker-status:
-    docker-compose exec orchestrator /app/rust-orchestrator status
-
-# Docker: View logs
-docker-logs:
-    docker-compose logs -f orchestrator
-
-# Show database tables
-db-tables:
-    docker-compose exec postgres psql -U postgres -d orchestrator -c "\dt"
-
-# Query workflows table
-db-workflows:
-    docker-compose exec postgres psql -U postgres -d orchestrator -c "SELECT id, name, cloud_run_job_name, executor_type FROM workflows;"
-
-# Query runs table
-db-runs:
-    docker-compose exec postgres psql -U postgres -d orchestrator -c "SELECT id, workflow_id, status, created_at FROM runs ORDER BY created_at DESC LIMIT 10;"
-
-# Query tasks table
-db-tasks run_id:
-    docker-compose exec postgres psql -U postgres -d orchestrator -c "SELECT task_index, status, cloud_run_execution_name, finished_at FROM tasks WHERE run_id = '{{run_id}}' ORDER BY task_index;"
-
-# Complete setup for first time
-setup: db-start init create-test-script create-example-workflow
-    @echo ""
-    @echo "Setup complete! You can now:"
-    @echo "  just trigger example-process  - Trigger the example workflow"
-    @echo "  just run                       - Start the orchestrator"
-    @echo "  just status                    - Check run status"
+# Clean everything (build + test + db)
+clean-all: clean clean-test db-reset
+    @echo "✓ All cleaned"
