@@ -1,4 +1,5 @@
 mod cloud_run;
+mod config;
 mod db;
 mod models;
 mod process_executor;

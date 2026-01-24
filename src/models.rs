@@ -60,3 +60,24 @@ pub struct Task {
     pub finished_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
+
+/// Combined task and workflow data to avoid N+1 queries
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TaskWithWorkflow {
+    // Task fields
+    pub task_id: Uuid,
+    pub run_id: Uuid,
+    #[allow(dead_code)]
+    pub task_index: i32,
+    pub task_status: String,
+    pub cloud_run_execution_name: Option<String>,
+    pub params: Option<Json<serde_json::Value>>,
+
+    // Workflow fields
+    #[allow(dead_code)]
+    pub workflow_id: Uuid,
+    pub executor_type: String,
+    pub cloud_run_job_name: String,
+    pub cloud_run_project: String,
+    pub cloud_run_region: String,
+}

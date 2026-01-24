@@ -1,25 +1,38 @@
 use anyhow::Result;
+use futures::stream::{self, StreamExt};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::cloud_run::CloudRunClient;
+use crate::config::OrchestratorConfig;
 use crate::db::Database;
 use crate::models::{ExecutorType, Workflow};
 use crate::process_executor::ProcessExecutor;
 
 pub struct Scheduler {
     db: Arc<Database>,
+    config: OrchestratorConfig,
 }
 
 impl Scheduler {
     pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+        Self::new_with_config(db, OrchestratorConfig::default())
+    }
+
+    pub fn new_with_config(db: Arc<Database>, config: OrchestratorConfig) -> Self {
+        Self { db, config }
     }
 
     pub async fn run(&self) -> Result<()> {
-        info!("Starting scheduler loop");
+        info!(
+            "Starting scheduler loop (poll_interval={}s, max_batch={}, max_concurrent_dispatch={}, max_concurrent_status={})",
+            self.config.poll_interval_secs,
+            self.config.max_tasks_per_batch,
+            self.config.max_concurrent_dispatches,
+            self.config.max_concurrent_status_checks
+        );
 
         loop {
             if let Err(e) = self.process_pending_runs().await {
@@ -34,7 +47,7 @@ impl Scheduler {
                 error!("Error checking running tasks: {}", e);
             }
 
-            sleep(Duration::from_secs(5)).await;
+            sleep(Duration::from_secs(self.config.poll_interval_secs)).await;
         }
     }
 
@@ -80,57 +93,66 @@ impl Scheduler {
     }
 
     async fn process_pending_tasks(&self) -> Result<()> {
-        let tasks = self.db.get_pending_tasks().await?;
+        // OPTIMIZATION: Single JOIN query instead of N+1 queries
+        let tasks = self
+            .db
+            .get_pending_tasks_with_workflow(self.config.max_tasks_per_batch)
+            .await?;
 
-        for task in tasks {
-            info!("Dispatching task: {} (index {})", task.id, task.task_index);
+        if tasks.is_empty() {
+            return Ok(());
+        }
 
-            // Get run and workflow info
-            let run = self.db.get_run(task.run_id).await?;
-            let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
-                .bind(run.workflow_id)
-                .fetch_one(self.db.pool())
-                .await?;
+        info!("Processing {} pending tasks", tasks.len());
 
-            // Check executor type and dispatch accordingly
-            let executor_type =
-                ExecutorType::from_str(&workflow.executor_type).unwrap_or(ExecutorType::CloudRun);
+        // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
+        let results = stream::iter(tasks)
+            .map(|task_with_workflow| async move {
+                let executor_type = ExecutorType::from_str(&task_with_workflow.executor_type)
+                    .unwrap_or(ExecutorType::CloudRun);
 
-            let execution_result = match executor_type {
-                ExecutorType::CloudRun => {
-                    let client = CloudRunClient::new(
-                        workflow.cloud_run_project.clone(),
-                        workflow.cloud_run_region.clone(),
-                    );
-                    client
-                        .execute_job(
-                            &workflow.cloud_run_job_name,
-                            task.params.as_ref().map(|p| p.0.clone()),
-                        )
-                        .await
-                }
-                ExecutorType::Process => {
-                    let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
-                    executor
-                        .execute_process(
-                            &workflow.cloud_run_job_name,
-                            task.params.as_ref().map(|p| p.0.clone()),
-                        )
-                        .await
-                }
-            };
+                let execution_result = match executor_type {
+                    ExecutorType::CloudRun => {
+                        let client = CloudRunClient::new(
+                            task_with_workflow.cloud_run_project.clone(),
+                            task_with_workflow.cloud_run_region.clone(),
+                        );
+                        client
+                            .execute_job(
+                                &task_with_workflow.cloud_run_job_name,
+                                task_with_workflow.params.as_ref().map(|p| p.0.clone()),
+                            )
+                            .await
+                    }
+                    ExecutorType::Process => {
+                        let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
+                        executor
+                            .execute_process(
+                                &task_with_workflow.cloud_run_job_name,
+                                task_with_workflow.params.as_ref().map(|p| p.0.clone()),
+                            )
+                            .await
+                    }
+                };
 
-            match execution_result {
+                (task_with_workflow.task_id, execution_result)
+            })
+            .buffer_unordered(self.config.max_concurrent_dispatches)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Update statuses
+        for (task_id, result) in results {
+            match result {
                 Ok(execution_name) => {
                     self.db
-                        .update_task_status(task.id, "dispatched", Some(&execution_name), None)
+                        .update_task_status(task_id, "dispatched", Some(&execution_name), None)
                         .await?;
-                    info!("Task {} dispatched as {}", task.id, execution_name);
                 }
                 Err(e) => {
-                    error!("Failed to dispatch task {}: {}", task.id, e);
+                    error!("Failed to dispatch task {}: {}", task_id, e);
                     self.db
-                        .update_task_status(task.id, "failed", None, Some(&e.to_string()))
+                        .update_task_status(task_id, "failed", None, Some(&e.to_string()))
                         .await?;
                 }
             }
@@ -140,58 +162,72 @@ impl Scheduler {
     }
 
     async fn check_running_tasks(&self) -> Result<()> {
-        let tasks = self.db.get_running_tasks().await?;
+        // OPTIMIZATION: Single JOIN query instead of N+1 queries
+        let tasks = self
+            .db
+            .get_running_tasks_with_workflow(self.config.max_tasks_per_batch)
+            .await?;
 
-        for task in tasks {
-            if let Some(execution_name) = &task.cloud_run_execution_name {
-                // Get run and workflow info
-                let run = self.db.get_run(task.run_id).await?;
-                let workflow =
-                    sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
-                        .bind(run.workflow_id)
-                        .fetch_one(self.db.pool())
-                        .await?;
+        if tasks.is_empty() {
+            return Ok(());
+        }
 
-                let executor_type = ExecutorType::from_str(&workflow.executor_type)
-                    .unwrap_or(ExecutorType::CloudRun);
+        // OPTIMIZATION: Process status checks concurrently with limit
+        let results = stream::iter(tasks)
+            .map(|task| async move {
+                if let Some(ref execution_name) = task.cloud_run_execution_name {
+                    let executor_type = ExecutorType::from_str(&task.executor_type)
+                        .unwrap_or(ExecutorType::CloudRun);
 
-                let status_result = match executor_type {
-                    ExecutorType::CloudRun => {
-                        let client = CloudRunClient::new(
-                            workflow.cloud_run_project.clone(),
-                            workflow.cloud_run_region.clone(),
-                        );
-                        client.get_execution_status(execution_name).await
-                    }
-                    ExecutorType::Process => {
-                        let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
-                        executor.get_process_status(execution_name).await
-                    }
-                };
-
-                match status_result {
-                    Ok(status) => {
-                        let new_status = match status.as_str() {
-                            "ready" | "completed" | "success" => "success",
-                            "failed" | "error" => "failed",
-                            _ => "running",
-                        };
-
-                        if new_status != task.status {
-                            self.db
-                                .update_task_status(task.id, new_status, None, None)
-                                .await?;
-                            info!("Task {} updated to status: {}", task.id, new_status);
+                    let status_result = match executor_type {
+                        ExecutorType::CloudRun => {
+                            let client = CloudRunClient::new(
+                                task.cloud_run_project.clone(),
+                                task.cloud_run_region.clone(),
+                            );
+                            client.get_execution_status(execution_name).await
                         }
+                        ExecutorType::Process => {
+                            let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
+                            executor.get_process_status(execution_name).await
+                        }
+                    };
 
-                        // Check if all tasks in the run are complete
-                        if new_status == "success" || new_status == "failed" {
-                            self.check_run_completion(task.run_id).await?;
+                    match status_result {
+                        Ok(status) => {
+                            let new_status = match status.as_str() {
+                                "ready" | "completed" | "success" => "success",
+                                "failed" | "error" => "failed",
+                                _ => "running",
+                            };
+                            Some((task.task_id, task.run_id, new_status, task.task_status))
+                        }
+                        Err(e) => {
+                            warn!("Failed to get status for task {}: {}", task.task_id, e);
+                            None
                         }
                     }
-                    Err(e) => {
-                        warn!("Failed to get status for task {}: {}", task.id, e);
-                    }
+                } else {
+                    None
+                }
+            })
+            .buffer_unordered(self.config.max_concurrent_status_checks)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Update changed statuses
+        for result in results.into_iter().flatten() {
+            let (task_id, run_id, new_status, old_status) = result;
+
+            if new_status != old_status {
+                self.db
+                    .update_task_status(task_id, new_status, None, None)
+                    .await?;
+                info!("Task {} updated to status: {}", task_id, new_status);
+
+                // Check run completion for finished tasks
+                if new_status == "success" || new_status == "failed" {
+                    self.check_run_completion(run_id).await?;
                 }
             }
         }

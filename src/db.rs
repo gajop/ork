@@ -3,7 +3,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::{Run, Task, Workflow};
+use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
 
 pub struct Database {
     pool: PgPool,
@@ -11,8 +11,15 @@ pub struct Database {
 
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
+        Self::new_with_pool_size(database_url, 10).await
+    }
+
+    pub async fn new_with_pool_size(database_url: &str, max_connections: u32) -> Result<Self> {
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(max_connections)
+            .min_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .idle_timeout(Some(std::time::Duration::from_secs(300)))
             .connect(database_url)
             .await?;
 
@@ -236,6 +243,7 @@ impl Database {
         Ok(tasks)
     }
 
+    #[allow(dead_code)]
     pub async fn get_pending_tasks(&self) -> Result<Vec<Task>> {
         let tasks = sqlx::query_as::<_, Task>(
             r#"
@@ -248,6 +256,7 @@ impl Database {
         Ok(tasks)
     }
 
+    #[allow(dead_code)]
     pub async fn get_running_tasks(&self) -> Result<Vec<Task>> {
         let tasks = sqlx::query_as::<_, Task>(
             r#"
@@ -262,5 +271,105 @@ impl Database {
 
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    // Optimized batch queries to avoid N+1 queries
+
+    /// Get pending tasks with workflow info in a single query (eliminates N+1)
+    pub async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
+        let tasks = sqlx::query_as::<_, TaskWithWorkflow>(
+            r#"
+            SELECT
+                t.id as task_id,
+                t.run_id,
+                t.task_index,
+                t.status as task_status,
+                t.cloud_run_execution_name,
+                t.params,
+                w.id as workflow_id,
+                w.executor_type,
+                w.cloud_run_job_name,
+                w.cloud_run_project,
+                w.cloud_run_region
+            FROM tasks t
+            INNER JOIN runs r ON t.run_id = r.id
+            INNER JOIN workflows w ON r.workflow_id = w.id
+            WHERE t.status = 'pending'
+            ORDER BY t.created_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(tasks)
+    }
+
+    /// Get running/dispatched tasks with workflow info in a single query
+    pub async fn get_running_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
+        let tasks = sqlx::query_as::<_, TaskWithWorkflow>(
+            r#"
+            SELECT
+                t.id as task_id,
+                t.run_id,
+                t.task_index,
+                t.status as task_status,
+                t.cloud_run_execution_name,
+                t.params,
+                w.id as workflow_id,
+                w.executor_type,
+                w.cloud_run_job_name,
+                w.cloud_run_project,
+                w.cloud_run_region
+            FROM tasks t
+            INNER JOIN runs r ON t.run_id = r.id
+            INNER JOIN workflows w ON r.workflow_id = w.id
+            WHERE t.status IN ('dispatched', 'running')
+              AND t.cloud_run_execution_name IS NOT NULL
+            ORDER BY t.created_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(tasks)
+    }
+
+    /// Batch update task statuses (more efficient than one-by-one)
+    #[allow(dead_code)]
+    pub async fn batch_update_task_status(
+        &self,
+        updates: &[(Uuid, &str, Option<&str>)],
+    ) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Use transaction for atomicity
+        let mut tx = self.pool.begin().await?;
+
+        for (task_id, status, error) in updates {
+            sqlx::query(
+                r#"
+                UPDATE tasks
+                SET status = $1,
+                    error = $2,
+                    started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
+                    finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
+                WHERE id = $3
+                "#,
+            )
+            .bind(status)
+            .bind(error)
+            .bind(task_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 }
