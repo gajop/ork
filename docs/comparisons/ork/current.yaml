@@ -1,0 +1,19 @@
+name: tier1_dependencies
+
+tasks:
+  fetch_users:
+    executor: python
+    file: tasks/fetch_users.py
+
+  fetch_orders:
+    executor: python
+    file: tasks/fetch_orders.py
+
+  fetch_products:
+    executor: python
+    file: tasks/fetch_products.py
+
+  combine_data:
+    executor: python
+    file: tasks/combine_data.py
+    depends_on: [fetch_users, fetch_orders, fetch_products]
