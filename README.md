@@ -1,15 +1,18 @@
 # Rust Cloud Run Orchestrator
 
-A simple Rust-based orchestrator that generates tasks and executes them as Google Cloud Run jobs, using PostgreSQL as the database backend.
+A simple Rust-based orchestrator that generates tasks and executes them as **Google Cloud Run jobs** or **local processes**, using PostgreSQL as the database backend.
 
 ## Features
 
+- **Dual Execution Modes**:
+  - **Cloud Run**: Execute tasks as Google Cloud Run jobs via API
+  - **Process**: Execute tasks as local shell scripts/processes
 - **Simple Task Generation**: Create workflows that generate multiple tasks
-- **Cloud Run Integration**: Execute tasks as Cloud Run jobs with full API integration
-- **PostgreSQL Backend**: Reliable state management with Postgres
+- **PostgreSQL Backend**: Reliable state management with async Postgres operations
 - **CLI Interface**: Easy-to-use command-line interface for managing workflows and runs
 - **Docker Compose**: Local testing environment with Postgres
-- **Mock Mode**: Test locally without Cloud Run credentials
+- **Justfile**: Convenient task runner with all common operations
+- **Mock Mode**: Test Cloud Run mode locally without GCP credentials
 
 ## Architecture
 
@@ -19,306 +22,450 @@ A simple Rust-based orchestrator that generates tasks and executes them as Googl
 └──────┬───────┘
        │
 ┌──────▼───────┐
-│  Scheduler   │ ← Polls for pending runs/tasks
-│              │   Dispatches tasks to Cloud Run
+│  Scheduler   │ ← Polls for pending runs/tasks (every 5s)
+│              │   Dispatches to executor based on type
 └──────┬───────┘
        │
-┌──────▼───────┐     ┌────────────────┐
-│  PostgreSQL  │◄────┤  Cloud Run API │
-│              │     │  (Jobs)        │
-└──────────────┘     └────────────────┘
+       ├──────────────┬──────────────┐
+       │              │              │
+┌──────▼───────┐  ┌──▼────────┐  ┌──▼──────────┐
+│  PostgreSQL  │  │ Cloud Run │  │   Process   │
+│              │  │    API    │  │  Executor   │
+└──────────────┘  └───────────┘  └─────────────┘
 ```
 
 ## Prerequisites
 
-- Rust 1.70+ (for local development)
-- Docker and Docker Compose (for running with containers)
-- Google Cloud credentials (for actual Cloud Run execution)
+- **Rust 1.70+** (for local development)
+- **Docker and Docker Compose** (for running with PostgreSQL)
+- **Just** (task runner) - `cargo install just` (recommended)
+- **Google Cloud credentials** (optional, only for Cloud Run executor)
 
-## Quick Start with Docker Compose
+## Quick Start with Justfile
 
-### 1. Start the services
+The easiest way to use this project is with [just](https://github.com/casey/just), a command runner.
+
+### Install Just
 
 ```bash
-# Start PostgreSQL and the orchestrator
-docker-compose up -d
-
-# Initialize the database
-docker-compose exec orchestrator /app/rust-orchestrator init
+cargo install just
 ```
 
-### 2. Create a workflow
+### List all available commands
 
 ```bash
-docker-compose exec orchestrator /app/rust-orchestrator create-workflow \
-  --name "example-workflow" \
-  --description "Example workflow" \
-  --job-name "my-cloud-run-job" \
-  --project "my-gcp-project" \
-  --region "us-central1" \
-  --task-count 5
+just --list
 ```
 
-### 3. List workflows
+### Common Workflows
+
+#### 1. Local Development Setup
 
 ```bash
-docker-compose exec orchestrator /app/rust-orchestrator list-workflows
+# Complete first-time setup
+just setup
+
+# This will:
+# - Start PostgreSQL
+# - Run migrations
+# - Create test scripts
+# - Create example workflow
 ```
 
-### 4. Trigger a workflow
+#### 2. Run with Process Executor (Local Testing)
 
 ```bash
-docker-compose exec orchestrator /app/rust-orchestrator trigger example-workflow
-```
+# Start the orchestrator
+just run
 
-### 5. Check status
+# In another terminal, trigger the example workflow
+just trigger example-process
 
-```bash
-# View all runs
-docker-compose exec orchestrator /app/rust-orchestrator status
-
-# View specific run
-docker-compose exec orchestrator /app/rust-orchestrator status <run-id>
+# Check status
+just status
 
 # View tasks for a run
-docker-compose exec orchestrator /app/rust-orchestrator tasks <run-id>
+just tasks <run-id>
 ```
 
-## Local Development
-
-### 1. Install dependencies
+#### 3. Create Custom Workflows
 
 ```bash
-cargo build
+# Process executor
+just create-example-workflow
+
+# Cloud Run executor
+just create-cloudrun-workflow my-workflow my-cloud-run-job my-gcp-project us-central1 5
 ```
 
-### 2. Start PostgreSQL
+#### 4. Database Operations
+
+```bash
+# View workflows
+just list-workflows
+
+# Query database directly
+just db-workflows
+just db-runs
+just db-tasks <run-id>
+```
+
+## Manual Usage (without Just)
+
+### Local Development
+
+#### 1. Start PostgreSQL
 
 ```bash
 docker-compose up -d postgres
 ```
 
-### 3. Initialize the database
+#### 2. Initialize the database
 
 ```bash
 cargo run -- init
 ```
 
-### 4. Create a workflow
+#### 3. Create a workflow
 
+**Process Executor** (runs local scripts):
 ```bash
 cargo run -- create-workflow \
-  --name "test-workflow" \
-  --job-name "my-job" \
-  --project "my-project" \
-  --task-count 3
+  --name "example-process" \
+  --description "Example with process executor" \
+  --job-name "example-task.sh" \
+  --project "local" \
+  --region "local" \
+  --task-count 5 \
+  --executor process
 ```
 
-### 5. Run the orchestrator
+**Cloud Run Executor** (runs Cloud Run jobs):
+```bash
+cargo run -- create-workflow \
+  --name "my-workflow" \
+  --description "Production workflow" \
+  --job-name "my-cloud-run-job" \
+  --project "my-gcp-project" \
+  --region "us-central1" \
+  --task-count 3 \
+  --executor cloudrun
+```
+
+#### 4. Run the orchestrator
 
 ```bash
 cargo run -- run
 ```
 
-In another terminal:
+#### 5. Trigger a workflow (in another terminal)
 
 ```bash
-# Trigger a workflow
-cargo run -- trigger test-workflow
+cargo run -- trigger example-process
 
-# Check status
+# Note the Run ID from output
+```
+
+#### 6. Check status
+
+```bash
+# All runs
 cargo run -- status
+
+# Specific run
+cargo run -- status <run-id>
+
+# Runs for a specific workflow
+cargo run -- status --workflow example-process
 
 # View tasks
 cargo run -- tasks <run-id>
 ```
 
-## CLI Commands
+## Docker Compose Usage
 
-### Initialize database
-
-```bash
-rust-orchestrator init
-```
-
-### Run the scheduler
+### Start Everything
 
 ```bash
-rust-orchestrator run
+just docker-up
+
+# Or manually:
+docker-compose up -d
+docker-compose exec orchestrator /app/rust-orchestrator init
 ```
 
-### Create a workflow
+### Execute Commands
 
 ```bash
-rust-orchestrator create-workflow \
-  --name <name> \
-  --description <description> \
-  --job-name <cloud-run-job-name> \
-  --project <gcp-project-id> \
-  --region <region> \
-  --task-count <number>
+just docker-exec list-workflows
+just docker-exec status
+
+# Or manually:
+docker-compose exec orchestrator /app/rust-orchestrator <command>
 ```
 
-### List workflows
+## Executors
 
+### Process Executor
+
+Executes tasks as local shell scripts. Perfect for testing and local development.
+
+**Features:**
+- Runs scripts from `test-scripts/` directory
+- Passes task parameters as environment variables
+- Background execution with logging
+- Simulated immediate completion (for demo purposes)
+
+**Environment Variables Passed:**
+- `task_index`: Task index number
+- `run_id`: Run UUID
+- `workflow_name`: Workflow name
+- `EXECUTION_ID`: Unique execution UUID
+
+**Example Script:**
 ```bash
-rust-orchestrator list-workflows
+#!/bin/bash
+echo "Task index: ${task_index}"
+echo "Run ID: ${run_id}"
+echo "Workflow: ${workflow_name}"
+
+# Do work
+sleep 2
+
+# Output JSON result
+echo '{"status": "success", "processed": 42}'
 ```
 
-### Trigger a workflow run
+### Cloud Run Executor
 
+Executes tasks as Google Cloud Run jobs via the Cloud Run API.
+
+**Features:**
+- Full Cloud Run API integration
+- Automatic authentication via `gcloud` CLI
+- Environment variable passing to jobs
+- Status polling for completion
+- Mock mode when credentials unavailable
+
+**Setup:**
 ```bash
-rust-orchestrator trigger <workflow-name>
+# Authenticate with gcloud
+gcloud auth application-default login
+
+# Create a Cloud Run job
+gcloud run jobs create my-job \
+  --image gcr.io/my-project/my-image \
+  --region us-central1
 ```
 
-### Check run status
+## CLI Commands Reference
 
-```bash
-# All runs
-rust-orchestrator status
-
-# Specific run
-rust-orchestrator status <run-id>
-
-# Runs for a workflow
-rust-orchestrator status --workflow <workflow-name>
-```
-
-### View tasks for a run
-
-```bash
-rust-orchestrator tasks <run-id>
-```
+| Command | Description |
+|---------|-------------|
+| `init` | Initialize database with migrations |
+| `run` | Start the orchestrator scheduler |
+| `create-workflow` | Create a new workflow |
+| `list-workflows` | List all workflows |
+| `trigger <name>` | Trigger a workflow run |
+| `status [run-id]` | Show run status |
+| `status --workflow <name>` | Show runs for a workflow |
+| `tasks <run-id>` | Show tasks for a run |
 
 ## Configuration
 
 ### Environment Variables
 
-- `DATABASE_URL`: PostgreSQL connection string (default: `postgres://postgres:postgres@localhost:5432/orchestrator`)
-- `GOOGLE_APPLICATION_CREDENTIALS`: Path to GCP service account key (for Cloud Run API access)
-- `RUST_LOG`: Log level (default: `info`)
+- `DATABASE_URL`: PostgreSQL connection string
+  Default: `postgres://postgres:postgres@localhost:5432/orchestrator`
+- `RUST_LOG`: Log level (debug, info, warn, error)
+  Default: `info`
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to GCP service account key (for Cloud Run)
 
-## Google Cloud Setup
+### Workflow Parameters
 
-### 1. Create a Cloud Run Job
+When creating a workflow:
 
-```bash
-gcloud run jobs create my-job \
-  --image gcr.io/my-project/my-image \
-  --region us-central1 \
-  --project my-project
-```
-
-### 2. Set up authentication
-
-```bash
-# Option 1: Application Default Credentials
-gcloud auth application-default login
-
-# Option 2: Service Account Key
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
-```
-
-### 3. Grant permissions
-
-Ensure your service account has the `run.jobs.run` permission:
-
-```bash
-gcloud projects add-iam-policy-binding my-project \
-  --member="serviceAccount:my-service-account@my-project.iam.gserviceaccount.com" \
-  --role="roles/run.developer"
-```
-
-## Mock Mode (Local Testing)
-
-When `GOOGLE_APPLICATION_CREDENTIALS` is not set, the orchestrator runs in mock mode:
-
-- Cloud Run API calls are simulated
-- Tasks are marked as dispatched with mock execution names
-- Status checks automatically return "success"
-- Great for testing the orchestrator logic without GCP credentials
+- `--name`: Unique workflow identifier
+- `--description`: Optional description
+- `--job-name`: For Cloud Run: job name | For Process: script filename
+- `--project`: For Cloud Run: GCP project ID | For Process: can be "local"
+- `--region`: For Cloud Run: GCP region | For Process: can be "local"
+- `--task-count`: Number of tasks to generate per run
+- `--executor`: `cloudrun` or `process`
 
 ## Database Schema
 
-### Workflows
-
-- `id`: UUID primary key
+### Workflows Table
+- `id`: UUID
 - `name`: Unique workflow name
-- `cloud_run_job_name`: Name of the Cloud Run job to execute
-- `cloud_run_project`: GCP project ID
-- `cloud_run_region`: GCP region
-- `task_params`: JSON parameters (e.g., task count)
+- `executor_type`: `cloudrun` or `process`
+- `cloud_run_job_name`: Job name or script path
+- `cloud_run_project`: GCP project or "local"
+- `cloud_run_region`: GCP region or "local"
+- `task_params`: JSON (e.g., `{"task_count": 5}`)
 
-### Runs
-
-- `id`: UUID primary key
+### Runs Table
+- `id`: UUID
 - `workflow_id`: Foreign key to workflows
-- `status`: pending, running, success, failed, cancelled
+- `status`: pending → running → success/failed
 - `started_at`, `finished_at`: Timestamps
 
-### Tasks
-
-- `id`: UUID primary key
+### Tasks Table
+- `id`: UUID
 - `run_id`: Foreign key to runs
-- `task_index`: Sequential task number
-- `status`: pending, dispatched, running, success, failed
-- `cloud_run_execution_name`: Cloud Run execution identifier
+- `task_index`: Sequential task number (0, 1, 2, ...)
+- `status`: pending → dispatched → running → success/failed
+- `cloud_run_execution_name`: Execution identifier
 - `params`: JSON task parameters
 - `dispatched_at`, `started_at`, `finished_at`: Timestamps
 
 ## How It Works
 
-1. **Workflow Creation**: Define a workflow with Cloud Run job details and task generation parameters
+1. **Workflow Creation**: Define workflows with executor type and task generation parameters
 2. **Run Triggering**: Create a run for a workflow (status: pending)
 3. **Scheduler Loop** (every 5 seconds):
-   - Process pending runs → Generate tasks based on workflow config
-   - Process pending tasks → Dispatch to Cloud Run API
-   - Check running tasks → Poll Cloud Run for status updates
-   - Complete runs when all tasks finish
-4. **Task Execution**: Each task is executed as a separate Cloud Run job execution
+   - **Process pending runs** → Generate N tasks based on workflow config
+   - **Process pending tasks** → Dispatch to appropriate executor (Cloud Run API or Process)
+   - **Check running tasks** → Poll for status updates
+   - **Complete runs** → Mark run as success/failed when all tasks finish
 
-## Development
+4. **Task Execution**:
+   - **Cloud Run**: API call to execute job, poll for completion
+   - **Process**: Spawn shell script with env vars, immediate success (simulated)
 
-### Project Structure
+## Project Structure
 
 ```
 .
-├── Cargo.toml
-├── Dockerfile
-├── docker-compose.yml
-├── migrations/
-│   └── 001_init.sql
+├── Cargo.toml              # Rust dependencies
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # PostgreSQL + Orchestrator
+├── justfile                # Task runner recipes
+├── README.md               # This file
+├── test-local.sh           # Local test demonstration
+├── migrations/             # Database migrations
+│   ├── 001_init.sql        # Initial schema
+│   └── 002_add_executor_type.sql  # Add executor column
+├── test-scripts/           # Example process executor scripts
+│   └── example-task.sh     # Demo task script
 └── src/
-    ├── main.rs          # CLI and main entry point
-    ├── db.rs            # Database operations
-    ├── models.rs        # Data models
-    ├── scheduler.rs     # Scheduler loop logic
-    └── cloud_run.rs     # Cloud Run API integration
+    ├── main.rs             # CLI and main entry point
+    ├── db.rs               # Database operations (sqlx)
+    ├── models.rs           # Data models (Workflow, Run, Task)
+    ├── scheduler.rs        # Scheduler loop logic
+    ├── cloud_run.rs        # Cloud Run API integration
+    └── process_executor.rs # Local process execution
 ```
 
-### Testing
+## Development
+
+### Build
 
 ```bash
-# Build
-cargo build
-
-# Run tests (when available)
-cargo test
-
-# Run with logging
-RUST_LOG=debug cargo run -- run
+just build           # Debug build
+just build-release   # Release build
 ```
 
-## Stopping
+### Code Quality
 
 ```bash
-# Stop all services
-docker-compose down
+just check    # Check compilation
+just fmt      # Format code
+just lint     # Run clippy
+just test     # Run tests
+```
 
-# Stop and remove volumes
-docker-compose down -v
+### Clean Up
+
+```bash
+just clean           # Remove build artifacts
+just clean-test      # Remove test scripts
+just reset-db        # Delete database (WARNING: loses data)
+```
+
+## Examples
+
+### Process Executor Example
+
+```bash
+# Setup
+just setup
+
+# Start orchestrator
+just run &
+
+# Wait a moment, then trigger
+sleep 2
+just trigger example-process
+
+# Check progress
+just status
+just tasks <run-id>
+```
+
+### Cloud Run Example
+
+```bash
+# Create Cloud Run workflow
+cargo run -- create-workflow \
+  --name prod-etl \
+  --job-name data-processor \
+  --project my-project \
+  --region us-central1 \
+  --task-count 10 \
+  --executor cloudrun
+
+# Trigger it
+cargo run -- trigger prod-etl
+```
+
+## Troubleshooting
+
+### Database Connection Issues
+
+```bash
+# Check if PostgreSQL is running
+docker-compose ps
+
+# Restart PostgreSQL
+docker-compose restart postgres
+
+# Check logs
+docker-compose logs postgres
+```
+
+### Process Executor Not Working
+
+```bash
+# Ensure scripts are executable
+chmod +x test-scripts/*.sh
+
+# Check script exists
+ls -la test-scripts/
+
+# Check working directory setting in scheduler.rs
+# Default: "test-scripts"
+```
+
+### Cloud Run Authentication
+
+```bash
+# Check gcloud auth
+gcloud auth application-default print-access-token
+
+# Re-authenticate if needed
+gcloud auth application-default login
 ```
 
 ## License
 
 MIT
+
+## Contributing
+
+This is a simple example orchestrator. Contributions welcome for:
+- Better process tracking for Process executor
+- Retry logic and error handling
+- Task dependencies and DAG execution
+- Web UI for monitoring
+- More executor types (AWS Lambda, etc.)

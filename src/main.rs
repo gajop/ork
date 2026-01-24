@@ -1,6 +1,7 @@
 mod cloud_run;
 mod db;
 mod models;
+mod process_executor;
 mod scheduler;
 
 use anyhow::Result;
@@ -19,7 +20,10 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    #[arg(long, default_value = "postgres://postgres:postgres@localhost:5432/orchestrator")]
+    #[arg(
+        long,
+        default_value = "postgres://postgres:postgres@localhost:5432/orchestrator"
+    )]
     database_url: String,
 }
 
@@ -41,21 +45,25 @@ enum Commands {
         #[arg(short, long)]
         description: Option<String>,
 
-        /// Cloud Run job name
+        /// Cloud Run job name (or script path for process executor)
         #[arg(short, long)]
         job_name: String,
 
-        /// Cloud Run project ID
+        /// Cloud Run project ID (or 'local' for process executor)
         #[arg(short, long)]
         project: String,
 
-        /// Cloud Run region
+        /// Cloud Run region (or 'local' for process executor)
         #[arg(short, long, default_value = "us-central1")]
         region: String,
 
         /// Number of tasks to generate per run
         #[arg(short, long, default_value = "3")]
         task_count: i32,
+
+        /// Executor type: cloudrun or process
+        #[arg(short, long, default_value = "cloudrun")]
+        executor: String,
     },
 
     /// List all workflows
@@ -118,6 +126,7 @@ async fn main() -> Result<()> {
             project,
             region,
             task_count,
+            executor,
         } => {
             let task_params = serde_json::json!({
                 "task_count": task_count,
@@ -130,13 +139,15 @@ async fn main() -> Result<()> {
                     &job_name,
                     &region,
                     &project,
+                    &executor,
                     Some(task_params),
                 )
                 .await?;
 
             println!("✓ Created workflow: {}", workflow.name);
             println!("  ID: {}", workflow.id);
-            println!("  Cloud Run Job: {}", workflow.cloud_run_job_name);
+            println!("  Job/Script: {}", workflow.cloud_run_job_name);
+            println!("  Executor: {}", workflow.executor_type);
             println!("  Project: {}", workflow.cloud_run_project);
             println!("  Region: {}", workflow.cloud_run_region);
         }
@@ -225,10 +236,7 @@ async fn main() -> Result<()> {
                 println!("{}", "-".repeat(113));
 
                 for task in tasks {
-                    let execution = task
-                        .cloud_run_execution_name
-                        .as_deref()
-                        .unwrap_or("-");
+                    let execution = task.cloud_run_execution_name.as_deref().unwrap_or("-");
 
                     let finished = task
                         .finished_at

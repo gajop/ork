@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
 use std::process::Command;
+use tracing::{debug, info};
 
 #[derive(Debug, Serialize)]
 pub struct CloudRunJobRequest {
@@ -60,9 +60,7 @@ impl CloudRunClient {
 
         match output {
             Ok(result) if result.status.success() => {
-                let token = String::from_utf8(result.stdout)?
-                    .trim()
-                    .to_string();
+                let token = String::from_utf8(result.stdout)?.trim().to_string();
                 debug!("Got access token from gcloud CLI");
                 Ok(token)
             }
@@ -83,7 +81,10 @@ impl CloudRunClient {
 
         // Check if we're in mock mode
         if token == "mock-token-for-local-testing" {
-            info!("Mock mode: Simulating Cloud Run job execution for {}", job_name);
+            info!(
+                "Mock mode: Simulating Cloud Run job execution for {}",
+                job_name
+            );
             return Ok(format!("mock-execution-{}", uuid::Uuid::new_v4()));
         }
 
@@ -122,7 +123,10 @@ impl CloudRunClient {
             },
         };
 
-        debug!("Executing Cloud Run job: {} with params: {:?}", job_name, params);
+        debug!(
+            "Executing Cloud Run job: {} with params: {:?}",
+            job_name, params
+        );
 
         let response = self
             .client
@@ -182,11 +186,7 @@ impl CloudRunClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Failed to get execution status {}: {}",
-                status,
-                error_text
-            );
+            anyhow::bail!("Failed to get execution status {}: {}", status, error_text);
         }
 
         let execution: serde_json::Value = response.json().await?;

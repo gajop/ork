@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::cloud_run::CloudRunClient;
 use crate::db::Database;
-use crate::models::Workflow;
+use crate::models::{ExecutorType, Workflow};
+use crate::process_executor::ProcessExecutor;
 
 pub struct Scheduler {
     db: Arc<Database>,
@@ -44,12 +45,10 @@ impl Scheduler {
             info!("Processing pending run: {}", run.id);
 
             // Get the workflow
-            let workflow = sqlx::query_as::<_, Workflow>(
-                "SELECT * FROM workflows WHERE id = $1",
-            )
-            .bind(run.workflow_id)
-            .fetch_one(self.db.pool())
-            .await?;
+            let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
+                .bind(run.workflow_id)
+                .fetch_one(self.db.pool())
+                .await?;
 
             // Update run to running
             self.db.update_run_status(run.id, "running", None).await?;
@@ -88,27 +87,40 @@ impl Scheduler {
 
             // Get run and workflow info
             let run = self.db.get_run(task.run_id).await?;
-            let workflow = sqlx::query_as::<_, Workflow>(
-                "SELECT * FROM workflows WHERE id = $1",
-            )
-            .bind(run.workflow_id)
-            .fetch_one(self.db.pool())
-            .await?;
+            let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
+                .bind(run.workflow_id)
+                .fetch_one(self.db.pool())
+                .await?;
 
-            // Create Cloud Run client
-            let client = CloudRunClient::new(
-                workflow.cloud_run_project.clone(),
-                workflow.cloud_run_region.clone(),
-            );
+            // Check executor type and dispatch accordingly
+            let executor_type =
+                ExecutorType::from_str(&workflow.executor_type).unwrap_or(ExecutorType::CloudRun);
 
-            // Execute the job
-            match client
-                .execute_job(
-                    &workflow.cloud_run_job_name,
-                    task.params.as_ref().map(|p| p.0.clone()),
-                )
-                .await
-            {
+            let execution_result = match executor_type {
+                ExecutorType::CloudRun => {
+                    let client = CloudRunClient::new(
+                        workflow.cloud_run_project.clone(),
+                        workflow.cloud_run_region.clone(),
+                    );
+                    client
+                        .execute_job(
+                            &workflow.cloud_run_job_name,
+                            task.params.as_ref().map(|p| p.0.clone()),
+                        )
+                        .await
+                }
+                ExecutorType::Process => {
+                    let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
+                    executor
+                        .execute_process(
+                            &workflow.cloud_run_job_name,
+                            task.params.as_ref().map(|p| p.0.clone()),
+                        )
+                        .await
+                }
+            };
+
+            match execution_result {
                 Ok(execution_name) => {
                     self.db
                         .update_task_status(task.id, "dispatched", Some(&execution_name), None)
@@ -134,19 +146,30 @@ impl Scheduler {
             if let Some(execution_name) = &task.cloud_run_execution_name {
                 // Get run and workflow info
                 let run = self.db.get_run(task.run_id).await?;
-                let workflow = sqlx::query_as::<_, Workflow>(
-                    "SELECT * FROM workflows WHERE id = $1",
-                )
-                .bind(run.workflow_id)
-                .fetch_one(self.db.pool())
-                .await?;
+                let workflow =
+                    sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
+                        .bind(run.workflow_id)
+                        .fetch_one(self.db.pool())
+                        .await?;
 
-                let client = CloudRunClient::new(
-                    workflow.cloud_run_project.clone(),
-                    workflow.cloud_run_region.clone(),
-                );
+                let executor_type = ExecutorType::from_str(&workflow.executor_type)
+                    .unwrap_or(ExecutorType::CloudRun);
 
-                match client.get_execution_status(execution_name).await {
+                let status_result = match executor_type {
+                    ExecutorType::CloudRun => {
+                        let client = CloudRunClient::new(
+                            workflow.cloud_run_project.clone(),
+                            workflow.cloud_run_region.clone(),
+                        );
+                        client.get_execution_status(execution_name).await
+                    }
+                    ExecutorType::Process => {
+                        let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
+                        executor.get_process_status(execution_name).await
+                    }
+                };
+
+                match status_result {
                     Ok(status) => {
                         let new_status = match status.as_str() {
                             "ready" | "completed" | "success" => "success",

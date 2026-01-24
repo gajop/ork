@@ -25,6 +25,7 @@ impl Database {
     }
 
     // Workflow operations
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_workflow(
         &self,
         name: &str,
@@ -32,12 +33,13 @@ impl Database {
         cloud_run_job_name: &str,
         cloud_run_region: &str,
         cloud_run_project: &str,
+        executor_type: &str,
         task_params: Option<serde_json::Value>,
     ) -> Result<Workflow> {
         let workflow = sqlx::query_as::<_, Workflow>(
             r#"
-            INSERT INTO workflows (name, description, cloud_run_job_name, cloud_run_region, cloud_run_project, task_params)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO workflows (name, description, cloud_run_job_name, cloud_run_region, cloud_run_project, executor_type, task_params)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             "#,
         )
@@ -46,6 +48,7 @@ impl Database {
         .bind(cloud_run_job_name)
         .bind(cloud_run_region)
         .bind(cloud_run_project)
+        .bind(executor_type)
         .bind(task_params)
         .fetch_one(&self.pool)
         .await?;

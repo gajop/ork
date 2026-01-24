@@ -11,9 +11,26 @@ pub struct Workflow {
     pub cloud_run_job_name: String,
     pub cloud_run_region: String,
     pub cloud_run_project: String,
+    pub executor_type: String,
     pub task_params: Option<Json<serde_json::Value>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutorType {
+    CloudRun,
+    Process,
+}
+
+impl ExecutorType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "cloudrun" => Some(Self::CloudRun),
+            "process" => Some(Self::Process),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
