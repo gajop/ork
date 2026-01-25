@@ -201,6 +201,39 @@ impl Database {
         Ok(task)
     }
 
+    pub async fn batch_create_tasks(
+        &self,
+        run_id: Uuid,
+        task_count: i32,
+        workflow_name: &str,
+    ) -> Result<()> {
+        // Use a transaction for batch inserts
+        let mut tx = self.pool.begin().await?;
+
+        for i in 0..task_count {
+            let params = serde_json::json!({
+                "task_index": i,
+                "run_id": run_id.to_string(),
+                "workflow_name": workflow_name,
+            });
+
+            sqlx::query(
+                r#"
+                INSERT INTO tasks (run_id, task_index, status, params)
+                VALUES ($1, $2, 'pending', $3)
+                "#,
+            )
+            .bind(run_id)
+            .bind(i)
+            .bind(params)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub async fn update_task_status(
         &self,
