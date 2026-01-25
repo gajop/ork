@@ -110,17 +110,6 @@ just perf-all
 # Saves results to perf-results/<timestamp>-<config>.txt
 ```
 
-### Custom Test
-
-Use CLI args for ad-hoc tests:
-```bash
-just perf <runs> <tasks_per_run> <duration>
-
-# Examples:
-just perf 100 5 0.1      # 100 runs, 5 tasks each, 0.1s duration
-just perf 50 10 0.5      # 50 runs, 10 tasks each, 0.5s duration
-```
-
 ### Understanding the Output
 
 ```
@@ -166,14 +155,20 @@ Create a new YAML file in `perf-configs/`:
 workflows: 200
 tasks_per_workflow: 8
 duration: 0.25
+
+scheduler:
+  poll_interval_secs: 2
+  max_tasks_per_batch: 200
+  max_concurrent_dispatches: 50
+  max_concurrent_status_checks: 100
 ```
 
 Then run with:
 ```bash
+just perf-my-test  # Add to justfile
+# or directly:
 cargo run --release --bin perf-test -- --config my-test
 ```
-
-Or add a justfile command for it.
 
 ### Prerequisites
 
@@ -195,8 +190,12 @@ The performance testing infrastructure includes:
 **Just commands** (all in `perf` group):
 - `just perf-quick/standard/heavy/latency/memory` - Run predefined configs
 - `just perf-all` - Run all configs and save results to `perf-results/`
-- `just perf <runs> <tasks> <duration>` - Custom parameters
 - `just clean-data` - Clean database between tests
+
+**Config structure**:
+- Each config defines workload (workflows, tasks_per_workflow, duration)
+- Each config defines scheduler parameters (poll_interval, batch sizes, concurrency limits)
+- This ensures tests run with appropriate execution parameters for their workload
 
 **Implementation details**:
 - Rust binary at `src/bin/perf-test.rs`

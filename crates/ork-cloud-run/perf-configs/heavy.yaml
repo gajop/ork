@@ -3,3 +3,9 @@
 workflows: 1000
 tasks_per_workflow: 10
 duration: 0.05
+
+scheduler:
+  poll_interval_secs: 1
+  max_tasks_per_batch: 500
+  max_concurrent_dispatches: 100
+  max_concurrent_status_checks: 200

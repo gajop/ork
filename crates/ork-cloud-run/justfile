@@ -250,11 +250,6 @@ test-e2e: db-start db-init test-script-create workflow-create-example
 test-load: db-start db-init workflow-create-example
     ./scripts/test-load.sh
 
-# Run performance test with custom parameters
-[group('perf')]
-perf workflows="100" tasks="5" duration="0.1": db-start db-init clean-data
-    cargo run --release --bin perf-test -- --workflows {{workflows}} --tasks-per-workflow {{tasks}} --duration {{duration}}
-
 # Quick smoke test (10 runs, 5 tasks/run)
 [group('perf')]
 perf-quick: db-start db-init clean-data

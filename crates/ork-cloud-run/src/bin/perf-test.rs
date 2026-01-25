@@ -13,19 +13,7 @@ use tokio::time::sleep;
 struct Args {
     /// Config file to load (from perf-configs/*.yaml)
     #[arg(short, long)]
-    config: Option<String>,
-
-    /// Number of workflows to trigger
-    #[arg(short, long, default_value = "100")]
-    workflows: u32,
-
-    /// Number of tasks per workflow
-    #[arg(short, long, default_value = "5")]
-    tasks_per_workflow: u32,
-
-    /// Task duration in seconds
-    #[arg(short, long, default_value = "0.1")]
-    duration: f32,
+    config: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +21,15 @@ struct PerfConfig {
     workflows: u32,
     tasks_per_workflow: u32,
     duration: f32,
+    scheduler: SchedulerConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchedulerConfig {
+    poll_interval_secs: u64,
+    max_tasks_per_batch: i64,
+    max_concurrent_dispatches: usize,
+    max_concurrent_status_checks: usize,
 }
 
 #[derive(Debug)]
@@ -46,20 +43,12 @@ struct ResourceStats {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Load config from file or use CLI args
-    let config = if let Some(config_name) = &args.config {
-        let config_path = format!("perf-configs/{}.yaml", config_name);
-        let config_content = std::fs::read_to_string(&config_path)
-            .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", config_path, e))?;
-        serde_yaml::from_str::<PerfConfig>(&config_content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse config file {}: {}", config_path, e))?
-    } else {
-        PerfConfig {
-            workflows: args.workflows,
-            tasks_per_workflow: args.tasks_per_workflow,
-            duration: args.duration,
-        }
-    };
+    // Load config from file
+    let config_path = format!("perf-configs/{}.yaml", args.config);
+    let config_content = std::fs::read_to_string(&config_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", config_path, e))?;
+    let config = serde_yaml::from_str::<PerfConfig>(&config_content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse config file {}: {}", config_path, e))?;
 
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/orchestrator".to_string());
@@ -67,9 +56,7 @@ async fn main() -> Result<()> {
     let pool = PgPool::connect(&database_url).await?;
 
     println!("=== Performance Test Configuration ===");
-    if let Some(config_name) = &args.config {
-        println!("Config: {}", config_name);
-    }
+    println!("Config: {}", args.config);
     println!("Runs to trigger: {}", config.workflows);
     println!("Tasks per run: {}", config.tasks_per_workflow);
     println!("Task duration: {}s", config.duration);
@@ -118,10 +105,19 @@ async fn main() -> Result<()> {
         anyhow::bail!("Failed to create workflow");
     }
 
-    // Start scheduler in background
+    // Start scheduler in background with config
     println!("Starting scheduler...");
+    println!("  Poll interval: {}s", config.scheduler.poll_interval_secs);
+    println!("  Max batch: {}", config.scheduler.max_tasks_per_batch);
+    println!("  Max concurrent dispatches: {}", config.scheduler.max_concurrent_dispatches);
+    println!("  Max concurrent status checks: {}", config.scheduler.max_concurrent_status_checks);
+
     let mut scheduler = Command::new("../../target/release/ork-cloud-run")
         .args(["run"])
+        .env("POLL_INTERVAL_SECS", config.scheduler.poll_interval_secs.to_string())
+        .env("MAX_TASKS_PER_BATCH", config.scheduler.max_tasks_per_batch.to_string())
+        .env("MAX_CONCURRENT_DISPATCHES", config.scheduler.max_concurrent_dispatches.to_string())
+        .env("MAX_CONCURRENT_STATUS_CHECKS", config.scheduler.max_concurrent_status_checks.to_string())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
