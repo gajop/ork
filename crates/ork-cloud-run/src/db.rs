@@ -201,6 +201,7 @@ impl Database {
         Ok(task)
     }
 
+    #[allow(dead_code)]
     pub async fn update_task_status(
         &self,
         task_id: Uuid,

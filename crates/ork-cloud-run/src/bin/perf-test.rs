@@ -3,6 +3,7 @@ use clap::Parser;
 use serde::Deserialize;
 use sqlx::PgPool;
 use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -47,6 +48,7 @@ struct ResourceStats {
 
 #[derive(Debug, Deserialize)]
 struct SchedulerMetrics {
+    #[allow(dead_code)]
     timestamp: u64,
     process_pending_runs_ms: u128,
     process_pending_tasks_ms: u128,
@@ -186,6 +188,7 @@ async fn main() -> Result<()> {
     let total_tasks = config.workflows * config.tasks_per_workflow;
     let mut completed = 0u32;
     let mut all_metrics: VecDeque<SchedulerMetrics> = VecDeque::new();
+    let mut log_position: u64 = 0;
 
     while completed < total_tasks {
         sleep(Duration::from_millis(500)).await;
@@ -232,30 +235,46 @@ async fn main() -> Result<()> {
 
         let elapsed = start_time.elapsed().as_secs_f64();
 
-        // Parse ALL scheduler metrics from log file
-        if let Ok(log_content) = std::fs::read_to_string(&scheduler_log_path) {
-            for line in log_content.lines() {
-                if let Some(json_start) = line.find("SCHEDULER_METRICS: ") {
-                    let json_str = &line[json_start + "SCHEDULER_METRICS: ".len()..];
-                    if let Ok(metrics) = serde_json::from_str::<SchedulerMetrics>(json_str) {
-                        // Only add if we haven't seen this timestamp yet
-                        if all_metrics.is_empty() || all_metrics.back().unwrap().timestamp != metrics.timestamp {
+        // Read new lines from log file since last position
+        if let Ok(mut file) = std::fs::File::open(&scheduler_log_path) {
+            if file.seek(SeekFrom::Start(log_position)).is_ok() {
+                let reader = BufReader::new(&file);
+                for line in reader.lines().flatten() {
+                    if let Some(json_start) = line.find("SCHEDULER_METRICS: ") {
+                        let json_str = &line[json_start + "SCHEDULER_METRICS: ".len()..];
+                        if let Ok(metrics) = serde_json::from_str::<SchedulerMetrics>(json_str) {
                             all_metrics.push_back(metrics);
                         }
                     }
                 }
+                // Update position to current end of file
+                if let Ok(metadata) = std::fs::metadata(&scheduler_log_path) {
+                    log_position = metadata.len();
+                }
             }
         }
 
-        // Get the latest metrics
-        let metrics_display = if let Some(latest) = all_metrics.back() {
+        // Show cumulative metrics with both absolute values and percentages
+        let metrics_display = if !all_metrics.is_empty() {
+            let total_runs: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
+            let total_tasks: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
+            let total_status: u128 = all_metrics.iter().map(|m| m.check_running_tasks_ms).sum();
+            let total_sleep: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
+            let total_time: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
+
+            let runs_pct = (total_runs as f64 / total_time as f64) * 100.0;
+            let tasks_pct = (total_tasks as f64 / total_time as f64) * 100.0;
+            let status_pct = (total_status as f64 / total_time as f64) * 100.0;
+            let sleep_pct = (total_sleep as f64 / total_time as f64) * 100.0;
+
             format!(
-                "runs:{}ms tasks:{}ms status:{}ms sleep:{}ms total:{}ms",
-                latest.process_pending_runs_ms,
-                latest.process_pending_tasks_ms,
-                latest.check_running_tasks_ms,
-                latest.sleep_ms,
-                latest.total_loop_ms
+                "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% status:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops)",
+                total_runs as f64 / 1000.0, runs_pct,
+                total_tasks as f64 / 1000.0, tasks_pct,
+                total_status as f64 / 1000.0, status_pct,
+                total_sleep as f64 / 1000.0, sleep_pct,
+                total_time as f64 / 1000.0,
+                all_metrics.len()
             )
         } else {
             "waiting for metrics...".to_string()

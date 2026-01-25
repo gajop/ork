@@ -14,6 +14,7 @@ use crate::models::{ExecutionStatus, TaskStatus, Workflow};
 
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
+    #[allow(dead_code)]
     pub timestamp: u64,
     pub process_pending_runs_ms: u128,
     pub process_pending_tasks_ms: u128,
@@ -55,25 +56,41 @@ impl Scheduler {
             let mut metrics = SchedulerMetrics::default();
 
             let start = Instant::now();
-            if let Err(e) = self.process_pending_runs().await {
-                error!("Error processing pending runs: {}", e);
-            }
+            let runs_processed = match self.process_pending_runs().await {
+                Ok(count) => count,
+                Err(e) => {
+                    error!("Error processing pending runs: {}", e);
+                    0
+                }
+            };
             metrics.process_pending_runs_ms = start.elapsed().as_millis();
 
             let start = Instant::now();
-            if let Err(e) = self.process_pending_tasks().await {
-                error!("Error processing pending tasks: {}", e);
-            }
+            let tasks_processed = match self.process_pending_tasks().await {
+                Ok(count) => count,
+                Err(e) => {
+                    error!("Error processing pending tasks: {}", e);
+                    0
+                }
+            };
             metrics.process_pending_tasks_ms = start.elapsed().as_millis();
 
             let start = Instant::now();
-            if let Err(e) = self.check_running_tasks().await {
-                error!("Error checking running tasks: {}", e);
-            }
+            let status_checked = match self.check_running_tasks().await {
+                Ok(count) => count,
+                Err(e) => {
+                    error!("Error checking running tasks: {}", e);
+                    0
+                }
+            };
             metrics.check_running_tasks_ms = start.elapsed().as_millis();
 
+            // Only sleep if there was no work to do
+            let had_work = runs_processed > 0 || tasks_processed > 0 || status_checked > 0;
             let start = Instant::now();
-            sleep(Duration::from_secs(self.config.poll_interval_secs)).await;
+            if !had_work {
+                sleep(Duration::from_secs(self.config.poll_interval_secs)).await;
+            }
             metrics.sleep_ms = start.elapsed().as_millis();
 
             metrics.total_loop_ms = loop_start.elapsed().as_millis();
@@ -88,8 +105,9 @@ impl Scheduler {
         }
     }
 
-    async fn process_pending_runs(&self) -> Result<()> {
+    async fn process_pending_runs(&self) -> Result<usize> {
         let runs = self.db.get_pending_runs().await?;
+        let count = runs.len();
 
         for run in runs {
             info!("Processing pending run: {}", run.id);
@@ -129,10 +147,10 @@ impl Scheduler {
             info!("Created {} tasks for run {}", task_count, run.id);
         }
 
-        Ok(())
+        Ok(count)
     }
 
-    async fn process_pending_tasks(&self) -> Result<()> {
+    async fn process_pending_tasks(&self) -> Result<usize> {
         let query_start = Instant::now();
         // OPTIMIZATION: Single JOIN query instead of N+1 queries
         let tasks = self
@@ -141,11 +159,12 @@ impl Scheduler {
             .await?;
 
         if tasks.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
 
+        let count = tasks.len();
         let query_ms = query_start.elapsed().as_millis();
-        info!("Processing {} pending tasks (query: {}ms)", tasks.len(), query_ms);
+        info!("Processing {} pending tasks (query: {}ms)", count, query_ms);
 
         // Ensure all workflows have registered executors
         let mut workflow_ids = std::collections::HashSet::new();
@@ -196,7 +215,6 @@ impl Scheduler {
         info!("Dispatched {} tasks in {}ms", results.len(), dispatch_ms);
 
         // Batch update statuses
-        let update_prep_start = Instant::now();
         let updates: Vec<(Uuid, &str, Option<&str>, Option<String>)> = results
             .iter()
             .map(|(task_id, result)| {
@@ -220,10 +238,10 @@ impl Scheduler {
         let db_update_ms = db_update_start.elapsed().as_millis();
         info!("Batch updated {} tasks in {}ms", updates_ref.len(), db_update_ms);
 
-        Ok(())
+        Ok(count)
     }
 
-    async fn check_running_tasks(&self) -> Result<()> {
+    async fn check_running_tasks(&self) -> Result<usize> {
         // OPTIMIZATION: Single JOIN query instead of N+1 queries
         let tasks = self
             .db
@@ -231,8 +249,10 @@ impl Scheduler {
             .await?;
 
         if tasks.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
+
+        let count = tasks.len();
 
         // Ensure all workflows have registered executors
         let mut workflow_ids = std::collections::HashSet::new();
@@ -323,7 +343,7 @@ impl Scheduler {
             }
         }
 
-        Ok(())
+        Ok(count)
     }
 
     async fn check_run_completion(&self, run_id: Uuid) -> Result<()> {
