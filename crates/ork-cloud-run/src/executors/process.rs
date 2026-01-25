@@ -1,8 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::Arc;
+use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -80,7 +80,7 @@ impl ProcessExecutor {
                 cmd.env(key, value);
             }
 
-            let status = match cmd.output() {
+            let status = match cmd.output().await {
                 Ok(output) => {
                     if output.status.success() {
                         info!("Process completed successfully: {}", exec_id_clone);

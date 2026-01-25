@@ -227,6 +227,15 @@ impl Scheduler {
                                 let execution_status = ExecutionStatus::from_str(&status_str);
                                 let new_status = execution_status.to_task_status();
                                 let old_status = task.task_status();
+
+                                // Don't update if status is unknown and task was already completed
+                                if execution_status == ExecutionStatus::Unknown
+                                    && matches!(old_status, TaskStatus::Success | TaskStatus::Failed) {
+                                    warn!("Task {} returned unknown status but was already completed ({}), skipping update",
+                                          task.task_id, old_status.as_str());
+                                    return None;
+                                }
+
                                 Some((task.task_id, task.run_id, new_status, old_status))
                             }
                             Err(e) => {
