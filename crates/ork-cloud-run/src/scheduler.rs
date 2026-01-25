@@ -141,7 +141,6 @@ impl Scheduler {
     }
 
     async fn process_pending_tasks(&self) -> Result<usize> {
-        let query_start = Instant::now();
         // OPTIMIZATION: Single JOIN query instead of N+1 queries
         let tasks = self
             .db
@@ -153,8 +152,6 @@ impl Scheduler {
         }
 
         let count = tasks.len();
-        let query_ms = query_start.elapsed().as_millis();
-        info!("Processing {} pending tasks (query: {}ms)", count, query_ms);
 
         // Ensure all workflows have registered executors
         let mut workflow_ids = std::collections::HashSet::new();
@@ -174,7 +171,6 @@ impl Scheduler {
         }
 
         // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
-        let dispatch_start = Instant::now();
         let results = stream::iter(tasks)
             .map(|task_with_workflow| {
                 let executor_manager = &self.executor_manager;
@@ -201,8 +197,6 @@ impl Scheduler {
             .buffer_unordered(self.config.max_concurrent_dispatches)
             .collect::<Vec<_>>()
             .await;
-        let dispatch_ms = dispatch_start.elapsed().as_millis();
-        info!("Dispatched {} tasks in {}ms", results.len(), dispatch_ms);
 
         // Batch update statuses
         let updates: Vec<(Uuid, &str, Option<&str>, Option<String>)> = results
@@ -232,7 +226,6 @@ impl Scheduler {
     }
 
     async fn check_running_tasks(&self) -> Result<usize> {
-        let query_start = Instant::now();
         // OPTIMIZATION: Single JOIN query instead of N+1 queries
         let tasks = self
             .db
@@ -244,8 +237,6 @@ impl Scheduler {
         }
 
         let count = tasks.len();
-        let query_ms = query_start.elapsed().as_millis();
-        info!("Checking {} running tasks (query: {}ms)", count, query_ms);
 
         // Ensure all workflows have registered executors
         let mut workflow_ids = std::collections::HashSet::new();
@@ -264,7 +255,6 @@ impl Scheduler {
         }
 
         // OPTIMIZATION: Process status checks concurrently with limit
-        let check_start = Instant::now();
         let results = stream::iter(tasks)
             .map(|task| {
                 let executor_manager = &self.executor_manager;
@@ -311,11 +301,8 @@ impl Scheduler {
             .buffer_unordered(self.config.max_concurrent_status_checks)
             .collect::<Vec<_>>()
             .await;
-        let check_ms = check_start.elapsed().as_millis();
-        info!("Status checks completed in {}ms", check_ms);
 
         // Batch update changed statuses
-        let update_start = Instant::now();
         let status_changes: Vec<_> = results
             .into_iter()
             .flatten()
@@ -329,10 +316,7 @@ impl Scheduler {
                 .collect();
 
             self.db.batch_update_task_status(&updates).await?;
-            let update_ms = update_start.elapsed().as_millis();
-            info!("Batch updated {} task statuses in {}ms", updates.len(), update_ms);
 
-            let completion_start = Instant::now();
             for (task_id, run_id, new_status, _) in status_changes {
                 info!("Task {} updated to status: {}", task_id, new_status.as_str());
 
@@ -340,10 +324,6 @@ impl Scheduler {
                 if matches!(new_status, TaskStatus::Success | TaskStatus::Failed) {
                     self.check_run_completion(run_id).await?;
                 }
-            }
-            let completion_ms = completion_start.elapsed().as_millis();
-            if completion_ms > 100 {
-                info!("Run completion checks took {}ms", completion_ms);
             }
         }
 
