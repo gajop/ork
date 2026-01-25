@@ -232,6 +232,7 @@ impl Scheduler {
     }
 
     async fn check_running_tasks(&self) -> Result<usize> {
+        let query_start = Instant::now();
         // OPTIMIZATION: Single JOIN query instead of N+1 queries
         let tasks = self
             .db
@@ -243,6 +244,8 @@ impl Scheduler {
         }
 
         let count = tasks.len();
+        let query_ms = query_start.elapsed().as_millis();
+        info!("Checking {} running tasks (query: {}ms)", count, query_ms);
 
         // Ensure all workflows have registered executors
         let mut workflow_ids = std::collections::HashSet::new();
@@ -261,6 +264,7 @@ impl Scheduler {
         }
 
         // OPTIMIZATION: Process status checks concurrently with limit
+        let check_start = Instant::now();
         let results = stream::iter(tasks)
             .map(|task| {
                 let executor_manager = &self.executor_manager;
@@ -307,8 +311,11 @@ impl Scheduler {
             .buffer_unordered(self.config.max_concurrent_status_checks)
             .collect::<Vec<_>>()
             .await;
+        let check_ms = check_start.elapsed().as_millis();
+        info!("Status checks completed in {}ms", check_ms);
 
         // Batch update changed statuses
+        let update_start = Instant::now();
         let status_changes: Vec<_> = results
             .into_iter()
             .flatten()
@@ -322,7 +329,10 @@ impl Scheduler {
                 .collect();
 
             self.db.batch_update_task_status(&updates).await?;
+            let update_ms = update_start.elapsed().as_millis();
+            info!("Batch updated {} task statuses in {}ms", updates.len(), update_ms);
 
+            let completion_start = Instant::now();
             for (task_id, run_id, new_status, _) in status_changes {
                 info!("Task {} updated to status: {}", task_id, new_status.as_str());
 
@@ -331,21 +341,33 @@ impl Scheduler {
                     self.check_run_completion(run_id).await?;
                 }
             }
+            let completion_ms = completion_start.elapsed().as_millis();
+            if completion_ms > 100 {
+                info!("Run completion checks took {}ms", completion_ms);
+            }
         }
 
         Ok(count)
     }
 
     async fn check_run_completion(&self, run_id: Uuid) -> Result<()> {
-        let tasks = self.db.list_tasks(run_id).await?;
+        // Use a COUNT query instead of fetching all tasks
+        let (total, completed, failed): (i64, i64, i64) = sqlx::query_as(
+            r#"
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status IN ('success', 'failed')) as completed,
+                COUNT(*) FILTER (WHERE status = 'failed') as failed
+            FROM tasks
+            WHERE run_id = $1
+            "#
+        )
+        .bind(run_id)
+        .fetch_one(self.db.pool())
+        .await?;
 
-        let all_complete = tasks
-            .iter()
-            .all(|t| matches!(t.status(), TaskStatus::Success | TaskStatus::Failed));
-
-        if all_complete {
-            let any_failed = tasks.iter().any(|t| t.status() == TaskStatus::Failed);
-            let new_status = if any_failed {
+        if completed == total {
+            let new_status = if failed > 0 {
                 TaskStatus::Failed
             } else {
                 TaskStatus::Success
@@ -355,9 +377,11 @@ impl Scheduler {
                 .update_run_status(run_id, new_status.as_str(), None)
                 .await?;
             info!(
-                "Run {} completed with status: {}",
+                "Run {} completed with status: {} ({}/{} tasks)",
                 run_id,
-                new_status.as_str()
+                new_status.as_str(),
+                completed,
+                total
             );
         }
 
