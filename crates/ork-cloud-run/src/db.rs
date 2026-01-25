@@ -178,28 +178,6 @@ impl Database {
         Ok(runs)
     }
 
-    // Task operations
-    pub async fn create_task(
-        &self,
-        run_id: Uuid,
-        task_index: i32,
-        params: Option<serde_json::Value>,
-    ) -> Result<Task> {
-        let task = sqlx::query_as::<_, Task>(
-            r#"
-            INSERT INTO tasks (run_id, task_index, status, params)
-            VALUES ($1, $2, 'pending', $3)
-            RETURNING *
-            "#,
-        )
-        .bind(run_id)
-        .bind(task_index)
-        .bind(params)
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(task)
-    }
 
     pub async fn batch_create_tasks(
         &self,
@@ -340,40 +318,8 @@ impl Database {
         Ok(tasks)
     }
 
-    /// Get running/dispatched tasks with workflow info in a single query
-    pub async fn get_running_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
-        let tasks = sqlx::query_as::<_, TaskWithWorkflow>(
-            r#"
-            SELECT
-                t.id as task_id,
-                t.run_id,
-                t.task_index,
-                t.status as task_status,
-                t.execution_name,
-                t.params,
-                w.id as workflow_id,
-                w.executor_type,
-                w.job_name,
-                w.project,
-                w.region
-            FROM tasks t
-            INNER JOIN runs r ON t.run_id = r.id
-            INNER JOIN workflows w ON r.workflow_id = w.id
-            WHERE t.status IN ('dispatched', 'running')
-              AND t.execution_name IS NOT NULL
-            ORDER BY t.created_at ASC
-            LIMIT $1
-            "#,
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(tasks)
-    }
 
     /// Batch update task statuses (more efficient than one-by-one)
-    #[allow(dead_code)]
     pub async fn batch_update_task_status(
         &self,
         updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
@@ -396,6 +342,9 @@ impl Database {
                     started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
                     finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
                 WHERE id = $4
+                  -- Prevent race condition: don't overwrite terminal states (success/failed) with non-terminal states
+                  -- This guards against late "dispatched" updates overwriting "success" from event-driven notifications
+                  AND (status NOT IN ('success', 'failed') OR $1 IN ('success', 'failed'))
                 "#,
             )
             .bind(status)
