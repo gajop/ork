@@ -28,7 +28,7 @@ struct PerfConfig {
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 struct SchedulerConfig {
-    poll_interval_secs: u64,
+    poll_interval_secs: f64,
     max_tasks_per_batch: i64,
     max_concurrent_dispatches: usize,
     max_concurrent_status_checks: usize,
@@ -52,7 +52,7 @@ struct SchedulerMetrics {
     timestamp: u64,
     process_pending_runs_ms: u128,
     process_pending_tasks_ms: u128,
-    check_running_tasks_ms: u128,
+    process_status_updates_ms: u128,
     sleep_ms: u128,
     total_loop_ms: u128,
 }
@@ -258,20 +258,20 @@ async fn main() -> Result<()> {
         let metrics_display = if !all_metrics.is_empty() {
             let total_runs: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
             let total_tasks: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
-            let total_status: u128 = all_metrics.iter().map(|m| m.check_running_tasks_ms).sum();
+            let total_status_updates: u128 = all_metrics.iter().map(|m| m.process_status_updates_ms).sum();
             let total_sleep: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
             let total_time: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
 
             let runs_pct = (total_runs as f64 / total_time as f64) * 100.0;
             let tasks_pct = (total_tasks as f64 / total_time as f64) * 100.0;
-            let status_pct = (total_status as f64 / total_time as f64) * 100.0;
+            let status_updates_pct = (total_status_updates as f64 / total_time as f64) * 100.0;
             let sleep_pct = (total_sleep as f64 / total_time as f64) * 100.0;
 
             format!(
-                "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% status:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops)",
+                "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% updates:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops)",
                 total_runs as f64 / 1000.0, runs_pct,
                 total_tasks as f64 / 1000.0, tasks_pct,
-                total_status as f64 / 1000.0, status_pct,
+                total_status_updates as f64 / 1000.0, status_updates_pct,
                 total_sleep as f64 / 1000.0, sleep_pct,
                 total_time as f64 / 1000.0,
                 all_metrics.len()
@@ -305,7 +305,7 @@ async fn main() -> Result<()> {
     if !all_metrics.is_empty() {
         let total_runs_ms: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
         let total_tasks_ms: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
-        let total_status_ms: u128 = all_metrics.iter().map(|m| m.check_running_tasks_ms).sum();
+        let total_status_updates_ms: u128 = all_metrics.iter().map(|m| m.process_status_updates_ms).sum();
         let total_sleep_ms: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
         let total_loop_ms: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
 
@@ -318,9 +318,9 @@ async fn main() -> Result<()> {
         println!("  Time processing tasks: {:.2}s ({:.1}%)",
             total_tasks_ms as f64 / 1000.0,
             (total_tasks_ms as f64 / total_loop_ms as f64) * 100.0);
-        println!("  Time checking status: {:.2}s ({:.1}%)",
-            total_status_ms as f64 / 1000.0,
-            (total_status_ms as f64 / total_loop_ms as f64) * 100.0);
+        println!("  Time processing status updates: {:.2}s ({:.1}%)",
+            total_status_updates_ms as f64 / 1000.0,
+            (total_status_updates_ms as f64 / total_loop_ms as f64) * 100.0);
         println!("  Time sleeping: {:.2}s ({:.1}%)",
             total_sleep_ms as f64 / 1000.0,
             (total_sleep_ms as f64 / total_loop_ms as f64) * 100.0);

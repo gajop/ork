@@ -3,11 +3,11 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use super::Executor;
+use super::{Executor, StatusUpdate};
 
 #[derive(Debug, Clone)]
 enum ProcessStatus {
@@ -19,6 +19,7 @@ enum ProcessStatus {
 pub struct ProcessExecutor {
     working_dir: String,
     process_states: Arc<RwLock<HashMap<String, ProcessStatus>>>,
+    status_tx: Arc<RwLock<Option<mpsc::UnboundedSender<StatusUpdate>>>>,
 }
 
 impl ProcessExecutor {
@@ -26,11 +27,13 @@ impl ProcessExecutor {
         Self {
             working_dir: working_dir.unwrap_or_else(|| ".".to_string()),
             process_states: Arc::new(RwLock::new(HashMap::new())),
+            status_tx: Arc::new(RwLock::new(None)),
         }
     }
 
     pub async fn execute_process(
         &self,
+        task_id: Uuid,
         command: &str,
         params: Option<serde_json::Value>,
     ) -> Result<String> {
@@ -71,6 +74,7 @@ impl ProcessExecutor {
         // Clone for the async task
         let exec_id_clone = execution_id.clone();
         let states_clone = self.process_states.clone();
+        let status_tx_clone = self.status_tx.clone();
 
         tokio::spawn(async move {
             let mut cmd = Command::new("sh");
@@ -100,43 +104,38 @@ impl ProcessExecutor {
 
             // Update status
             let mut states = states_clone.write().await;
-            states.insert(exec_id_clone, status);
+            states.insert(exec_id_clone.clone(), status.clone());
+            drop(states);
+
+            // Send status update through channel if available
+            let tx_guard = status_tx_clone.read().await;
+            if let Some(tx) = tx_guard.as_ref() {
+                let status_str = match status {
+                    ProcessStatus::Running => "running",
+                    ProcessStatus::Success => "success",
+                    ProcessStatus::Failed => "failed",
+                }.to_string();
+
+                let _ = tx.send(StatusUpdate {
+                    task_id,
+                    status: status_str,
+                });
+            }
         });
 
         Ok(execution_id)
     }
 
-    pub async fn get_process_status(&self, execution_id: &str) -> Result<String> {
-        let states = self.process_states.read().await;
-
-        match states.get(execution_id) {
-            Some(ProcessStatus::Running) => {
-                debug!("Process {} is still running", execution_id);
-                Ok("running".to_string())
-            }
-            Some(ProcessStatus::Success) => {
-                debug!("Process {} completed successfully", execution_id);
-                Ok("success".to_string())
-            }
-            Some(ProcessStatus::Failed) => {
-                debug!("Process {} failed", execution_id);
-                Ok("failed".to_string())
-            }
-            None => {
-                warn!("Unknown process execution_id: {}", execution_id);
-                Ok("unknown".to_string())
-            }
-        }
-    }
 }
 
 #[async_trait]
 impl Executor for ProcessExecutor {
-    async fn execute(&self, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
-        self.execute_process(job_name, params).await
+    async fn execute(&self, task_id: Uuid, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
+        self.execute_process(task_id, job_name, params).await
     }
 
-    async fn get_status(&self, execution_id: &str) -> Result<String> {
-        self.get_process_status(execution_id).await
+    async fn set_status_channel(&self, tx: mpsc::UnboundedSender<StatusUpdate>) {
+        let mut status_tx = self.status_tx.write().await;
+        *status_tx = Some(tx);
     }
 }

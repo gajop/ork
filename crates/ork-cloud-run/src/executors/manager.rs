@@ -26,7 +26,9 @@ impl ExecutorManager {
         let executor: Arc<dyn Executor> = match executor_type {
             ExecutorType::Process => self.process_executor.clone(),
             ExecutorType::CloudRun => {
-                Arc::new(CloudRunClient::new(workflow.project.clone(), workflow.region.clone()).await?)
+                let client = Arc::new(CloudRunClient::new(workflow.project.clone(), workflow.region.clone()).await?);
+                client.clone().start_polling_task();
+                client
             }
         };
 

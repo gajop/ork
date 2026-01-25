@@ -4,8 +4,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct OrchestratorConfig {
-    /// Polling interval in seconds
-    pub poll_interval_secs: u64,
+    /// Polling interval in seconds (supports fractional seconds like 0.5)
+    pub poll_interval_secs: f64,
 
     /// Maximum number of tasks to process per batch
     pub max_tasks_per_batch: i64,
@@ -26,7 +26,7 @@ impl Default for OrchestratorConfig {
             poll_interval_secs: std::env::var("POLL_INTERVAL_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(5),
+                .unwrap_or(5.0),
             max_tasks_per_batch: std::env::var("MAX_TASKS_PER_BATCH")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -52,7 +52,7 @@ impl OrchestratorConfig {
     #[allow(dead_code)]
     pub fn optimized() -> Self {
         Self {
-            poll_interval_secs: 2,         // Faster polling
+            poll_interval_secs: 2.0,         // Faster polling
             max_tasks_per_batch: 50,        // Smaller batches
             max_concurrent_dispatches: 5,   // Limited concurrency
             max_concurrent_status_checks: 20, // Moderate status checks
@@ -64,7 +64,7 @@ impl OrchestratorConfig {
     #[allow(dead_code)]
     pub fn high_throughput() -> Self {
         Self {
-            poll_interval_secs: 5,
+            poll_interval_secs: 5.0,
             max_tasks_per_batch: 500,
             max_concurrent_dispatches: 50,
             max_concurrent_status_checks: 100,

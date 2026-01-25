@@ -2,9 +2,14 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
+use tokio::time::{sleep, Duration};
+use tracing::{debug, info, warn};
+use uuid::Uuid;
 
-use super::Executor;
+use super::{Executor, StatusUpdate};
 
 #[derive(Debug, Serialize)]
 pub struct CloudRunJobRequest {
@@ -36,10 +41,20 @@ pub struct CloudRunExecution {
     pub name: String,
 }
 
+#[derive(Debug, Clone)]
+struct ExecutionState {
+    task_id: Uuid,
+    execution_name: String,
+    last_status: String,
+}
+
 pub struct CloudRunClient {
     client: Client,
     project: String,
     region: String,
+    active_executions: Arc<RwLock<HashMap<String, ExecutionState>>>,
+    status_tx: Arc<RwLock<Option<mpsc::UnboundedSender<StatusUpdate>>>>,
+    poll_interval_secs: u64,
 }
 
 impl CloudRunClient {
@@ -48,6 +63,9 @@ impl CloudRunClient {
             client: Client::new(),
             project,
             region,
+            active_executions: Arc::new(RwLock::new(HashMap::new())),
+            status_tx: Arc::new(RwLock::new(None)),
+            poll_interval_secs: 5,
         })
     }
 
@@ -63,6 +81,7 @@ impl CloudRunClient {
 
     pub async fn execute_job(
         &self,
+        task_id: Uuid,
         job_name: &str,
         params: Option<serde_json::Value>,
     ) -> Result<String> {
@@ -137,6 +156,19 @@ impl CloudRunClient {
             execution.name
         );
 
+        // Track this execution
+        {
+            let mut executions = self.active_executions.write().await;
+            executions.insert(
+                execution.name.clone(),
+                ExecutionState {
+                    task_id,
+                    execution_name: execution.name.clone(),
+                    last_status: "running".to_string(),
+                },
+            );
+        }
+
         Ok(execution.name)
     }
 
@@ -176,15 +208,72 @@ impl CloudRunClient {
 
         Ok(status.to_lowercase())
     }
+
+    async fn poll_active_executions(&self) {
+        let executions_to_check = {
+            let executions = self.active_executions.read().await;
+            executions.values().cloned().collect::<Vec<_>>()
+        };
+
+        if executions_to_check.is_empty() {
+            return;
+        }
+
+        for exec_state in executions_to_check {
+            match self.get_execution_status(&exec_state.execution_name).await {
+                Ok(status) => {
+                    let normalized_status = match status.as_str() {
+                        "completed" | "succeeded" => "success",
+                        "failed" | "error" => "failed",
+                        _ => "running",
+                    };
+
+                    if normalized_status != exec_state.last_status {
+                        let mut executions = self.active_executions.write().await;
+
+                        if let Some(state) = executions.get_mut(&exec_state.execution_name) {
+                            state.last_status = normalized_status.to_string();
+                        }
+
+                        let tx_guard = self.status_tx.read().await;
+                        if let Some(tx) = tx_guard.as_ref() {
+                            let _ = tx.send(StatusUpdate {
+                                task_id: exec_state.task_id,
+                                status: normalized_status.to_string(),
+                            });
+                        }
+
+                        if normalized_status == "success" || normalized_status == "failed" {
+                            let mut executions = self.active_executions.write().await;
+                            executions.remove(&exec_state.execution_name);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get status for {}: {}", exec_state.execution_name, e);
+                }
+            }
+        }
+    }
+
+    pub fn start_polling_task(self: Arc<Self>) {
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(self.poll_interval_secs)).await;
+                self.poll_active_executions().await;
+            }
+        });
+    }
 }
 
 #[async_trait]
 impl Executor for CloudRunClient {
-    async fn execute(&self, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
-        self.execute_job(job_name, params).await
+    async fn execute(&self, task_id: Uuid, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
+        self.execute_job(task_id, job_name, params).await
     }
 
-    async fn get_status(&self, execution_id: &str) -> Result<String> {
-        self.get_execution_status(execution_id).await
+    async fn set_status_channel(&self, tx: mpsc::UnboundedSender<StatusUpdate>) {
+        let mut status_tx = self.status_tx.write().await;
+        *status_tx = Some(tx);
     }
 }
