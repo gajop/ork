@@ -1,0 +1,5 @@
+# Latency test - measure scheduling overhead
+# Very short tasks to measure orchestrator latency, not task execution time
+workflows: 50
+tasks_per_workflow: 5
+duration: 0.01

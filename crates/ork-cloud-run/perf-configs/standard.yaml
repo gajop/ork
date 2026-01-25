@@ -1,0 +1,5 @@
+# Standard load test - typical workload
+# Medium load to measure normal operating characteristics
+workflows: 100
+tasks_per_workflow: 5
+duration: 0.1

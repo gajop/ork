@@ -37,24 +37,24 @@ impl Database {
         &self,
         name: &str,
         description: Option<&str>,
-        cloud_run_job_name: &str,
-        cloud_run_region: &str,
-        cloud_run_project: &str,
+        job_name: &str,
+        region: &str,
+        project: &str,
         executor_type: &str,
         task_params: Option<serde_json::Value>,
     ) -> Result<Workflow> {
         let workflow = sqlx::query_as::<_, Workflow>(
             r#"
-            INSERT INTO workflows (name, description, cloud_run_job_name, cloud_run_region, cloud_run_project, executor_type, task_params)
+            INSERT INTO workflows (name, description, job_name, region, project, executor_type, task_params)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             "#,
         )
         .bind(name)
         .bind(description)
-        .bind(cloud_run_job_name)
-        .bind(cloud_run_region)
-        .bind(cloud_run_project)
+        .bind(job_name)
+        .bind(region)
+        .bind(project)
         .bind(executor_type)
         .bind(task_params)
         .fetch_one(&self.pool)
@@ -212,7 +212,7 @@ impl Database {
             r#"
             UPDATE tasks
             SET status = $1,
-                cloud_run_execution_name = COALESCE($2, cloud_run_execution_name),
+                execution_name = COALESCE($2, execution_name),
                 error = $3,
                 dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
                 started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
@@ -284,13 +284,13 @@ impl Database {
                 t.run_id,
                 t.task_index,
                 t.status as task_status,
-                t.cloud_run_execution_name,
+                t.execution_name,
                 t.params,
                 w.id as workflow_id,
                 w.executor_type,
-                w.cloud_run_job_name,
-                w.cloud_run_project,
-                w.cloud_run_region
+                w.job_name,
+                w.project,
+                w.region
             FROM tasks t
             INNER JOIN runs r ON t.run_id = r.id
             INNER JOIN workflows w ON r.workflow_id = w.id
@@ -315,18 +315,18 @@ impl Database {
                 t.run_id,
                 t.task_index,
                 t.status as task_status,
-                t.cloud_run_execution_name,
+                t.execution_name,
                 t.params,
                 w.id as workflow_id,
                 w.executor_type,
-                w.cloud_run_job_name,
-                w.cloud_run_project,
-                w.cloud_run_region
+                w.job_name,
+                w.project,
+                w.region
             FROM tasks t
             INNER JOIN runs r ON t.run_id = r.id
             INNER JOIN workflows w ON r.workflow_id = w.id
             WHERE t.status IN ('dispatched', 'running')
-              AND t.cloud_run_execution_name IS NOT NULL
+              AND t.execution_name IS NOT NULL
             ORDER BY t.created_at ASC
             LIMIT $1
             "#,

@@ -1,17 +1,31 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use super::Executor;
+
+#[derive(Debug, Clone)]
+enum ProcessStatus {
+    Running,
+    Success,
+    Failed,
+}
+
 pub struct ProcessExecutor {
     working_dir: String,
+    process_states: Arc<RwLock<HashMap<String, ProcessStatus>>>,
 }
 
 impl ProcessExecutor {
     pub fn new(working_dir: Option<String>) -> Self {
         Self {
             working_dir: working_dir.unwrap_or_else(|| ".".to_string()),
+            process_states: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -48,11 +62,16 @@ impl ProcessExecutor {
             command_path, env_vars
         );
 
-        // Clone execution_id for the async task
-        let exec_id_clone = execution_id.clone();
+        // Mark as running
+        {
+            let mut states = self.process_states.write().await;
+            states.insert(execution_id.clone(), ProcessStatus::Running);
+        }
 
-        // For now, we'll spawn the process and let it run
-        // In a real implementation, you might want to track the process better
+        // Clone for the async task
+        let exec_id_clone = execution_id.clone();
+        let states_clone = self.process_states.clone();
+
         tokio::spawn(async move {
             let mut cmd = Command::new("sh");
             cmd.arg("-c").arg(&command_path);
@@ -61,30 +80,63 @@ impl ProcessExecutor {
                 cmd.env(key, value);
             }
 
-            match cmd.output() {
+            let status = match cmd.output() {
                 Ok(output) => {
                     if output.status.success() {
                         info!("Process completed successfully: {}", exec_id_clone);
                         debug!("Output: {}", String::from_utf8_lossy(&output.stdout));
+                        ProcessStatus::Success
                     } else {
                         warn!("Process failed: {}", exec_id_clone);
                         warn!("Error: {}", String::from_utf8_lossy(&output.stderr));
+                        ProcessStatus::Failed
                     }
                 }
                 Err(e) => {
                     warn!("Failed to execute process {}: {}", exec_id_clone, e);
+                    ProcessStatus::Failed
                 }
-            }
+            };
+
+            // Update status
+            let mut states = states_clone.write().await;
+            states.insert(exec_id_clone, status);
         });
 
         Ok(execution_id)
     }
 
-    pub async fn get_process_status(&self, _execution_id: &str) -> Result<String> {
-        // For simplicity, we'll just return success immediately
-        // In a real implementation, you would track process PIDs and check their status
-        // For now, simulate quick completion
-        debug!("Checking process status (simulated immediate success)");
-        Ok("success".to_string())
+    pub async fn get_process_status(&self, execution_id: &str) -> Result<String> {
+        let states = self.process_states.read().await;
+
+        match states.get(execution_id) {
+            Some(ProcessStatus::Running) => {
+                debug!("Process {} is still running", execution_id);
+                Ok("running".to_string())
+            }
+            Some(ProcessStatus::Success) => {
+                debug!("Process {} completed successfully", execution_id);
+                Ok("success".to_string())
+            }
+            Some(ProcessStatus::Failed) => {
+                debug!("Process {} failed", execution_id);
+                Ok("failed".to_string())
+            }
+            None => {
+                warn!("Unknown process execution_id: {}", execution_id);
+                Ok("unknown".to_string())
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Executor for ProcessExecutor {
+    async fn execute(&self, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
+        self.execute_process(job_name, params).await
+    }
+
+    async fn get_status(&self, execution_id: &str) -> Result<String> {
+        self.get_process_status(execution_id).await
     }
 }

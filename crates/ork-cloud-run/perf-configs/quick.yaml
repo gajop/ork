@@ -1,0 +1,5 @@
+# Quick smoke test - verify basic functionality
+# Low load, should complete in ~3-5 seconds
+workflows: 10
+tasks_per_workflow: 5
+duration: 0.1

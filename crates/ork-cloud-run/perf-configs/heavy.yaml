@@ -1,0 +1,5 @@
+# Heavy load test - stress test with many concurrent tasks
+# High concurrency to identify bottlenecks and resource limits
+workflows: 1000
+tasks_per_workflow: 10
+duration: 0.05
