@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use serde::Deserialize;
 use sqlx::PgPool;
+use std::collections::VecDeque;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -42,6 +43,16 @@ fn default_db_pool_size() -> u32 {
 struct ResourceStats {
     scheduler_rss_kb: u64,
     scheduler_cpu_percent: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchedulerMetrics {
+    timestamp: u64,
+    process_pending_runs_ms: u128,
+    process_pending_tasks_ms: u128,
+    check_running_tasks_ms: u128,
+    sleep_ms: u128,
+    total_loop_ms: u128,
 }
 
 #[tokio::main]
@@ -122,10 +133,15 @@ async fn main() -> Result<()> {
     println!("  Max concurrent dispatches: {}", config.scheduler.max_concurrent_dispatches);
     println!("  Max concurrent status checks: {}", config.scheduler.max_concurrent_status_checks);
 
+    // Redirect scheduler logs to file so we can read them
+    let scheduler_log_path = format!("/tmp/ork-scheduler-{}.log", std::process::id());
+    let log_file = std::fs::File::create(&scheduler_log_path)?;
+
     let mut scheduler = Command::new("../../target/release/ork-cloud-run")
         .args(["run", "--config", &scheduler_config_path])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .env("RUST_LOG", "info")
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
         .spawn()?;
 
     let scheduler_pid = Pid::from_u32(scheduler.id());
@@ -169,6 +185,7 @@ async fn main() -> Result<()> {
     println!("Monitoring task completion...");
     let total_tasks = config.workflows * config.tasks_per_workflow;
     let mut completed = 0u32;
+    let mut all_metrics: VecDeque<SchedulerMetrics> = VecDeque::new();
 
     while completed < total_tasks {
         sleep(Duration::from_millis(500)).await;
@@ -215,8 +232,37 @@ async fn main() -> Result<()> {
 
         let elapsed = start_time.elapsed().as_secs_f64();
 
-        print!(
-            "\r[{:.1}s] Completed:{}/{} | Pending:{} Dispatched:{} Running:{} | Scheduler: {} KB, {:.1}% CPU   ",
+        // Parse ALL scheduler metrics from log file
+        if let Ok(log_content) = std::fs::read_to_string(&scheduler_log_path) {
+            for line in log_content.lines() {
+                if let Some(json_start) = line.find("SCHEDULER_METRICS: ") {
+                    let json_str = &line[json_start + "SCHEDULER_METRICS: ".len()..];
+                    if let Ok(metrics) = serde_json::from_str::<SchedulerMetrics>(json_str) {
+                        // Only add if we haven't seen this timestamp yet
+                        if all_metrics.is_empty() || all_metrics.back().unwrap().timestamp != metrics.timestamp {
+                            all_metrics.push_back(metrics);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Get the latest metrics
+        let metrics_display = if let Some(latest) = all_metrics.back() {
+            format!(
+                "runs:{}ms tasks:{}ms status:{}ms sleep:{}ms total:{}ms",
+                latest.process_pending_runs_ms,
+                latest.process_pending_tasks_ms,
+                latest.check_running_tasks_ms,
+                latest.sleep_ms,
+                latest.total_loop_ms
+            )
+        } else {
+            "waiting for metrics...".to_string()
+        };
+
+        println!(
+            "[{:.1}s] Completed:{}/{} | Pending:{} Dispatched:{} Running:{} | Scheduler: {} KB, {:.1}% CPU | {}",
             elapsed,
             completed,
             total_tasks,
@@ -224,10 +270,9 @@ async fn main() -> Result<()> {
             dispatched,
             running,
             resource_stats.scheduler_rss_kb,
-            resource_stats.scheduler_cpu_percent
+            resource_stats.scheduler_cpu_percent,
+            metrics_display
         );
-        use std::io::Write;
-        std::io::stdout().flush()?;
     }
 
     let end_time = Instant::now();
@@ -236,6 +281,32 @@ async fn main() -> Result<()> {
     println!();
     println!();
     println!("=== Performance Test Results ===");
+
+    // Analyze scheduler metrics
+    if !all_metrics.is_empty() {
+        let total_runs_ms: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
+        let total_tasks_ms: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
+        let total_status_ms: u128 = all_metrics.iter().map(|m| m.check_running_tasks_ms).sum();
+        let total_sleep_ms: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
+        let total_loop_ms: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
+
+        println!();
+        println!("Scheduler Time Breakdown:");
+        println!("  Total scheduler loops: {}", all_metrics.len());
+        println!("  Time processing runs: {:.2}s ({:.1}%)",
+            total_runs_ms as f64 / 1000.0,
+            (total_runs_ms as f64 / total_loop_ms as f64) * 100.0);
+        println!("  Time processing tasks: {:.2}s ({:.1}%)",
+            total_tasks_ms as f64 / 1000.0,
+            (total_tasks_ms as f64 / total_loop_ms as f64) * 100.0);
+        println!("  Time checking status: {:.2}s ({:.1}%)",
+            total_status_ms as f64 / 1000.0,
+            (total_status_ms as f64 / total_loop_ms as f64) * 100.0);
+        println!("  Time sleeping: {:.2}s ({:.1}%)",
+            total_sleep_ms as f64 / 1000.0,
+            (total_sleep_ms as f64 / total_loop_ms as f64) * 100.0);
+        println!("  Total scheduler time: {:.2}s", total_loop_ms as f64 / 1000.0);
+    }
 
     // Query latency stats
     let latency_stats: (i64, Option<f64>, Option<f64>, Option<f64>) = sqlx::query_as(
@@ -296,6 +367,7 @@ async fn main() -> Result<()> {
     println!("Cleaning up...");
     scheduler.kill()?;
     let _ = std::fs::remove_file(&scheduler_config_path);
+    let _ = std::fs::remove_file(&scheduler_log_path);
 
     Ok(())
 }

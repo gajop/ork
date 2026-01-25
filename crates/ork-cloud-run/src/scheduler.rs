@@ -1,5 +1,6 @@
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
@@ -11,8 +12,9 @@ use crate::db::Database;
 use crate::executors::ExecutorManager;
 use crate::models::{ExecutionStatus, TaskStatus, Workflow};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
+    pub timestamp: u64,
     pub process_pending_runs_ms: u128,
     pub process_pending_tasks_ms: u128,
     pub check_running_tasks_ms: u128,
@@ -75,15 +77,14 @@ impl Scheduler {
             metrics.sleep_ms = start.elapsed().as_millis();
 
             metrics.total_loop_ms = loop_start.elapsed().as_millis();
+            metrics.timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
 
-            info!(
-                "Scheduler loop: {}ms total (runs:{}ms tasks:{}ms status:{}ms sleep:{}ms)",
-                metrics.total_loop_ms,
-                metrics.process_pending_runs_ms,
-                metrics.process_pending_tasks_ms,
-                metrics.check_running_tasks_ms,
-                metrics.sleep_ms
-            );
+            // Output structured JSON metrics for easy parsing
+            let metrics_json = serde_json::to_string(&metrics).unwrap_or_default();
+            info!("SCHEDULER_METRICS: {}", metrics_json);
         }
     }
 
