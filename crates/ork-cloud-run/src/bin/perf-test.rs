@@ -24,19 +24,24 @@ struct PerfConfig {
     scheduler: SchedulerConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 struct SchedulerConfig {
     poll_interval_secs: u64,
     max_tasks_per_batch: i64,
     max_concurrent_dispatches: usize,
     max_concurrent_status_checks: usize,
+    #[serde(default = "default_db_pool_size")]
+    db_pool_size: u32,
+}
+
+fn default_db_pool_size() -> u32 {
+    10
 }
 
 #[derive(Debug)]
 struct ResourceStats {
     scheduler_rss_kb: u64,
     scheduler_cpu_percent: f32,
-    worker_count: usize,
 }
 
 #[tokio::main]
@@ -105,6 +110,11 @@ async fn main() -> Result<()> {
         anyhow::bail!("Failed to create workflow");
     }
 
+    // Write scheduler config to temp file
+    let scheduler_config_path = format!("/tmp/ork-scheduler-{}.yaml", std::process::id());
+    let scheduler_config_yaml = serde_yaml::to_string(&config.scheduler)?;
+    std::fs::write(&scheduler_config_path, scheduler_config_yaml)?;
+
     // Start scheduler in background with config
     println!("Starting scheduler...");
     println!("  Poll interval: {}s", config.scheduler.poll_interval_secs);
@@ -113,11 +123,7 @@ async fn main() -> Result<()> {
     println!("  Max concurrent status checks: {}", config.scheduler.max_concurrent_status_checks);
 
     let mut scheduler = Command::new("../../target/release/ork-cloud-run")
-        .args(["run"])
-        .env("POLL_INTERVAL_SECS", config.scheduler.poll_interval_secs.to_string())
-        .env("MAX_TASKS_PER_BATCH", config.scheduler.max_tasks_per_batch.to_string())
-        .env("MAX_CONCURRENT_DISPATCHES", config.scheduler.max_concurrent_dispatches.to_string())
-        .env("MAX_CONCURRENT_STATUS_CHECKS", config.scheduler.max_concurrent_status_checks.to_string())
+        .args(["run", "--config", &scheduler_config_path])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
@@ -163,44 +169,62 @@ async fn main() -> Result<()> {
     println!("Monitoring task completion...");
     let total_tasks = config.workflows * config.tasks_per_workflow;
     let mut completed = 0u32;
-    let mut max_worker_count = 0usize;
 
     while completed < total_tasks {
         sleep(Duration::from_millis(500)).await;
 
-        // Get task count
-        let row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM tasks WHERE status IN ('success', 'failed')")
-                .fetch_one(&pool)
-                .await?;
-        completed = row.0 as u32;
+        // Get task counts by status
+        let status_counts: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT status, COUNT(*) FROM tasks GROUP BY status"
+        )
+        .fetch_all(&pool)
+        .await?;
+
+        let mut pending = 0i64;
+        let mut dispatched = 0i64;
+        let mut running = 0i64;
+        let mut success = 0i64;
+        let mut failed = 0i64;
+
+        for (status, count) in status_counts {
+            match status.as_str() {
+                "pending" => pending = count,
+                "dispatched" => dispatched = count,
+                "running" => running = count,
+                "success" => success = count,
+                "failed" => failed = count,
+                _ => {}
+            }
+        }
+
+        completed = (success + failed) as u32;
 
         // Get resource stats
         system.refresh_processes(ProcessesToUpdate::Some(&[scheduler_pid]), true);
         let resource_stats = if let Some(process) = system.process(scheduler_pid) {
-            let worker_count = get_child_process_count(scheduler_pid.as_u32());
-            max_worker_count = max_worker_count.max(worker_count);
-
             ResourceStats {
                 scheduler_rss_kb: process.memory() / 1024, // Convert bytes to KB
                 scheduler_cpu_percent: process.cpu_usage(),
-                worker_count,
             }
         } else {
             ResourceStats {
                 scheduler_rss_kb: 0,
                 scheduler_cpu_percent: 0.0,
-                worker_count: 0,
             }
         };
 
+        let elapsed = start_time.elapsed().as_secs_f64();
+
         print!(
-            "\rProgress: {}/{} tasks | Scheduler: {} KB RSS, {:.1}% CPU | Workers: {}   ",
+            "\r[{:.1}s] Completed:{}/{} | Pending:{} Dispatched:{} Running:{} | Scheduler: {} KB, {:.1}% CPU   ",
+            elapsed,
             completed,
             total_tasks,
+            pending,
+            dispatched,
+            running,
             resource_stats.scheduler_rss_kb,
-            resource_stats.scheduler_cpu_percent,
-            resource_stats.worker_count
+            resource_stats.scheduler_cpu_percent
         );
         use std::io::Write;
         std::io::stdout().flush()?;
@@ -266,32 +290,12 @@ async fn main() -> Result<()> {
         "  Scheduler RSS growth: {} KB",
         scheduler_rss.saturating_sub(scheduler_rss_start)
     );
-    println!("  Peak worker count: {}", max_worker_count);
 
     // Cleanup
     println!();
     println!("Cleaning up...");
     scheduler.kill()?;
+    let _ = std::fs::remove_file(&scheduler_config_path);
 
     Ok(())
-}
-
-fn get_child_process_count(parent_pid: u32) -> usize {
-    let output = Command::new("pgrep")
-        .args(["-P", &parent_pid.to_string()])
-        .output();
-
-    match output {
-        Ok(output) => {
-            if output.status.success() {
-                String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| !line.is_empty())
-                    .count()
-            } else {
-                0
-            }
-        }
-        Err(_) => 0,
-    }
 }

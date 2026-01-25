@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -9,6 +10,15 @@ use crate::config::OrchestratorConfig;
 use crate::db::Database;
 use crate::executors::ExecutorManager;
 use crate::models::{ExecutionStatus, TaskStatus, Workflow};
+
+#[derive(Debug, Default)]
+pub struct SchedulerMetrics {
+    pub process_pending_runs_ms: u128,
+    pub process_pending_tasks_ms: u128,
+    pub check_running_tasks_ms: u128,
+    pub sleep_ms: u128,
+    pub total_loop_ms: u128,
+}
 
 pub struct Scheduler {
     db: Arc<Database>,
@@ -39,19 +49,41 @@ impl Scheduler {
         );
 
         loop {
+            let loop_start = Instant::now();
+            let mut metrics = SchedulerMetrics::default();
+
+            let start = Instant::now();
             if let Err(e) = self.process_pending_runs().await {
                 error!("Error processing pending runs: {}", e);
             }
+            metrics.process_pending_runs_ms = start.elapsed().as_millis();
 
+            let start = Instant::now();
             if let Err(e) = self.process_pending_tasks().await {
                 error!("Error processing pending tasks: {}", e);
             }
+            metrics.process_pending_tasks_ms = start.elapsed().as_millis();
 
+            let start = Instant::now();
             if let Err(e) = self.check_running_tasks().await {
                 error!("Error checking running tasks: {}", e);
             }
+            metrics.check_running_tasks_ms = start.elapsed().as_millis();
 
+            let start = Instant::now();
             sleep(Duration::from_secs(self.config.poll_interval_secs)).await;
+            metrics.sleep_ms = start.elapsed().as_millis();
+
+            metrics.total_loop_ms = loop_start.elapsed().as_millis();
+
+            info!(
+                "Scheduler loop: {}ms total (runs:{}ms tasks:{}ms status:{}ms sleep:{}ms)",
+                metrics.total_loop_ms,
+                metrics.process_pending_runs_ms,
+                metrics.process_pending_tasks_ms,
+                metrics.check_running_tasks_ms,
+                metrics.sleep_ms
+            );
         }
     }
 
@@ -100,6 +132,7 @@ impl Scheduler {
     }
 
     async fn process_pending_tasks(&self) -> Result<()> {
+        let query_start = Instant::now();
         // OPTIMIZATION: Single JOIN query instead of N+1 queries
         let tasks = self
             .db
@@ -110,7 +143,8 @@ impl Scheduler {
             return Ok(());
         }
 
-        info!("Processing {} pending tasks", tasks.len());
+        let query_ms = query_start.elapsed().as_millis();
+        info!("Processing {} pending tasks (query: {}ms)", tasks.len(), query_ms);
 
         // Ensure all workflows have registered executors
         let mut workflow_ids = std::collections::HashSet::new();
@@ -130,6 +164,7 @@ impl Scheduler {
         }
 
         // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
+        let dispatch_start = Instant::now();
         let results = stream::iter(tasks)
             .map(|task_with_workflow| {
                 let executor_manager = &self.executor_manager;
@@ -156,23 +191,33 @@ impl Scheduler {
             .buffer_unordered(self.config.max_concurrent_dispatches)
             .collect::<Vec<_>>()
             .await;
+        let dispatch_ms = dispatch_start.elapsed().as_millis();
+        info!("Dispatched {} tasks in {}ms", results.len(), dispatch_ms);
 
-        // Update statuses
-        for (task_id, result) in results {
-            match result {
-                Ok(execution_name) => {
-                    self.db
-                        .update_task_status(task_id, "dispatched", Some(&execution_name), None)
-                        .await?;
+        // Batch update statuses
+        let update_prep_start = Instant::now();
+        let updates: Vec<(Uuid, &str, Option<&str>, Option<String>)> = results
+            .iter()
+            .map(|(task_id, result)| {
+                match result {
+                    Ok(execution_name) => (*task_id, "dispatched", Some(execution_name.as_str()), None),
+                    Err(e) => {
+                        error!("Failed to dispatch task {}: {}", task_id, e);
+                        (*task_id, "failed", None, Some(e.to_string()))
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to dispatch task {}: {}", task_id, e);
-                    self.db
-                        .update_task_status(task_id, "failed", None, Some(&e.to_string()))
-                        .await?;
-                }
-            }
-        }
+            })
+            .collect();
+
+        let updates_ref: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = updates
+            .iter()
+            .map(|(id, status, exec, err)| (*id, *status, *exec, err.as_deref()))
+            .collect();
+
+        let db_update_start = Instant::now();
+        self.db.batch_update_task_status(&updates_ref).await?;
+        let db_update_ms = db_update_start.elapsed().as_millis();
+        info!("Batch updated {} tasks in {}ms", updates_ref.len(), db_update_ms);
 
         Ok(())
     }
@@ -252,19 +297,23 @@ impl Scheduler {
             .collect::<Vec<_>>()
             .await;
 
-        // Update changed statuses
-        for result in results.into_iter().flatten() {
-            let (task_id, run_id, new_status, old_status) = result;
+        // Batch update changed statuses
+        let status_changes: Vec<_> = results
+            .into_iter()
+            .flatten()
+            .filter(|(_, _, new_status, old_status)| new_status != old_status)
+            .collect();
 
-            if new_status != old_status {
-                self.db
-                    .update_task_status(task_id, new_status.as_str(), None, None)
-                    .await?;
-                info!(
-                    "Task {} updated to status: {}",
-                    task_id,
-                    new_status.as_str()
-                );
+        if !status_changes.is_empty() {
+            let updates: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = status_changes
+                .iter()
+                .map(|(task_id, _, new_status, _)| (*task_id, new_status.as_str(), None, None))
+                .collect();
+
+            self.db.batch_update_task_status(&updates).await?;
+
+            for (task_id, run_id, new_status, _) in status_changes {
+                info!("Task {} updated to status: {}", task_id, new_status.as_str());
 
                 // Check run completion for finished tasks
                 if matches!(new_status, TaskStatus::Success | TaskStatus::Failed) {
