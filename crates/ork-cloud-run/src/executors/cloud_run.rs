@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 use tracing::{debug, info};
+
+use super::Executor;
 
 #[derive(Debug, Serialize)]
 pub struct CloudRunJobRequest {
@@ -41,35 +43,22 @@ pub struct CloudRunClient {
 }
 
 impl CloudRunClient {
-    pub fn new(project: String, region: String) -> Self {
-        Self {
+    pub async fn new(project: String, region: String) -> Result<Self> {
+        Ok(Self {
             client: Client::new(),
             project,
             region,
-        }
+        })
     }
 
     async fn get_access_token(&self) -> Result<String> {
-        // Try to get access token using gcloud CLI
-        // For local testing without gcloud, will use mock mode
-
-        // Check if gcloud is available
-        let output = Command::new("gcloud")
-            .args(["auth", "print-access-token"])
-            .output();
-
-        match output {
-            Ok(result) if result.status.success() => {
-                let token = String::from_utf8(result.stdout)?.trim().to_string();
-                debug!("Got access token from gcloud CLI");
-                Ok(token)
-            }
-            _ => {
-                // Fallback to mock mode for local testing
-                debug!("gcloud not available or not authenticated, using mock mode");
-                Ok("mock-token-for-local-testing".to_string())
-            }
-        }
+        let provider = gcp_auth::provider().await
+            .context("Failed to get GCP auth provider. Set GOOGLE_APPLICATION_CREDENTIALS or use workload identity")?;
+        let scopes = &["https://www.googleapis.com/auth/cloud-platform"];
+        let token = provider.token(scopes).await
+            .context("Failed to get access token")?;
+        debug!("Got access token from GCP auth");
+        Ok(token.as_str().to_string())
     }
 
     pub async fn execute_job(
@@ -78,15 +67,6 @@ impl CloudRunClient {
         params: Option<serde_json::Value>,
     ) -> Result<String> {
         let token = self.get_access_token().await?;
-
-        // Check if we're in mock mode
-        if token == "mock-token-for-local-testing" {
-            info!(
-                "Mock mode: Simulating Cloud Run job execution for {}",
-                job_name
-            );
-            return Ok(format!("mock-execution-{}", uuid::Uuid::new_v4()));
-        }
 
         let url = format!(
             "https://{}-run.googleapis.com/v1/namespaces/{}/jobs/{}:run",
@@ -163,13 +143,6 @@ impl CloudRunClient {
     pub async fn get_execution_status(&self, execution_name: &str) -> Result<String> {
         let token = self.get_access_token().await?;
 
-        // Mock mode
-        if token == "mock-token-for-local-testing" {
-            debug!("Mock mode: Simulating execution status check");
-            // Simulate random success/running
-            return Ok("success".to_string());
-        }
-
         let url = format!(
             "https://{}-run.googleapis.com/v1/{}",
             self.region, execution_name
@@ -202,5 +175,16 @@ impl CloudRunClient {
             .unwrap_or("unknown");
 
         Ok(status.to_lowercase())
+    }
+}
+
+#[async_trait]
+impl Executor for CloudRunClient {
+    async fn execute(&self, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
+        self.execute_job(job_name, params).await
+    }
+
+    async fn get_status(&self, execution_id: &str) -> Result<String> {
+        self.get_execution_status(execution_id).await
     }
 }

@@ -1,19 +1,19 @@
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::cloud_run::CloudRunClient;
 use crate::config::OrchestratorConfig;
 use crate::db::Database;
-use crate::models::{ExecutorType, Workflow};
-use crate::process_executor::ProcessExecutor;
+use crate::executors::ExecutorManager;
+use crate::models::{ExecutionStatus, TaskStatus, Workflow};
 
 pub struct Scheduler {
     db: Arc<Database>,
     config: OrchestratorConfig,
+    executor_manager: ExecutorManager,
 }
 
 impl Scheduler {
@@ -22,7 +22,11 @@ impl Scheduler {
     }
 
     pub fn new_with_config(db: Arc<Database>, config: OrchestratorConfig) -> Self {
-        Self { db, config }
+        Self {
+            db,
+            config,
+            executor_manager: ExecutorManager::new(),
+        }
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -62,6 +66,9 @@ impl Scheduler {
                 .bind(run.workflow_id)
                 .fetch_one(self.db.pool())
                 .await?;
+
+            // Register workflow executor if not already done
+            self.executor_manager.register_workflow(&workflow).await?;
 
             // Update run to running
             self.db.update_run_status(run.id, "running", None).await?;
@@ -105,37 +112,46 @@ impl Scheduler {
 
         info!("Processing {} pending tasks", tasks.len());
 
+        // Ensure all workflows have registered executors
+        let mut workflow_ids = std::collections::HashSet::new();
+        for task in &tasks {
+            workflow_ids.insert(task.workflow_id);
+        }
+
+        for workflow_id in workflow_ids {
+            // Check if executor already registered, if not register it
+            if self.executor_manager.get_executor(workflow_id).await.is_err() {
+                let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
+                    .bind(workflow_id)
+                    .fetch_one(self.db.pool())
+                    .await?;
+                self.executor_manager.register_workflow(&workflow).await?;
+            }
+        }
+
         // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
         let results = stream::iter(tasks)
-            .map(|task_with_workflow| async move {
-                let executor_type = ExecutorType::from_str(&task_with_workflow.executor_type)
-                    .unwrap_or(ExecutorType::CloudRun);
+            .map(|task_with_workflow| {
+                let executor_manager = &self.executor_manager;
 
-                let execution_result = match executor_type {
-                    ExecutorType::CloudRun => {
-                        let client = CloudRunClient::new(
-                            task_with_workflow.cloud_run_project.clone(),
-                            task_with_workflow.cloud_run_region.clone(),
-                        );
-                        client
-                            .execute_job(
-                                &task_with_workflow.cloud_run_job_name,
-                                task_with_workflow.params.as_ref().map(|p| p.0.clone()),
-                            )
-                            .await
-                    }
-                    ExecutorType::Process => {
-                        let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
-                        executor
-                            .execute_process(
-                                &task_with_workflow.cloud_run_job_name,
-                                task_with_workflow.params.as_ref().map(|p| p.0.clone()),
-                            )
-                            .await
-                    }
-                };
+                async move {
+                    let execution_result = match executor_manager
+                        .get_executor(task_with_workflow.workflow_id)
+                        .await
+                    {
+                        Ok(executor) => {
+                            executor
+                                .execute(
+                                    &task_with_workflow.job_name,
+                                    task_with_workflow.params.as_ref().map(|p| p.0.clone()),
+                                )
+                                .await
+                        }
+                        Err(e) => Err(e),
+                    };
 
-                (task_with_workflow.task_id, execution_result)
+                    (task_with_workflow.task_id, execution_result)
+                }
             })
             .buffer_unordered(self.config.max_concurrent_dispatches)
             .collect::<Vec<_>>()
@@ -172,43 +188,55 @@ impl Scheduler {
             return Ok(());
         }
 
+        // Ensure all workflows have registered executors
+        let mut workflow_ids = std::collections::HashSet::new();
+        for task in &tasks {
+            workflow_ids.insert(task.workflow_id);
+        }
+
+        for workflow_id in workflow_ids {
+            if self.executor_manager.get_executor(workflow_id).await.is_err() {
+                let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
+                    .bind(workflow_id)
+                    .fetch_one(self.db.pool())
+                    .await?;
+                self.executor_manager.register_workflow(&workflow).await?;
+            }
+        }
+
         // OPTIMIZATION: Process status checks concurrently with limit
         let results = stream::iter(tasks)
-            .map(|task| async move {
-                if let Some(ref execution_name) = task.cloud_run_execution_name {
-                    let executor_type = ExecutorType::from_str(&task.executor_type)
-                        .unwrap_or(ExecutorType::CloudRun);
+            .map(|task| {
+                let executor_manager = &self.executor_manager;
 
-                    let status_result = match executor_type {
-                        ExecutorType::CloudRun => {
-                            let client = CloudRunClient::new(
-                                task.cloud_run_project.clone(),
-                                task.cloud_run_region.clone(),
-                            );
-                            client.get_execution_status(execution_name).await
-                        }
-                        ExecutorType::Process => {
-                            let executor = ProcessExecutor::new(Some("test-scripts".to_string()));
-                            executor.get_process_status(execution_name).await
-                        }
-                    };
+                async move {
+                    if let Some(ref execution_name) = task.execution_name {
+                        let status_result = match executor_manager
+                            .get_executor(task.workflow_id)
+                            .await
+                        {
+                            Ok(executor) => executor.get_status(execution_name).await,
+                            Err(e) => {
+                                warn!("Failed to get executor for task {}: {}", task.task_id, e);
+                                return None;
+                            }
+                        };
 
-                    match status_result {
-                        Ok(status) => {
-                            let new_status = match status.as_str() {
-                                "ready" | "completed" | "success" => "success",
-                                "failed" | "error" => "failed",
-                                _ => "running",
-                            };
-                            Some((task.task_id, task.run_id, new_status, task.task_status))
+                        match status_result {
+                            Ok(status_str) => {
+                                let execution_status = ExecutionStatus::from_str(&status_str);
+                                let new_status = execution_status.to_task_status();
+                                let old_status = task.task_status();
+                                Some((task.task_id, task.run_id, new_status, old_status))
+                            }
+                            Err(e) => {
+                                warn!("Failed to get status for task {}: {}", task.task_id, e);
+                                None
+                            }
                         }
-                        Err(e) => {
-                            warn!("Failed to get status for task {}: {}", task.task_id, e);
-                            None
-                        }
+                    } else {
+                        None
                     }
-                } else {
-                    None
                 }
             })
             .buffer_unordered(self.config.max_concurrent_status_checks)
@@ -221,12 +249,16 @@ impl Scheduler {
 
             if new_status != old_status {
                 self.db
-                    .update_task_status(task_id, new_status, None, None)
+                    .update_task_status(task_id, new_status.as_str(), None, None)
                     .await?;
-                info!("Task {} updated to status: {}", task_id, new_status);
+                info!(
+                    "Task {} updated to status: {}",
+                    task_id,
+                    new_status.as_str()
+                );
 
                 // Check run completion for finished tasks
-                if new_status == "success" || new_status == "failed" {
+                if matches!(new_status, TaskStatus::Success | TaskStatus::Failed) {
                     self.check_run_completion(run_id).await?;
                 }
             }
@@ -240,14 +272,24 @@ impl Scheduler {
 
         let all_complete = tasks
             .iter()
-            .all(|t| t.status == "success" || t.status == "failed");
+            .all(|t| matches!(t.status(), TaskStatus::Success | TaskStatus::Failed));
 
         if all_complete {
-            let any_failed = tasks.iter().any(|t| t.status == "failed");
-            let new_status = if any_failed { "failed" } else { "success" };
+            let any_failed = tasks.iter().any(|t| t.status() == TaskStatus::Failed);
+            let new_status = if any_failed {
+                TaskStatus::Failed
+            } else {
+                TaskStatus::Success
+            };
 
-            self.db.update_run_status(run_id, new_status, None).await?;
-            info!("Run {} completed with status: {}", run_id, new_status);
+            self.db
+                .update_run_status(run_id, new_status.as_str(), None)
+                .await?;
+            info!(
+                "Run {} completed with status: {}",
+                run_id,
+                new_status.as_str()
+            );
         }
 
         Ok(())

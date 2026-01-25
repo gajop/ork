@@ -1,0 +1,5 @@
+# Memory test - measure resource usage with long-running tasks
+# Many concurrent long-running tasks to measure memory consumption
+workflows: 100
+tasks_per_workflow: 20
+duration: 2.0

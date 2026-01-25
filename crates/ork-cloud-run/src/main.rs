@@ -1,8 +1,7 @@
-mod cloud_run;
 mod config;
 mod db;
+mod executors;
 mod models;
-mod process_executor;
 mod scheduler;
 
 use anyhow::Result;
@@ -147,10 +146,10 @@ async fn main() -> Result<()> {
 
             println!("✓ Created workflow: {}", workflow.name);
             println!("  ID: {}", workflow.id);
-            println!("  Job/Script: {}", workflow.cloud_run_job_name);
+            println!("  Job/Script: {}", workflow.job_name);
             println!("  Executor: {}", workflow.executor_type);
-            println!("  Project: {}", workflow.cloud_run_project);
-            println!("  Region: {}", workflow.cloud_run_region);
+            println!("  Project: {}", workflow.project);
+            println!("  Region: {}", workflow.region);
         }
 
         Commands::ListWorkflows => {
@@ -166,7 +165,7 @@ async fn main() -> Result<()> {
                 for wf in workflows {
                     println!(
                         "{:<36} {:<30} {:<30}",
-                        wf.id, wf.name, wf.cloud_run_job_name
+                        wf.id, wf.name, wf.job_name
                     );
                 }
             }
@@ -178,7 +177,7 @@ async fn main() -> Result<()> {
 
             println!("✓ Triggered workflow: {}", workflow_name);
             println!("  Run ID: {}", run.id);
-            println!("  Status: {}", run.status);
+            println!("  Status: {}", run.status_str());
             println!("\nUse 'status {}' to check progress", run.id);
         }
 
@@ -216,7 +215,7 @@ async fn main() -> Result<()> {
 
                     println!(
                         "{:<36} {:<36} {:<12} {:<20} {:<20}",
-                        run.id, run.workflow_id, run.status, started, finished
+                        run.id, run.workflow_id, run.status_str(), started, finished
                     );
                 }
             }
@@ -237,7 +236,7 @@ async fn main() -> Result<()> {
                 println!("{}", "-".repeat(113));
 
                 for task in tasks {
-                    let execution = task.cloud_run_execution_name.as_deref().unwrap_or("-");
+                    let execution = task.execution_name.as_deref().unwrap_or("-");
 
                     let finished = task
                         .finished_at
@@ -246,7 +245,7 @@ async fn main() -> Result<()> {
 
                     println!(
                         "{:<5} {:<36} {:<12} {:<40} {:<20}",
-                        task.task_index, task.id, task.status, execution, finished
+                        task.task_index, task.id, task.status_str(), execution, finished
                     );
                 }
             }

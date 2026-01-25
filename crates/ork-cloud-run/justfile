@@ -62,7 +62,7 @@ db-stop:
 # Initialize database (run migrations)
 [group('database')]
 db-init: db-start
-    cargo run -- init
+    cargo run --bin ork-cloud-run -- init
 
 # Reset database (WARNING: deletes all data)
 [group('database')]
@@ -97,19 +97,19 @@ db-tasks run_id:
 # Run the orchestrator (default config)
 [group('orchestrator')]
 run: db-start
-    cargo run -- run
+    cargo run --bin ork-cloud-run -- run
 
 # Run with optimized config (low-latency, low-memory)
 [group('orchestrator')]
 run-optimized: db-start
     @echo "Running with optimized config (2s poll, 50 batch, 5 concurrent)"
-    RUST_LOG=info cargo run --release -- run
+    RUST_LOG=info cargo run --release --bin ork-cloud-run -- run
 
 # Run with high-throughput config
 [group('orchestrator')]
 run-high-throughput: db-start
     @echo "Running with high-throughput config (5s poll, 500 batch, 50 concurrent)"
-    RUST_LOG=info cargo run --release -- run
+    RUST_LOG=info cargo run --release --bin ork-cloud-run -- run
 
 # ============================================================================
 # Workflows & Runs
@@ -118,12 +118,12 @@ run-high-throughput: db-start
 # List all workflows
 [group('workflows')]
 workflows:
-    cargo run -- list-workflows
+    cargo run --bin ork-cloud-run -- list-workflows
 
 # Create example workflow (process executor)
 [group('workflows')]
 workflow-create-example:
-    @cargo run -- create-workflow \
+    @cargo run --bin ork-cloud-run -- create-workflow \
         --name "example-process" \
         --description "Example workflow with process executor" \
         --job-name "example-task.sh" \
@@ -135,7 +135,7 @@ workflow-create-example:
 # Create Cloud Run workflow
 [group('workflows')]
 workflow-create name job project="my-project" region="us-central1" tasks="3":
-    cargo run -- create-workflow \
+    cargo run --bin ork-cloud-run -- create-workflow \
         --name {{name}} \
         --job-name {{job}} \
         --project {{project}} \
@@ -146,27 +146,27 @@ workflow-create name job project="my-project" region="us-central1" tasks="3":
 # Trigger a workflow
 [group('workflows')]
 trigger workflow:
-    cargo run -- trigger {{workflow}}
+    cargo run --bin ork-cloud-run -- trigger {{workflow}}
 
 # Show all run statuses
 [group('workflows')]
 status:
-    cargo run -- status
+    cargo run --bin ork-cloud-run -- status
 
 # Show status of specific run
 [group('workflows')]
 status-run run_id:
-    cargo run -- status {{run_id}}
+    cargo run --bin ork-cloud-run -- status {{run_id}}
 
 # Show runs for a workflow
 [group('workflows')]
 status-workflow workflow:
-    cargo run -- status --workflow {{workflow}}
+    cargo run --bin ork-cloud-run -- status --workflow {{workflow}}
 
 # Show tasks for a run
 [group('workflows')]
 tasks run_id:
-    cargo run -- tasks {{run_id}}
+    cargo run --bin ork-cloud-run -- tasks {{run_id}}
 
 # ============================================================================
 # Docker
@@ -238,119 +238,71 @@ setup: db-start db-init test-script-create workflow-create-example
 # Create test script for process executor
 [group('setup')]
 test-script-create:
-    #!/usr/bin/env bash
-    mkdir -p test-scripts
-    cat > test-scripts/example-task.sh << 'EOF'
-    #!/bin/bash
-    echo "=========================================="
-    echo "Task Execution Started"
-    echo "=========================================="
-    echo "Task index: ${task_index}"
-    echo "Run ID: ${run_id}"
-    echo "Workflow: ${workflow_name}"
-    echo "Execution ID: ${EXECUTION_ID}"
-    echo ""
-
-    # Simulate some work
-    echo "Processing data..."
-    sleep 2
-
-    echo "Task processing complete!"
-    echo ""
-
-    # Output result as JSON
-    echo "Result:"
-    echo '{"status": "success", "processed_items": 42, "task_index": "'${task_index}'"}'
-
-    echo "=========================================="
-    echo "Task Execution Completed"
-    echo "=========================================="
-    EOF
-    chmod +x test-scripts/example-task.sh
-    @echo "✓ Created test-scripts/example-task.sh"
+    @echo "✓ Test script already exists at test-scripts/example-task.sh"
 
 # Run end-to-end test
 [group('testing')]
 test-e2e: db-start db-init test-script-create workflow-create-example
-    #!/usr/bin/env bash
-    set -e
-
-    # Build binary once
-    echo "Building binary..."
-    cargo build --quiet
-
-    BIN="../../target/debug/ork-cloud-run"
-
-    # Cleanup function
-    cleanup() {
-        echo "Stopping orchestrator..."
-        kill $ORCH_PID 2>/dev/null || true
-    }
-    trap cleanup EXIT
-
-    echo "Starting orchestrator in background..."
-    $BIN run &
-    ORCH_PID=$!
-
-    echo "Waiting for orchestrator to start..."
-    sleep 3
-
-    echo "Triggering workflow..."
-    RUN_ID=$($BIN trigger example-process | grep "Run ID:" | awk '{print $3}')
-    echo "Started run: $RUN_ID"
-
-    echo "Waiting for tasks to complete..."
-    sleep 10
-
-    echo "Checking status..."
-    $BIN status $RUN_ID
-    $BIN tasks $RUN_ID
-
-    cleanup
-
-    echo ""
-    echo "✓ Test complete!"
+    ./scripts/test-e2e.sh
 
 # Run load test (100 workflows)
 [group('testing')]
 test-load: db-start db-init workflow-create-example
+    ./scripts/test-load.sh
+
+# Run performance test with custom parameters
+[group('perf')]
+perf workflows="100" tasks="5" duration="0.1": db-start db-init clean-data
+    cargo run --release --bin perf-test -- --workflows {{workflows}} --tasks-per-workflow {{tasks}} --duration {{duration}}
+
+# Quick smoke test (10 runs, 5 tasks/run)
+[group('perf')]
+perf-quick: db-start db-init clean-data
+    cargo run --release --bin perf-test -- --config quick
+
+# Standard load test (100 runs, 5 tasks/run)
+[group('perf')]
+perf-standard: db-start db-init clean-data
+    cargo run --release --bin perf-test -- --config standard
+
+# Heavy load test (1000 runs, 10 tasks/run)
+[group('perf')]
+perf-heavy: db-start db-init clean-data
+    cargo run --release --bin perf-test -- --config heavy
+
+# Latency test (measure scheduling overhead)
+[group('perf')]
+perf-latency: db-start db-init clean-data
+    cargo run --release --bin perf-test -- --config latency
+
+# Memory test (long-running concurrent tasks)
+[group('perf')]
+perf-memory: db-start db-init clean-data
+    cargo run --release --bin perf-test -- --config memory
+
+# Run all performance tests
+[group('perf')]
+perf-all: db-start db-init
     #!/usr/bin/env bash
     set -e
-
-    # Build binary once to avoid spam
-    echo "Building release binary..."
-    cargo build --release --quiet
-
-    BIN="../../target/release/ork-cloud-run"
-
-    # Cleanup function
-    cleanup() {
+    mkdir -p perf-results
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    for config in perf-configs/*.yaml; do
+        name=$(basename "$config" .yaml)
         echo ""
-        echo "Cleaning up..."
-        kill $ORCH_PID 2>/dev/null || true
-        exit 0
-    }
-    trap cleanup INT TERM EXIT
-
-    echo "Starting orchestrator..."
-    $BIN run &
-    ORCH_PID=$!
-    sleep 2
-
-    echo "Triggering 100 workflows..."
-    for i in {1..100}; do
-        $BIN trigger example-process >/dev/null &
+        echo "========================================"
+        echo "Running performance test: $name"
+        echo "========================================"
+        just clean-data
+        output_file="perf-results/${timestamp}-${name}.txt"
+        cargo run --release --bin perf-test -- --config "$name" | tee "$output_file"
+        echo "Results saved to: $output_file"
     done
-    wait
-
-    echo "Monitoring for 30 seconds..."
-    sleep 30
-
     echo ""
-    $BIN status
-
-    cleanup
-    echo "✓ Load test complete"
+    echo "========================================"
+    echo "All performance tests completed"
+    echo "Results saved in perf-results/${timestamp}-*.txt"
+    echo "========================================"
 
 # ============================================================================
 # Cleanup
@@ -366,6 +318,12 @@ clean:
 [group('cleanup')]
 clean-test:
     rm -rf test-scripts
+
+# Clean database data (keep schema)
+[group('cleanup')]
+clean-data:
+    docker compose exec postgres psql -U postgres -d orchestrator -c "DELETE FROM tasks; DELETE FROM runs;"
+    @echo "✓ Database data cleaned"
 
 # Clean everything (build + test + db)
 [group('cleanup')]
