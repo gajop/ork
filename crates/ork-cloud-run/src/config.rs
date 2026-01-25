@@ -1,5 +1,7 @@
+use serde::Deserialize;
+
 /// Orchestrator configuration for performance tuning
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct OrchestratorConfig {
     /// Polling interval in seconds

@@ -342,7 +342,7 @@ impl Database {
     #[allow(dead_code)]
     pub async fn batch_update_task_status(
         &self,
-        updates: &[(Uuid, &str, Option<&str>)],
+        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
@@ -351,18 +351,21 @@ impl Database {
         // Use transaction for atomicity
         let mut tx = self.pool.begin().await?;
 
-        for (task_id, status, error) in updates {
+        for (task_id, status, execution_name, error) in updates {
             sqlx::query(
                 r#"
                 UPDATE tasks
                 SET status = $1,
-                    error = $2,
+                    execution_name = COALESCE($2, execution_name),
+                    error = $3,
+                    dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
                     started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
                     finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
-                WHERE id = $3
+                WHERE id = $4
                 "#,
             )
             .bind(status)
+            .bind(execution_name)
             .bind(error)
             .bind(task_id)
             .execute(&mut *tx)

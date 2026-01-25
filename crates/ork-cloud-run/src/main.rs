@@ -33,7 +33,11 @@ enum Commands {
     Init,
 
     /// Start the orchestrator scheduler
-    Run,
+    Run {
+        /// Optional config file path (YAML)
+        #[arg(short, long)]
+        config: Option<String>,
+    },
 
     /// Create a new workflow
     CreateWorkflow {
@@ -113,9 +117,15 @@ async fn main() -> Result<()> {
             println!("✓ Database initialized successfully");
         }
 
-        Commands::Run => {
+        Commands::Run { config } => {
             info!("Starting orchestrator...");
-            let scheduler = Scheduler::new(db.clone());
+            let scheduler = if let Some(config_path) = config {
+                let config_content = std::fs::read_to_string(&config_path)?;
+                let orchestrator_config: config::OrchestratorConfig = serde_yaml::from_str(&config_content)?;
+                Scheduler::new_with_config(db.clone(), orchestrator_config)
+            } else {
+                Scheduler::new(db.clone())
+            };
             scheduler.run().await?;
         }
 
