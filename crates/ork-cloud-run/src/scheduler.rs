@@ -125,7 +125,6 @@ impl Scheduler {
             self.db.update_run_status(run.id, "running", None).await?;
 
             // Generate tasks based on workflow configuration
-            // For now, we'll generate a simple sequence of tasks
             let task_count = workflow
                 .task_params
                 .as_ref()
@@ -133,17 +132,8 @@ impl Scheduler {
                 .and_then(|v| v.as_i64())
                 .unwrap_or(3) as i32;
 
-            for i in 0..task_count {
-                let params = serde_json::json!({
-                    "task_index": i,
-                    "run_id": run.id.to_string(),
-                    "workflow_name": workflow.name,
-                });
-
-                self.db.create_task(run.id, i, Some(params)).await?;
-                info!("Created task {}/{} for run {}", i + 1, task_count, run.id);
-            }
-
+            // Batch create all tasks in a single transaction
+            self.db.batch_create_tasks(run.id, task_count, &workflow.name).await?;
             info!("Created {} tasks for run {}", task_count, run.id);
         }
 
