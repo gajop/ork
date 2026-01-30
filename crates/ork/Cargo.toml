@@ -1,10 +1,10 @@
 [package]
-name = "ork-cloud-run"
+name = "ork"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "ork-cloud-run"
+name = "ork"
 path = "src/main.rs"
 
 [[bin]]

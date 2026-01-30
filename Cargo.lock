@@ -1373,21 +1373,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ork-cli"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "ork-core",
- "ork-runner",
- "ork-state",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "ork-cloud-run"
+name = "ork"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1405,6 +1391,20 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "ork-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "ork-core",
+ "ork-runner",
+ "ork-state",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
