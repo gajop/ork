@@ -15,6 +15,19 @@ pub type JsonValue = Json<serde_json::Value>;
 #[cfg(not(feature = "sqlx"))]
 pub type JsonValue = serde_json::Value;
 
+// Helper to access inner JSON value uniformly
+#[cfg(feature = "sqlx")]
+#[inline]
+pub fn json_inner(j: &JsonValue) -> &serde_json::Value {
+    &j.0
+}
+
+#[cfg(not(feature = "sqlx"))]
+#[inline]
+pub fn json_inner(j: &JsonValue) -> &serde_json::Value {
+    j
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Workflow {
