@@ -3,6 +3,11 @@ name = "ork-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+sqlx = ["dep:sqlx"]
+async = ["dep:async-trait", "dep:tokio", "dep:anyhow"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 indexmap = { version = "2", features = ["serde"] }
@@ -10,4 +15,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Optional: SQL database support (for models_v2)
+sqlx = { version = "0.8", optional = true, default-features = false }
+
+# Optional: Async runtime support (for executor trait)
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1", optional = true, features = ["sync"] }
+anyhow = { version = "1.0", optional = true }
