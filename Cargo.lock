@@ -1414,6 +1414,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "futures",
  "indexmap",
  "serde",
  "serde_json",
@@ -1421,6 +1422,23 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ork-executors"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "gcp_auth",
+ "ork-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
