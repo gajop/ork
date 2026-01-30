@@ -10,8 +10,8 @@ use ork_executors::ExecutorManager;
 use ork_state::PostgresDatabase;
 
 #[derive(Parser)]
-#[command(name = "rust-orchestrator")]
-#[command(about = "A simple Rust-based orchestrator for Cloud Run jobs", long_about = None)]
+#[command(name = "ork")]
+#[command(about = "Ork - A high-performance task orchestrator supporting multiple execution backends", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
