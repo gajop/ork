@@ -1,296 +1,272 @@
-mod cli;
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use std::sync::Arc;
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
 
-use std::path::{Path, PathBuf};
+use ork_core::config::OrchestratorConfig;
+use ork_core::scheduler::Scheduler;
+use ork_executors::ExecutorManager;
 
-use chrono::Utc;
-use clap::{Parser, ValueEnum};
-use cli::{Cli, Commands};
-use ork_core::error::OrkResult;
-use ork_core::types::{Run, TaskRun, TaskStatus};
-use ork_core::workflow::Workflow;
-use ork_runner::{LocalScheduler, LocalTaskState, RunSummary};
-use ork_state::{FileStateStore, InMemoryStateStore, LocalObjectStore, ObjectStore};
+#[cfg(feature = "postgres")]
+use ork_state::PostgresDatabase;
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
-pub(crate) enum StateBackend {
-    File,
-    Memory,
+#[derive(Parser)]
+#[command(name = "ork")]
+#[command(about = "Ork - A high-performance task orchestrator supporting multiple execution backends", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    #[arg(
+        long,
+        default_value = "postgres://postgres:postgres@localhost:5432/orchestrator"
+    )]
+    database_url: String,
 }
 
-fn build_state_store(
-    backend: StateBackend,
-    state_base: &Path,
-) -> std::sync::Arc<dyn ork_state::StateStore> {
-    match backend {
-        StateBackend::File => std::sync::Arc::new(FileStateStore::new(state_base)),
-        StateBackend::Memory => std::sync::Arc::new(InMemoryStateStore::default()),
-    }
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize the database with migrations
+    Init,
+
+    /// Start the orchestrator scheduler
+    Run {
+        /// Optional config file path (YAML)
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+
+    /// Create a new workflow
+    CreateWorkflow {
+        /// Workflow name
+        #[arg(short, long)]
+        name: String,
+
+        /// Description
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// Cloud Run job name (or script path for process executor)
+        #[arg(short, long)]
+        job_name: String,
+
+        /// Cloud Run project ID (or 'local' for process executor)
+        #[arg(short, long)]
+        project: String,
+
+        /// Cloud Run region (or 'local' for process executor)
+        #[arg(short, long, default_value = "us-central1")]
+        region: String,
+
+        /// Number of tasks to generate per run
+        #[arg(short, long, default_value = "3")]
+        task_count: i32,
+
+        /// Executor type: cloudrun or process
+        #[arg(short, long, default_value = "cloudrun")]
+        executor: String,
+    },
+
+    /// List all workflows
+    ListWorkflows,
+
+    /// Trigger a workflow run
+    Trigger {
+        /// Workflow name to trigger
+        workflow_name: String,
+    },
+
+    /// Show status of runs
+    Status {
+        /// Specific run ID to show (optional)
+        run_id: Option<String>,
+
+        /// Workflow name to filter by (optional)
+        #[arg(short, long)]
+        workflow: Option<String>,
+    },
+
+    /// Show tasks for a run
+    Tasks {
+        /// Run ID
+        run_id: String,
+    },
 }
 
 #[tokio::main]
-async fn main() -> OrkResult<()> {
+async fn main() -> Result<()> {
+    // Initialize tracing
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+
     let cli = Cli::parse();
 
+    // Connect to database (prefer DATABASE_URL env var if set)
+    let database_url = std::env::var("DATABASE_URL").unwrap_or(cli.database_url);
+
+    #[cfg(feature = "postgres")]
+    let db = Arc::new(PostgresDatabase::new(&database_url).await?);
+
+    #[cfg(not(feature = "postgres"))]
+    let db: Arc<dyn ork_core::database::Database> = {
+        anyhow::bail!("No database backend enabled. Enable 'postgres' or 'sqlite' feature.");
+    };
+
     match cli.command {
-        Commands::Validate { workflow } => {
-            let wf = Workflow::load(&workflow)?;
-            println!(
-                "Workflow `{}` is valid with {} task(s)",
-                wf.name,
-                wf.tasks.len()
-            );
+        Commands::Init => {
+            info!("Running database migrations...");
+            db.run_migrations().await?;
+            println!("✓ Database initialized successfully");
         }
-        Commands::Run {
-            workflow,
-            parallel,
-            run_dir,
-            state_dir,
-            state_backend,
-        } => handle_run(workflow, parallel, run_dir, state_dir, state_backend).await?,
-        Commands::Status {
-            run_id,
-            run_dir,
-            state_dir,
-            limit,
-            show_outputs,
-            state_backend,
-        } => {
-            handle_status(
-                run_id,
-                run_dir,
-                state_dir,
-                limit,
-                show_outputs,
-                state_backend,
-            )
-            .await?
-        }
-    }
 
-    Ok(())
-}
-
-async fn handle_run(
-    workflow: PathBuf,
-    parallel: usize,
-    run_dir: Option<PathBuf>,
-    state_dir: Option<PathBuf>,
-    state_backend: StateBackend,
-) -> OrkResult<()> {
-    let wf = Workflow::load(&workflow)?;
-    let root = workflow
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let compiled = wf.compile(root)?;
-    let base_dir = run_dir.unwrap_or_else(|| PathBuf::from(".ork/runs"));
-    let state_base = state_dir.unwrap_or_else(|| PathBuf::from(".ork/state"));
-    let state = build_state_store(state_backend, &state_base);
-    let object_store = std::sync::Arc::new(LocalObjectStore::new(&base_dir));
-    let scheduler = LocalScheduler::with_state(state, object_store.clone(), &base_dir, parallel);
-    let summary = scheduler.run_compiled(wf.clone(), compiled).await?;
-    let stored = scheduler
-        .task_runs(&summary.run_id)
-        .await
-        .unwrap_or_default();
-    let run_record = scheduler.get_run(&summary.run_id).await.unwrap_or(None);
-    let store = object_store;
-    let mut stored_outputs = Vec::new();
-    for task in &stored {
-        let _spec: Option<ork_core::types::TaskSpec> =
-            store.read_spec(&summary.run_id, &task.task).await.ok();
-        let output = store
-            .read_output(&summary.run_id, &task.task)
-            .await
-            .ok()
-            .flatten();
-        let status_file = store
-            .read_status(&summary.run_id, &task.task)
-            .await
-            .ok()
-            .flatten();
-        stored_outputs.push((task.task.clone(), output, status_file.map(|s| s.status)));
-    }
-    print_summary(&wf.name, &summary, &stored, run_record, stored_outputs);
-    Ok(())
-}
-
-async fn handle_status(
-    run_id: Option<String>,
-    run_dir: Option<PathBuf>,
-    state_dir: Option<PathBuf>,
-    limit: usize,
-    show_outputs: bool,
-    state_backend: StateBackend,
-) -> OrkResult<()> {
-    let base_dir = run_dir.unwrap_or_else(|| PathBuf::from(".ork/runs"));
-    let state_base = state_dir.unwrap_or_else(|| PathBuf::from(".ork/state"));
-    let state = build_state_store(state_backend, &state_base);
-    let object_store = std::sync::Arc::new(LocalObjectStore::new(&base_dir));
-    let scheduler = LocalScheduler::with_state(state, object_store.clone(), &base_dir, 4);
-
-    let mut runs = scheduler.list_runs().await.unwrap_or_default();
-    if runs.is_empty() {
-        println!("No runs found in state store.");
-        return Ok(());
-    }
-
-    if run_id.is_none() {
-        println!("Runs in state store (newest first):");
-        runs.truncate(limit);
-        for run in runs.iter() {
-            println!(
-                "  {} workflow={} status={:?} created_at={} started_at={:?} finished_at={:?} duration={}",
-                run.id,
-                run.workflow,
-                run.status,
-                fmt_ts(Some(run.created_at)),
-                fmt_ts(run.started_at),
-                fmt_ts(run.finished_at),
-                fmt_duration(run.started_at, run.finished_at)
-            );
-        }
-    }
-
-    let chosen = run_id
-        .as_ref()
-        .map(|s| s.as_str())
-        .or_else(|| runs.first().map(|r| r.id.as_str()))
-        .and_then(|id| runs.iter().find(|r| r.id == id).cloned());
-
-    if let Some(run) = chosen {
-        println!("Run {} status: {:?}", run.id, run.status);
-        let tasks = scheduler.task_runs(&run.id).await.unwrap_or_default();
-        let store = object_store;
-        for task in tasks {
-            let status_file = store.read_status(&run.id, &task.task).await.ok().flatten();
-            let output_snippet = if show_outputs {
-                store
-                    .read_output(&run.id, &task.task)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|o| truncate(&o))
+        Commands::Run { config } => {
+            info!("Starting orchestrator...");
+            let executor_manager = Arc::new(ExecutorManager::new());
+            let scheduler = if let Some(config_path) = config {
+                let config_content = std::fs::read_to_string(&config_path)?;
+                let orchestrator_config: OrchestratorConfig = serde_yaml::from_str(&config_content)?;
+                Scheduler::new_with_config(db.clone(), executor_manager, orchestrator_config)
             } else {
-                None
+                Scheduler::new(db.clone(), executor_manager)
             };
-            let duration = fmt_duration(task.started_at, task.finished_at);
-            println!(
-                "  {:<20} status={:?} recorded={:?} started_at={:?} finished_at={:?} duration={}{}",
-                task.task,
-                task.status,
-                status_file.as_ref().map(|s| s.status.clone()),
-                fmt_ts(task.started_at),
-                fmt_ts(task.finished_at),
-                duration,
-                output_snippet
-                    .map(|o| format!(" output={o}"))
-                    .unwrap_or_default()
-            );
+            scheduler.run().await?;
         }
-    } else if let Some(id) = run_id {
-        println!("Run {} not found in state store", id);
-    }
-    Ok(())
-}
 
-fn print_summary(
-    workflow_name: &str,
-    summary: &RunSummary,
-    stored: &[TaskRun],
-    run_record: Option<Run>,
-    stored_outputs: Vec<(String, Option<serde_json::Value>, Option<TaskStatus>)>,
-) {
-    println!(
-        "Workflow `{}` run {} (artifacts: {})",
-        workflow_name,
-        summary.run_id,
-        summary.run_dir.display()
-    );
+        Commands::CreateWorkflow {
+            name,
+            description,
+            job_name,
+            project,
+            region,
+            task_count,
+            executor,
+        } => {
+            let task_params = serde_json::json!({
+                "task_count": task_count,
+            });
 
-    for (task, status) in &summary.statuses {
-        match status {
-            LocalTaskState::Success { attempt, output } => {
+            let workflow = db
+                .create_workflow(
+                    &name,
+                    description.as_deref(),
+                    &job_name,
+                    &region,
+                    &project,
+                    &executor,
+                    Some(task_params),
+                )
+                .await?;
+
+            println!("✓ Created workflow: {}", workflow.name);
+            println!("  ID: {}", workflow.id);
+            println!("  Job/Script: {}", workflow.job_name);
+            println!("  Executor: {}", workflow.executor_type);
+            println!("  Project: {}", workflow.project);
+            println!("  Region: {}", workflow.region);
+        }
+
+        Commands::ListWorkflows => {
+            let workflows = db.list_workflows().await?;
+
+            if workflows.is_empty() {
+                println!("No workflows found");
+            } else {
+                println!("Workflows:");
+                println!("{:<36} {:<30} {:<30}", "ID", "Name", "Cloud Run Job");
+                println!("{}", "-".repeat(96));
+
+                for wf in workflows {
+                    println!(
+                        "{:<36} {:<30} {:<30}",
+                        wf.id, wf.name, wf.job_name
+                    );
+                }
+            }
+        }
+
+        Commands::Trigger { workflow_name } => {
+            let workflow = db.get_workflow(&workflow_name).await?;
+            let run = db.create_run(workflow.id, "manual").await?;
+
+            println!("✓ Triggered workflow: {}", workflow_name);
+            println!("  Run ID: {}", run.id);
+            println!("  Status: {}", run.status_str());
+            println!("\nUse 'status {}' to check progress", run.id);
+        }
+
+        Commands::Status { run_id, workflow } => {
+            let runs = if let Some(rid) = run_id {
+                let run_uuid = rid.parse()?;
+                vec![db.get_run(run_uuid).await?]
+            } else if let Some(wf_name) = workflow {
+                let workflow = db.get_workflow(&wf_name).await?;
+                db.list_runs(Some(workflow.id)).await?
+            } else {
+                db.list_runs(None).await?
+            };
+
+            if runs.is_empty() {
+                println!("No runs found");
+            } else {
+                println!("Runs:");
                 println!(
-                    "  {:<20} ✅  attempt {}{}",
-                    task,
-                    attempt,
-                    output
-                        .as_ref()
-                        .map(|o| format!(" output={}", truncate(o)))
-                        .unwrap_or_default()
+                    "{:<36} {:<36} {:<12} {:<20} {:<20}",
+                    "Run ID", "Workflow ID", "Status", "Started", "Finished"
                 );
+                println!("{}", "-".repeat(124));
+
+                for run in runs {
+                    let started = run
+                        .started_at
+                        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| "-".to_string());
+
+                    let finished = run
+                        .finished_at
+                        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| "-".to_string());
+
+                    println!(
+                        "{:<36} {:<36} {:<12} {:<20} {:<20}",
+                        run.id, run.workflow_id, run.status_str(), started, finished
+                    );
+                }
             }
-            LocalTaskState::Failed { attempt, error } => {
-                println!("  {:<20} ❌  attempt {} error={}", task, attempt, error);
-            }
-            LocalTaskState::Running { attempt } => {
-                println!("  {:<20} ⏳  running (attempt {})", task, attempt);
-            }
-            LocalTaskState::Pending => {
-                println!("  {:<20} ⏳  pending", task);
-            }
-            LocalTaskState::Skipped { reason } => {
-                println!("  {:<20} ➖  skipped ({reason})", task);
+        }
+
+        Commands::Tasks { run_id } => {
+            let run_uuid = run_id.parse()?;
+            let tasks = db.list_tasks(run_uuid).await?;
+
+            if tasks.is_empty() {
+                println!("No tasks found for run {}", run_id);
+            } else {
+                println!("Tasks for run {}:", run_id);
+                println!(
+                    "{:<5} {:<36} {:<12} {:<40} {:<20}",
+                    "Index", "Task ID", "Status", "Execution", "Finished"
+                );
+                println!("{}", "-".repeat(113));
+
+                for task in tasks {
+                    let execution = task.execution_name.as_deref().unwrap_or("-");
+
+                    let finished = task
+                        .finished_at
+                        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| "-".to_string());
+
+                    println!(
+                        "{:<5} {:<36} {:<12} {:<40} {:<20}",
+                        task.task_index, task.id, task.status_str(), execution, finished
+                    );
+                }
             }
         }
     }
 
-    let duration = (summary.finished_at - summary.started_at).as_secs_f32();
-    let timestamp = Utc::now().to_rfc3339();
-    println!("Completed at {} in {:.2}s", timestamp, duration);
-
-    if !stored.is_empty() {
-        println!("State store snapshot:");
-        for task in stored {
-            println!(
-                "  {:<20} status={:?} attempt={}",
-                task.task, task.status, task.attempt
-            );
-        }
-    }
-
-    if let Some(run) = run_record {
-        println!("Persisted run status: {:?}", run.status);
-    }
-
-    if !stored_outputs.is_empty() {
-        println!("Stored task outputs:");
-        for (task, output, status) in stored_outputs {
-            println!(
-                "  {:<20} status={:?} output={}",
-                task,
-                status.unwrap_or(TaskStatus::Pending),
-                output
-                    .map(|o| truncate(&o))
-                    .unwrap_or_else(|| "<none>".into())
-            );
-        }
-    }
-}
-
-fn truncate(value: &serde_json::Value) -> String {
-    let s = value.to_string();
-    if s.len() > 80 {
-        format!("{}...", &s[..80])
-    } else {
-        s
-    }
-}
-
-fn fmt_duration(
-    start: Option<chrono::DateTime<Utc>>,
-    end: Option<chrono::DateTime<Utc>>,
-) -> String {
-    match (start, end) {
-        (Some(s), Some(e)) => {
-            let secs = (e - s).num_milliseconds() as f64 / 1000.0;
-            format!("{:.2}s", secs)
-        }
-        _ => "-".into(),
-    }
-}
-
-fn fmt_ts(ts: Option<chrono::DateTime<Utc>>) -> String {
-    ts.map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| "-".into())
+    Ok(())
 }
