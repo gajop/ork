@@ -5,7 +5,7 @@ set -e
 echo "Building release binary..."
 cargo build --release --quiet
 
-BIN="../../target/release/ork-cloud-run"
+BIN="../../target/release/ork"
 
 # Cleanup function
 cleanup() {

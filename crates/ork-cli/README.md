@@ -1,6 +1,6 @@
-# ork-cloud-run
+# ork-cli
 
-Standalone Rust orchestrator for Cloud Run jobs with PostgreSQL state.
+High-performance task orchestrator with support for multiple execution backends and databases.
 
 ## Features
 

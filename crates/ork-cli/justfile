@@ -62,7 +62,7 @@ db-stop:
 # Initialize database (run migrations)
 [group('database')]
 db-init: db-start
-    cargo run --bin ork-cloud-run -- init
+    cargo run --bin ork -- init
 
 # Reset database (WARNING: deletes all data)
 [group('database')]
@@ -97,19 +97,19 @@ db-tasks run_id:
 # Run the orchestrator (default config)
 [group('orchestrator')]
 run: db-start
-    cargo run --bin ork-cloud-run -- run
+    cargo run --bin ork -- run
 
 # Run with optimized config (low-latency, low-memory)
 [group('orchestrator')]
 run-optimized: db-start
     @echo "Running with optimized config (2s poll, 50 batch, 5 concurrent)"
-    RUST_LOG=info cargo run --release --bin ork-cloud-run -- run
+    RUST_LOG=info cargo run --release --bin ork -- run
 
 # Run with high-throughput config
 [group('orchestrator')]
 run-high-throughput: db-start
     @echo "Running with high-throughput config (5s poll, 500 batch, 50 concurrent)"
-    RUST_LOG=info cargo run --release --bin ork-cloud-run -- run
+    RUST_LOG=info cargo run --release --bin ork -- run
 
 # ============================================================================
 # Workflows & Runs
@@ -118,12 +118,12 @@ run-high-throughput: db-start
 # List all workflows
 [group('workflows')]
 workflows:
-    cargo run --bin ork-cloud-run -- list-workflows
+    cargo run --bin ork -- list-workflows
 
 # Create example workflow (process executor)
 [group('workflows')]
 workflow-create-example:
-    @cargo run --bin ork-cloud-run -- create-workflow \
+    @cargo run --bin ork -- create-workflow \
         --name "example-process" \
         --description "Example workflow with process executor" \
         --job-name "example-task.sh" \
@@ -135,7 +135,7 @@ workflow-create-example:
 # Create Cloud Run workflow
 [group('workflows')]
 workflow-create name job project="my-project" region="us-central1" tasks="3":
-    cargo run --bin ork-cloud-run -- create-workflow \
+    cargo run --bin ork -- create-workflow \
         --name {{name}} \
         --job-name {{job}} \
         --project {{project}} \
@@ -146,27 +146,27 @@ workflow-create name job project="my-project" region="us-central1" tasks="3":
 # Trigger a workflow
 [group('workflows')]
 trigger workflow:
-    cargo run --bin ork-cloud-run -- trigger {{workflow}}
+    cargo run --bin ork -- trigger {{workflow}}
 
 # Show all run statuses
 [group('workflows')]
 status:
-    cargo run --bin ork-cloud-run -- status
+    cargo run --bin ork -- status
 
 # Show status of specific run
 [group('workflows')]
 status-run run_id:
-    cargo run --bin ork-cloud-run -- status {{run_id}}
+    cargo run --bin ork -- status {{run_id}}
 
 # Show runs for a workflow
 [group('workflows')]
 status-workflow workflow:
-    cargo run --bin ork-cloud-run -- status --workflow {{workflow}}
+    cargo run --bin ork -- status --workflow {{workflow}}
 
 # Show tasks for a run
 [group('workflows')]
 tasks run_id:
-    cargo run --bin ork-cloud-run -- tasks {{run_id}}
+    cargo run --bin ork -- tasks {{run_id}}
 
 # ============================================================================
 # Docker
