@@ -1,15 +1,17 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
+use ork_core::database::Database as DatabaseTrait;
+use ork_core::models_v2::{Run, Task, TaskWithWorkflow, Workflow};
 
-pub struct Database {
+pub struct PostgresDatabase {
     pool: PgPool,
 }
 
-impl Database {
+impl PostgresDatabase {
     pub async fn new(database_url: &str) -> Result<Self> {
         Self::new_with_pool_size(database_url, 10).await
     }
@@ -357,5 +359,161 @@ impl Database {
 
         tx.commit().await?;
         Ok(())
+    }
+
+    // Scheduler-specific methods
+    pub async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+        let workflows = sqlx::query_as::<_, Workflow>(
+            "SELECT * FROM workflows WHERE id = ANY($1)"
+        )
+        .bind(workflow_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(workflows)
+    }
+
+    pub async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
+        let workflow = sqlx::query_as::<_, Workflow>(
+            "SELECT * FROM workflows WHERE id = $1"
+        )
+        .bind(workflow_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(workflow)
+    }
+
+    pub async fn get_task_run_id(&self, task_id: Uuid) -> Result<Uuid> {
+        let (run_id,): (Uuid,) = sqlx::query_as(
+            "SELECT run_id FROM tasks WHERE id = $1"
+        )
+        .bind(task_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(run_id)
+    }
+
+    pub async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
+        let stats: (i64, i64, i64) = sqlx::query_as(
+            r#"
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status IN ('success', 'failed')) as completed,
+                COUNT(*) FILTER (WHERE status = 'failed') as failed
+            FROM tasks
+            WHERE run_id = $1
+            "#
+        )
+        .bind(run_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(stats)
+    }
+}
+
+// Implement the Database trait from ork-core
+#[async_trait]
+impl DatabaseTrait for PostgresDatabase {
+    async fn create_workflow(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        job_name: &str,
+        region: &str,
+        project: &str,
+        executor_type: &str,
+        task_params: Option<serde_json::Value>,
+    ) -> Result<Workflow> {
+        PostgresDatabase::create_workflow(self, name, description, job_name, region, project, executor_type, task_params).await
+    }
+
+    async fn get_workflow(&self, name: &str) -> Result<Workflow> {
+        PostgresDatabase::get_workflow(self, name).await
+    }
+
+    async fn list_workflows(&self) -> Result<Vec<Workflow>> {
+        PostgresDatabase::list_workflows(self).await
+    }
+
+    async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> Result<Run> {
+        PostgresDatabase::create_run(self, workflow_id, triggered_by).await
+    }
+
+    async fn update_run_status(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        PostgresDatabase::update_run_status(self, run_id, status, error).await
+    }
+
+    async fn get_run(&self, run_id: Uuid) -> Result<Run> {
+        PostgresDatabase::get_run(self, run_id).await
+    }
+
+    async fn list_runs(&self, workflow_id: Option<Uuid>) -> Result<Vec<Run>> {
+        PostgresDatabase::list_runs(self, workflow_id).await
+    }
+
+    async fn get_pending_runs(&self) -> Result<Vec<Run>> {
+        PostgresDatabase::get_pending_runs(self).await
+    }
+
+    async fn batch_create_tasks(
+        &self,
+        run_id: Uuid,
+        task_count: i32,
+        workflow_name: &str,
+    ) -> Result<()> {
+        PostgresDatabase::batch_create_tasks(self, run_id, task_count, workflow_name).await
+    }
+
+    async fn update_task_status(
+        &self,
+        task_id: Uuid,
+        status: &str,
+        execution_name: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        PostgresDatabase::update_task_status(self, task_id, status, execution_name, error).await
+    }
+
+    async fn batch_update_task_status(
+        &self,
+        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+    ) -> Result<()> {
+        PostgresDatabase::batch_update_task_status(self, updates).await
+    }
+
+    async fn list_tasks(&self, run_id: Uuid) -> Result<Vec<Task>> {
+        PostgresDatabase::list_tasks(self, run_id).await
+    }
+
+    async fn get_pending_tasks(&self) -> Result<Vec<Task>> {
+        PostgresDatabase::get_pending_tasks(self).await
+    }
+
+    async fn get_running_tasks(&self) -> Result<Vec<Task>> {
+        PostgresDatabase::get_running_tasks(self).await
+    }
+
+    async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
+        PostgresDatabase::get_pending_tasks_with_workflow(self, limit).await
+    }
+
+    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+        PostgresDatabase::get_workflows_by_ids(self, workflow_ids).await
+    }
+
+    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
+        PostgresDatabase::get_workflow_by_id(self, workflow_id).await
+    }
+
+    async fn get_task_run_id(&self, task_id: Uuid) -> Result<Uuid> {
+        PostgresDatabase::get_task_run_id(self, task_id).await
+    }
+
+    async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
+        PostgresDatabase::get_run_task_stats(self, run_id).await
     }
 }

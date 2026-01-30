@@ -3,6 +3,11 @@ name = "ork-state"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+postgres = ["dep:sqlx", "ork-core/sqlx", "ork-core/async"]
+sqlite = ["dep:sqlx", "ork-core/sqlx", "ork-core/async"]
+
 [dependencies]
 async-trait = "0.1"
 tokio = { version = "1", features = ["fs", "sync"] }
@@ -10,3 +15,8 @@ serde_json = "1"
 ork-core = { path = "../ork-core" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 fs2 = "0.4"
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1.0"
+
+# Optional: Database backends
+sqlx = { version = "0.8", optional = true, features = ["runtime-tokio", "tls-rustls", "postgres", "sqlite", "macros", "migrate", "uuid", "chrono", "json"] }

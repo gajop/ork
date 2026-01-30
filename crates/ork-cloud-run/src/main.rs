@@ -1,17 +1,13 @@
-mod config;
-mod db;
-mod executors;
-mod models;
-mod scheduler;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use crate::db::Database;
-use crate::scheduler::Scheduler;
+use ork_core::config::OrchestratorConfig;
+use ork_core::scheduler::Scheduler;
+use ork_executors::ExecutorManager;
+use ork_state::PostgresDatabase;
 
 #[derive(Parser)]
 #[command(name = "rust-orchestrator")]
@@ -108,7 +104,7 @@ async fn main() -> Result<()> {
 
     // Connect to database (prefer DATABASE_URL env var if set)
     let database_url = std::env::var("DATABASE_URL").unwrap_or(cli.database_url);
-    let db = Arc::new(Database::new(&database_url).await?);
+    let db = Arc::new(PostgresDatabase::new(&database_url).await?);
 
     match cli.command {
         Commands::Init => {
@@ -119,12 +115,13 @@ async fn main() -> Result<()> {
 
         Commands::Run { config } => {
             info!("Starting orchestrator...");
+            let executor_manager = Arc::new(ExecutorManager::new());
             let scheduler = if let Some(config_path) = config {
                 let config_content = std::fs::read_to_string(&config_path)?;
-                let orchestrator_config: config::OrchestratorConfig = serde_yaml::from_str(&config_content)?;
-                Scheduler::new_with_config(db.clone(), orchestrator_config)
+                let orchestrator_config: OrchestratorConfig = serde_yaml::from_str(&config_content)?;
+                Scheduler::new_with_config(db.clone(), executor_manager, orchestrator_config)
             } else {
-                Scheduler::new(db.clone())
+                Scheduler::new(db.clone(), executor_manager)
             };
             scheduler.run().await?;
         }

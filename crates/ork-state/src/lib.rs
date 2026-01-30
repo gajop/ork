@@ -2,9 +2,15 @@ mod file;
 mod memory;
 pub mod object_store;
 
+#[cfg(feature = "postgres")]
+pub mod postgres;
+
 pub use file::FileStateStore;
 pub use memory::InMemoryStateStore;
 pub use object_store::{LocalObjectStore, ObjectStore};
+
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresDatabase;
 
 use async_trait::async_trait;
 use ork_core::error::OrkResult;
