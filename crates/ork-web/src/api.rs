@@ -36,9 +36,9 @@ impl ApiServer {
                 "/api/runs",
                 get(list_runs).post(axum::routing::post(start_run)),
             )
-            .route("/api/runs/:id", get(run_detail))
+            .route("/api/runs/{id}", get(run_detail))
             .route("/api/workflows", get(list_workflows))
-            .route("/api/workflows/:name", get(workflow_detail))
+            .route("/api/workflows/{name}", get(workflow_detail))
             .with_state(self)
             .layer(cors);
 

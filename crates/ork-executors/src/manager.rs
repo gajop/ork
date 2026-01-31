@@ -26,7 +26,9 @@ impl ExecutorManager {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "process")]
-            process_executor: Arc::new(ProcessExecutor::new(Some("test-scripts".to_string()))),
+            process_executor: Arc::new(ProcessExecutor::new(Some(
+                "crates/ork-cli".to_string(),
+            ))),
             #[cfg(feature = "cloudrun")]
             cloudrun_clients: Arc::new(RwLock::new(HashMap::new())),
         }

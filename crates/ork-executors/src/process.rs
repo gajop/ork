@@ -99,6 +99,7 @@ impl ProcessExecutor {
                 let command_path = resolve_command_path(&working_dir, &command);
                 let mut shell_cmd = Command::new("sh");
                 shell_cmd.arg("-c").arg(&command_path);
+                shell_cmd.current_dir(&working_dir);
                 shell_cmd
             };
 
@@ -282,14 +283,14 @@ fn build_env_vars(
 
 fn resolve_command_path(working_dir: &str, command: &str) -> String {
     let command_path = Path::new(command);
-    if command_path.is_absolute()
-        || command.contains('/')
-        || command.chars().any(|c| c.is_whitespace())
-    {
-        command.to_string()
-    } else {
-        format!("{}/{}", working_dir, command)
+    if command_path.is_absolute() || command.chars().any(|c| c.is_whitespace()) {
+        return command.to_string();
     }
+
+    Path::new(working_dir)
+        .join(command_path)
+        .to_string_lossy()
+        .to_string()
 }
 
 fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> Command {
