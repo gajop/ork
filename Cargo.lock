@@ -1453,6 +1453,7 @@ dependencies = [
  "chrono",
  "fs2",
  "ork-core",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",

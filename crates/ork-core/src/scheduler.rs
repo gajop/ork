@@ -1,34 +1,35 @@
-#[cfg(feature = "async")]
+
 use anyhow::Result;
-#[cfg(feature = "async")]
+
 use futures::stream::{self, StreamExt};
-#[cfg(feature = "async")]
+
 use serde::Serialize;
-#[cfg(feature = "async")]
+
 use std::collections::{HashMap, HashSet};
-#[cfg(feature = "async")]
+
 use std::sync::Arc;
-#[cfg(feature = "async")]
+
 use std::time::Instant;
-#[cfg(feature = "async")]
+
 use tokio::sync::mpsc;
-#[cfg(feature = "async")]
+
 use tokio::time::{Duration, interval};
-#[cfg(feature = "async")]
+
 use tracing::{error, info};
-#[cfg(feature = "async")]
+
 use uuid::Uuid;
 
-#[cfg(feature = "async")]
+
 use crate::config::OrchestratorConfig;
-#[cfg(feature = "async")]
+
 use crate::database::Database;
-#[cfg(feature = "async")]
+
 use crate::executor::StatusUpdate;
-#[cfg(feature = "async")]
+
 use crate::executor_manager::ExecutorManager;
-#[cfg(feature = "async")]
-use crate::models_v2::{json_inner, TaskStatus, Workflow};
+
+use crate::models::{json_inner, TaskStatus, Workflow};
+
 
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
@@ -41,7 +42,7 @@ pub struct SchedulerMetrics {
     pub total_loop_ms: u128,
 }
 
-#[cfg(feature = "async")]
+
 pub struct Scheduler<D: Database + 'static, E: ExecutorManager + 'static> {
     db: Arc<D>,
     config: OrchestratorConfig,
@@ -50,7 +51,7 @@ pub struct Scheduler<D: Database + 'static, E: ExecutorManager + 'static> {
     status_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<StatusUpdate>>>,
 }
 
-#[cfg(feature = "async")]
+
 impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     pub fn new(db: Arc<D>, executor_manager: Arc<E>) -> Self {
         Self::new_with_config(db, executor_manager, OrchestratorConfig::default())

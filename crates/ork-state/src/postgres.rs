@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use ork_core::database::Database as DatabaseTrait;
-use ork_core::models_v2::{Run, Task, TaskWithWorkflow, Workflow};
+use ork_core::models::{Run, Task, TaskWithWorkflow, Workflow};
 
 pub struct PostgresDatabase {
     pool: PgPool,

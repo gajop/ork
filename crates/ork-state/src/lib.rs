@@ -1,13 +1,21 @@
+// Legacy state stores (to be deprecated - use Database trait instead)
 mod file;
 mod memory;
 pub mod object_store;
 
-#[cfg(feature = "postgres")]
-pub mod postgres;
-
 pub use file::FileStateStore;
 pub use memory::InMemoryStateStore;
 pub use object_store::{LocalObjectStore, ObjectStore};
+
+// Database trait implementations
+#[cfg(feature = "file")]
+pub mod file_database;
+
+#[cfg(feature = "postgres")]
+pub mod postgres;
+
+#[cfg(feature = "file")]
+pub use file_database::FileDatabase;
 
 #[cfg(feature = "postgres")]
 pub use postgres::PostgresDatabase;

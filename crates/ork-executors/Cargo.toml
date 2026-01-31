@@ -13,7 +13,7 @@ fargate = []  # Future
 lambda = []   # Future
 
 [dependencies]
-ork-core = { path = "../ork-core", features = ["async"] }
+ork-core = { path = "../ork-core" }
 
 # Core async dependencies
 tokio = { version = "1", features = ["process", "sync", "time", "fs", "rt", "macros"] }
