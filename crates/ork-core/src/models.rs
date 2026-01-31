@@ -1,4 +1,4 @@
-// Optimized models from ork-cloud-run with event-driven architecture support
+// Database-backed orchestration models with event-driven architecture support
 // These models include rich metadata for orchestration (timestamps, execution tracking, etc.)
 
 use chrono::{DateTime, Utc};

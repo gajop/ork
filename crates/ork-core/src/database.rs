@@ -3,17 +3,17 @@
 
 use uuid::Uuid;
 
-#[cfg(feature = "async")]
+
 use async_trait::async_trait;
 
-#[cfg(feature = "async")]
-use crate::models_v2::{Run, Task, TaskWithWorkflow, Workflow};
+
+use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
 
 /// Database interface for orchestration state management
 ///
 /// This trait abstracts over different database backends (Postgres, SQLite, etc.)
 /// All operations are transactional where appropriate.
-#[cfg(feature = "async")]
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // Workflow operations

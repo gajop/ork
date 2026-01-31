@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use ork_core::executor::Executor;
 use ork_core::executor_manager::ExecutorManager as ExecutorManagerTrait;
-use ork_core::models_v2::{ExecutorType, Workflow};
+use ork_core::models::{ExecutorType, Workflow};
 
 #[cfg(feature = "process")]
 use crate::process::ProcessExecutor;

@@ -1,18 +1,12 @@
 // Event-driven executor trait with channel-based status updates
 // This replaces polling with push-based notifications for better performance
 
-#[cfg(feature = "async")]
 use uuid::Uuid;
-
-#[cfg(feature = "async")]
 use async_trait::async_trait;
-
-#[cfg(feature = "async")]
 use tokio::sync::mpsc;
 
 /// Status update event from executor to scheduler
 #[derive(Debug, Clone)]
-#[cfg(feature = "async")]
 pub struct StatusUpdate {
     pub task_id: Uuid,
     pub status: String,
@@ -23,7 +17,6 @@ pub struct StatusUpdate {
 /// 1. Dispatching tasks to workers (local processes, Cloud Run, Fargate, etc.)
 /// 2. Tracking execution state
 /// 3. Pushing status updates via channels (event-driven, not polling)
-#[cfg(feature = "async")]
 #[async_trait]
 pub trait Executor: Send + Sync {
     /// Execute a task and return the execution identifier

@@ -21,8 +21,8 @@ process = ["ork-executors/process"]
 cloudrun = ["ork-executors/cloudrun"]
 
 [dependencies]
-# V2 architecture
-ork-core = { path = "../ork-core", features = ["async", "sqlx"] }
+# Core orchestration
+ork-core = { path = "../ork-core", features = ["sqlx"] }
 ork-state = { path = "../ork-state" }
 ork-executors = { path = "../ork-executors" }
 
@@ -46,5 +46,5 @@ sysinfo = "0.33"
 # For perf-test binary
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 
-# Old v1 runner (to be deprecated)
+# Legacy runner (to be deprecated)
 ork-runner = { path = "../ork-runner" }

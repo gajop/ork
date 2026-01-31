@@ -1,17 +1,11 @@
 # ork-cli
 
-High-performance task orchestrator with support for multiple execution backends and databases.
-
-## Features
-
-- **Dual executors**: Cloud Run jobs or local processes
-- **Low latency**: Eliminates N+1 queries, bounded concurrency
-- **Low memory**: Batch limits, connection pooling, streaming
+The `ork` binary - a high-performance task orchestrator CLI.
 
 ## Quick Start
 
 ```bash
-# Setup
+# Setup database
 just setup
 
 # Run orchestrator
@@ -24,68 +18,52 @@ just trigger example-process
 just status
 ```
 
-## Commands
+## CLI Commands
+
+```bash
+# Workflows
+ork create-workflow --name <name> --job-name <job> --executor <cloudrun|process>
+ork list-workflows
+ork trigger <workflow-name>
+
+# Runs & Tasks
+ork status [run-id]
+ork tasks <run-id>
+
+# Database
+ork init
+ork run  # Start scheduler
+```
+
+## Development
 
 ```bash
 just --list              # Show all commands
 just setup               # First-time setup
 just run                 # Start orchestrator
-just run-optimized       # Low-latency mode
 just trigger <workflow>  # Trigger workflow
 just status              # View runs
 just test-load           # Load test (100 workflows)
+
+# Performance testing
+just perf-quick          # Quick smoke test
+just perf-standard       # Standard load test
+just perf-all            # Run all perf tests
 ```
 
-## CLI
-
-```bash
-# Workflows
-cargo run -- create-workflow --name <name> --job-name <job> --project <project> --executor <cloudrun|process>
-cargo run -- list-workflows
-cargo run -- trigger <workflow-name>
-
-# Runs & Tasks
-cargo run -- status [run-id]
-cargo run -- tasks <run-id>
-
-# Database
-cargo run -- init
-```
+See [../../docs/performance.md](../../docs/performance.md) for performance testing details.
 
 ## Configuration
 
-Set via environment:
+Environment variables:
 - `DATABASE_URL` - Postgres connection (default: localhost:5432)
 - `RUST_LOG` - Log level (info, debug)
 
-## Performance
+## Architecture
 
-Key decisions:
-1. **JOIN queries** - Fetch task+workflow in one query (not N+1)
-2. **Bounded concurrency** - `buffer_unordered(N)` prevents memory explosion
-3. **Batch limits** - Process max N tasks per poll
-4. **Connection pooling** - Reuse DB connections
-5. **Strategic indexes** - Composite indexes on hot paths
+- **Database-backed**: PostgreSQL or SQLite for state
+- **Event-driven**: Channel-based status updates from executors
+- **Optimized**: JOIN queries, bounded concurrency, connection pooling
+- **Multiple executors**: Process (local), Cloud Run (serverless)
 
-See [PERFORMANCE.md](PERFORMANCE.md) for details.
-
-## Docker
-
-```bash
-docker compose up -d     # Start postgres + orchestrator
-docker compose exec orchestrator /app/rust-orchestrator <command>
-```
-
-## Project Structure
-
-```
-src/
-  main.rs              # CLI
-  scheduler.rs         # Polling loop
-  db.rs               # Database queries
-  models.rs           # Data types
-  cloud_run.rs        # Cloud Run executor
-  process_executor.rs # Process executor
-  config.rs           # Performance tuning
-migrations/           # Database schema
-```
+See [../../docs/dev/architecture.md](../../docs/dev/architecture.md) for details.
