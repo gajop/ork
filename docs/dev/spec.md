@@ -1,5 +1,3 @@
-Status: Pending Review
-
 # Technical Specification
 
 ## State Machines
@@ -7,312 +5,250 @@ Status: Pending Review
 ### Run Lifecycle
 
 ```
-[*] --> pending: created
-pending --> running: scheduler picks up
-running --> success: all tasks succeeded
-running --> failed: any task failed (no retries left)
-running --> cancelled: user cancelled
+[*] --> pending: User triggers workflow
+pending --> running: Scheduler creates tasks
+running --> success: All tasks succeeded
+running --> failed: Any task failed
+running --> cancelled: User cancelled (future)
 success --> [*]
 failed --> [*]
 cancelled --> [*]
 ```
 
+**State transitions:**
+- `pending` → `running`: Scheduler processes pending run, creates tasks, updates status
+- `running` → `success`: All tasks complete with status=success
+- `running` → `failed`: Any task has status=failed
+
 ### Task Lifecycle
 
 ```
-[*] --> pending: run created
-pending --> dispatched: scheduler writes spec + creates job
-dispatched --> running: worker starts, writes status
-running --> success: exit 0
-running --> failed: exit non-zero / timeout / heartbeat stale
-failed --> pending: retry (if attempts < max)
-failed --> [*]: no retries left
-pending --> skipped: upstream failed
+[*] --> pending: Run enters running state
+pending --> dispatched: Scheduler dispatches to executor
+dispatched --> running: Executor reports task started
+running --> success: Task completes successfully
+running --> failed: Task exits non-zero or errors
 success --> [*]
-skipped --> [*]
+failed --> [*]
 ```
+
+**State transitions:**
+- `pending` → `dispatched`: Scheduler calls executor.execute(), updates DB
+- `dispatched` → `running`: Executor sends StatusUpdate{status: "running"} via channel
+- `running` → `success`/`failed`: Executor sends StatusUpdate{status: "success"/"failed"} via channel
+
+**No retries:** Tasks fail permanently (no retry logic implemented yet)
 
 ## Scheduler Algorithm
 
-### Main Loop
+### Event-Driven Main Loop
 
-```
-scheduler_main():
-    while true:
-        acquire_lease_or_exit()
-        
-        check_cron_schedules()      # every 60s
-        dispatch_pending_tasks()    # every 5s
-        monitor_running_tasks()     # every 10s
-        
-        sleep(1s)
-```
+```rust
+async fn run(&self) -> Result<()> {
+    let mut status_rx = self.status_rx.lock().await;
+    let mut poll_interval = interval(Duration::from_secs_f64(config.poll_interval_secs));
 
-### Cron Check
+    loop {
+        // Process pending runs
+        let runs = db.get_pending_runs().await?;
+        for run in runs {
+            db.batch_create_tasks(run.id, task_count).await?;
+            db.update_run_status(run.id, "running").await?;
+        }
 
-```
-check_cron_schedules():
-    schedules = query schedules where next_run <= now() and enabled = true
-    
-    for schedule in schedules:
-        create_run(schedule.workflow_id)
-        schedule.next_run = compute_next(schedule.cron_expr)
-        update schedule
-```
+        // Process pending tasks (batch)
+        let tasks = db.get_pending_tasks_with_workflow(max_batch).await?;
+        let results = stream::iter(tasks)
+            .map(|task| executor.execute(task.task_id, task.job_name, task.params))
+            .buffer_unordered(max_concurrent)
+            .collect().await;
+        db.batch_update_task_status(&results).await?;
 
-### Task Dispatch
+        // Process status updates from executors (event-driven)
+        let mut updates = Vec::new();
+        while let Ok(update) = status_rx.try_recv() {
+            updates.push(update);
+        }
+        if !updates.is_empty() {
+            db.batch_update_task_status(&updates).await?;
+            // Check if any runs completed
+            for run_id in affected_runs {
+                check_run_completion(run_id).await?;
+            }
+        }
 
-```
-dispatch_pending_tasks():
-    for run in query runs where status = 'running':
-        # Find tasks ready to run (deps satisfied)
-        ready_tasks = find_ready_tasks(run)
-        
-        for task in ready_tasks:
-            # Atomic acquire
-            acquired = try_acquire_task(task)
-            
-            if acquired:
-                write_spec_to_object_store(task)
-                create_worker_job(task)
-                task.status = 'dispatched'
-                update task
-
-find_ready_tasks(run):
-    pending = query tasks where run_id = run.id and status = 'pending'
-    
-    ready = []
-    for task in pending:
-        deps_satisfied = all upstream tasks have status = 'success'
-        if deps_satisfied:
-            ready.append(task)
-    
-    return ready
+        // Wait for next poll or status update
+        let had_work = runs > 0 || tasks > 0;
+        if !had_work {
+            tokio::select! {
+                _ = poll_interval.tick() => {},
+                Some(update) = status_rx.recv() => {
+                    process_status_updates(vec![update]).await?;
+                }
+            }
+        }
+    }
+}
 ```
 
-### Task Monitoring
+### Key Optimizations
 
-```
-monitor_running_tasks():
-    tasks = query tasks where status in ('dispatched', 'running')
-    
-    for task in tasks:
-        status = read_status_from_object_store(task)
-        
-        if status is None and task.status == 'dispatched':
-            if now() - task.dispatched_at > 5min:
-                mark_failed(task, "job never started")
-            continue
-        
-        if status.status == 'running':
-            if now() - status.heartbeat > 60s:
-                mark_failed(task, "heartbeat timeout")
-            elif now() - task.started_at > task.timeout:
-                mark_failed(task, "execution timeout")
-        
-        elif status.status == 'success':
-            task.output = read_output_from_object_store(task)
-            task.status = 'success'
-            update task
-            check_run_completion(task.run_id)
-        
-        elif status.status == 'failed':
-            if task.attempt < task.max_retries:
-                task.status = 'pending'
-                update task
-            else:
-                mark_failed(task, status.error)
-                skip_downstream(task)
-
-mark_failed(task, error):
-    task.status = 'failed'
-    task.error = error
-    update task
-    check_run_completion(task.run_id)
-
-skip_downstream(task):
-    downstream = find_downstream_tasks(task)
-    for t in downstream:
-        if t.on_failure != 'run':
-            t.status = 'skipped'
-            update t
-```
-
-### Run Completion
-
-```
-check_run_completion(run_id):
-    tasks = query tasks where run_id = run_id
-    
-    active = count where status in ('pending', 'dispatched', 'running')
-    failed = count where status = 'failed'
-    
-    if active == 0:
-        run = get run
-        if failed > 0:
-            run.status = 'failed'
-        else:
-            run.status = 'success'
-        run.finished_at = now()
-        update run
-```
-
-## Worker Algorithm
-
-```
-worker_main():
-    spec = fetch_from_object_store(env.TASK_SPEC_PATH)
-    
-    write_status("running")
-    start_heartbeat_thread()
-    
-    ctx = Context(
-        task_id=spec.task_id,
-        run_id=spec.run_id,
-        task_name=spec.task_name,
-        workflow_name=spec.workflow_name,
-        attempt=spec.attempt,
-        parallel_index=spec.parallel_index,
-        parallel_count=spec.parallel_count,
-    )
-    
-    result = execute_task(spec, ctx)
-    
-    if result.success:
-        write_output(result.output)
-        write_status("success")
-        exit(0)
-    else:
-        write_status("failed", error=result.error)
-        exit(1)
-
-heartbeat_thread():
-    while running:
-        write_status("running")
-        sleep(10s)
-
-execute_task(spec, ctx):
-    executor = load_executor(spec.executor)
-    input = merge(spec.input, spec.upstream)
-    return executor.run(input, ctx)
-```
-
-## Distributed Coordination
-
-### Lease Acquisition
-
-Prevents multiple scheduler instances from processing the same run.
-
-```
-acquire_lease(run_id, scheduler_id):
-    # Atomic compare-and-swap
-    result = update runs
-        set owner = scheduler_id, lease_expires = now() + 60s
-        where id = run_id
-        and status = 'running'
-        and (owner is null or lease_expires < now())
-    
-    return result.modified_count > 0
-
-renew_lease(run_id, scheduler_id):
-    update runs
-        set lease_expires = now() + 60s
-        where id = run_id and owner = scheduler_id
-
-release_lease(run_id, scheduler_id):
-    update runs
-        set owner = null, lease_expires = null
-        where id = run_id and owner = scheduler_id
-```
-
-### Task Acquisition
-
-Prevents multiple dispatches of the same task.
-
-For Postgres:
-
+**Single JOIN Query:**
 ```sql
-UPDATE task_runs
-SET status = 'dispatched',
-    dispatched_at = now(),
-    attempt = attempt + 1
-WHERE id = (
-    SELECT id FROM task_runs
-    WHERE run_id = $run_id AND status = 'pending'
-    LIMIT 1
-    FOR UPDATE SKIP LOCKED
-)
-RETURNING *;
+-- Get pending tasks with workflow info in one query
+SELECT
+    t.id as task_id,
+    t.run_id,
+    t.task_index,
+    t.status as task_status,
+    w.id as workflow_id,
+    w.job_name,
+    w.params
+FROM tasks t
+INNER JOIN runs r ON t.run_id = r.id
+INNER JOIN workflows w ON r.workflow_id = w.id
+WHERE t.status = 'pending'
+LIMIT ?
 ```
 
-For document stores, use conditional updates or transactions.
-
-## Parallelization
-
-### Static Parallelization
-
-```yaml
-tasks:
-  process:
-    parallel: 4
+**Batch Updates:**
+```rust
+// Update multiple tasks in single transaction
+async fn batch_update_task_status(
+    &self,
+    updates: &[(Uuid, &str, Option<&str>, Option<&str>)]
+) -> Result<()>
 ```
 
-Creates 4 task runs with:
-- `parallel_index`: 0, 1, 2, 3
-- `parallel_count`: 4
-
-### Dynamic by Count
-
-```yaml
-tasks:
-  discover:
-    # outputs: { "count": 10 }
-  process:
-    depends_on: [discover]
-    parallel: discover.count
+**Bounded Concurrency:**
+```rust
+// Limit concurrent dispatches to avoid memory explosion
+stream::iter(tasks)
+    .map(|task| executor.execute(...))
+    .buffer_unordered(max_concurrent)
+    .collect().await
 ```
 
-After `discover` completes, reads `count` from output and creates 10 task runs.
+## Executor Protocols
 
-### Dynamic by Items
+### Process Executor
 
-```yaml
-tasks:
-  discover:
-    # outputs: { "files": ["a.csv", "b.csv", "c.csv"] }
-  process:
-    depends_on: [discover]
-    foreach: discover.files
+**Dispatch:**
+```rust
+async fn execute(&self, task_id: Uuid, job_name: &str, params: Option<Value>) -> Result<String> {
+    let child = Command::new(&script_path)
+        .spawn()?;
+
+    let pid = child.id().unwrap().to_string();
+
+    // Monitor in background
+    tokio::spawn(async move {
+        let status = child.wait().await;
+        status_tx.send(StatusUpdate {
+            task_id,
+            status: if status.success() { "success" } else { "failed" }
+        });
+    });
+
+    Ok(pid)
+}
 ```
 
-After `discover` completes, reads `files` from output and creates 3 task runs, each with:
-- `input.item`: the file path
-- `parallel_index`: 0, 1, 2
-- `parallel_count`: 3
+**Status Updates:**
+- Immediate: Send "running" when process starts
+- On completion: Send "success" or "failed" based on exit code
+- Via channel: No polling required
 
-### Concurrency Limit
+### Cloud Run Executor
 
-```yaml
-tasks:
-  process:
-    foreach: discover.files
-    concurrency: 4
+**Dispatch:**
+```rust
+async fn execute(&self, task_id: Uuid, job_name: &str, params: Option<Value>) -> Result<String> {
+    let auth_token = get_auth_token().await?;
+    let response = http_client.post(cloud_run_url)
+        .json(&CreateExecutionRequest { ... })
+        .send().await?;
+
+    let execution_name = response.json().execution_name;
+
+    // Poll status in background
+    tokio::spawn(async move {
+        loop {
+            let status = check_execution_status(execution_name).await;
+            if status.is_terminal() {
+                status_tx.send(StatusUpdate { task_id, status });
+                break;
+            }
+            sleep(Duration::from_secs(2)).await;
+        }
+    });
+
+    Ok(execution_name)
+}
 ```
 
-Scheduler dispatches at most 4 `process` tasks at a time. Others remain `pending` until a slot opens.
+**Status Updates:**
+- Periodic polling (every 2s)
+- Sends update when terminal state reached
+- Via channel: No database polling by scheduler
 
-## API Endpoints
+## Concurrency Model
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | /workflows | List workflows |
-| POST | /workflows | Create/update workflow |
-| GET | /workflows/{name} | Get workflow |
-| DELETE | /workflows/{name} | Delete workflow |
-| POST | /workflows/{name}/runs | Trigger run |
-| GET | /runs | List runs |
-| GET | /runs/{id} | Get run details |
-| POST | /runs/{id}/cancel | Cancel run |
-| POST | /runs/{id}/retry | Retry failed tasks |
-| GET | /runs/{id}/tasks | List task runs |
-| GET | /runs/{id}/tasks/{name}/logs | Get task logs |
+### Thread Safety
+
+- **Database pool**: Shared via `Arc<PostgresDatabase>`
+- **Executor manager**: Shared via `Arc<ExecutorManager>`, internally uses `Mutex<HashMap>`
+- **Status channel**: `mpsc::unbounded_channel` for executor → scheduler updates
+- **Scheduler**: Single instance, no distributed coordination
+
+### Async Runtime
+
+- **Tokio**: All I/O is non-blocking
+- **Bounded concurrency**: `buffer_unordered(N)` limits parallel operations
+- **Background tasks**: Executors spawn monitoring tasks that send updates via channels
+
+### No Leasing
+
+Current implementation has no distributed scheduler support:
+- Single scheduler instance assumed
+- No lease acquisition/renewal
+- No failover or HA
+
+## Performance Characteristics
+
+### Latency Breakdown
+
+```
+Task created (pending) → Task dispatched → Task running → Task complete
+                0-5s              <100ms           task_duration
+```
+
+- **Pending → Dispatched**: Bounded by poll_interval (default 5s)
+- **Dispatched → Running**: Executor startup (<100ms for processes)
+- **Running → Complete**: Task execution time + channel latency (<1ms)
+
+### Throughput Limits
+
+**Database bottleneck:**
+- Postgres connection pool: 10 connections
+- Batch size: 100 tasks/poll
+- Theoretical max: ~2000 tasks/sec
+
+**Executor bottleneck:**
+- Process executor: Limited by OS process limits (~1000s)
+- Cloud Run executor: GCP API rate limits (~100 req/sec)
+
+**Measured performance:**
+- 155 tasks/sec sustained throughput
+- <700ms p99 latency (create → complete)
+- ~10MB RSS for 500 concurrent tasks
+
+## Current Limitations
+
+1. **No retries**: Tasks fail permanently
+2. **No timeouts**: Tasks can run indefinitely
+3. **No dependencies**: No DAG support, tasks run independently
+4. **No scheduling**: Manual trigger only
+5. **No distributed scheduler**: Single instance only
+6. **No heartbeat monitoring**: Can't detect hung tasks
+7. **No resource limits**: Executors can spawn unlimited workers
