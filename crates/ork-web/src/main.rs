@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "postgres")]
 use ork_state::PostgresDatabase;
-#[cfg(not(feature = "postgres"))]
+#[cfg(feature = "sqlite")]
+use ork_state::SqliteDatabase;
+#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
 use ork_core::database::Database;
 
 #[derive(Parser, Debug)]
@@ -37,12 +39,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = std::env::var("DATABASE_URL").unwrap_or(args.database_url);
 
-    #[cfg(feature = "postgres")]
+    #[cfg(all(feature = "postgres", not(feature = "sqlite")))]
     let db = Arc::new(PostgresDatabase::new(&database_url).await?);
 
-    #[cfg(not(feature = "postgres"))]
+    #[cfg(all(feature = "sqlite", not(feature = "postgres")))]
+    let db = Arc::new(SqliteDatabase::new(&database_url).await?);
+
+    #[cfg(all(feature = "postgres", feature = "sqlite"))]
+    compile_error!("Enable either the 'postgres' or 'sqlite' feature for ork-web, not both.");
+
+    #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
     let db: Arc<dyn Database> = {
-        return Err("No database backend enabled. Enable 'postgres' feature.".into());
+        return Err("No database backend enabled. Enable 'postgres' or 'sqlite' feature.".into());
     };
 
     let server = ApiServer::new(db);

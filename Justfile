@@ -10,9 +10,16 @@ up:
 # Alias for older docs/scripts.
 example-up: up
 
+# Start SQLite-backed scheduler + web UI (no Docker).
+up-sqlite:
+    ./scripts/dev-up-sqlite.sh
+
 # Create + trigger an example workflow by folder name (expects examples/<name>/<name>.yaml).
 example-run name:
-    ./scripts/example-run.sh "{{name}}"
+    cargo run -p ork-cli --bin ork -- run-workflow --file "examples/{{name}}/{{name}}.yaml"
+
+example-run-sqlite name:
+    cargo run -p ork-cli --no-default-features --features sqlite,process --bin ork -- run-workflow --file "examples/{{name}}/{{name}}.yaml"
 
 # Start only the scheduler (DB-backed).
 run-scheduler:

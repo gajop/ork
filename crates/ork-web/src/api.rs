@@ -37,7 +37,7 @@ impl ApiServer {
                 get(list_runs).post(axum::routing::post(start_run)),
             )
             .route("/api/runs/{id}", get(run_detail))
-            .route("/api/workflows", get(list_workflows))
+            .route("/api/workflows", get(list_workflows).post(create_workflow))
             .route("/api/workflows/{name}", get(workflow_detail))
             .with_state(self)
             .layer(cors);
@@ -121,6 +121,82 @@ async fn list_workflows(State(api): State<ApiServer>) -> impl IntoResponse {
     Json(items).into_response()
 }
 
+#[derive(Deserialize)]
+struct CreateWorkflowRequest {
+    yaml: String,
+    project: Option<String>,
+    region: Option<String>,
+    root: Option<String>,
+    replace: Option<bool>,
+}
+
+async fn create_workflow(
+    State(api): State<ApiServer>,
+    Json(payload): Json<CreateWorkflowRequest>,
+) -> impl IntoResponse {
+    let project = payload.project.unwrap_or_else(|| "local".to_string());
+    let region = payload.region.unwrap_or_else(|| "local".to_string());
+    let root = payload
+        .root
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let root = root.canonicalize().unwrap_or(root);
+
+    let definition: ork_core::workflow::Workflow = match serde_yaml::from_str(&payload.yaml) {
+        Ok(def) => def,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    if let Err(err) = definition.validate() {
+        return (StatusCode::BAD_REQUEST, err.to_string()).into_response();
+    }
+    let compiled = match definition.compile(&root) {
+        Ok(compiled) => compiled,
+        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+    };
+
+    if payload.replace.unwrap_or(true) {
+        let _ = api.db.delete_workflow(&definition.name).await;
+    }
+
+    let workflow = match api
+        .db
+        .create_workflow(
+            &definition.name,
+            None,
+            "dag",
+            &region,
+            &project,
+            "dag",
+            None,
+        )
+        .await
+    {
+        Ok(wf) => wf,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    };
+
+    let workflow_tasks = build_workflow_tasks(&compiled);
+    if let Err(err) = api
+        .db
+        .create_workflow_tasks(workflow.id, &workflow_tasks)
+        .await
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    #[derive(Serialize)]
+    struct Resp {
+        name: String,
+        id: String,
+    }
+    Json(Resp {
+        name: workflow.name,
+        id: workflow.id.to_string(),
+    })
+    .into_response()
+}
+
 #[derive(Serialize)]
 struct RunDetail {
     run: RunInfo,
@@ -150,6 +226,7 @@ struct TaskInfo {
     finished_at: Option<String>,
     dispatched_at: Option<String>,
     output: Option<serde_json::Value>,
+    logs: Option<String>,
     error: Option<String>,
 }
 
@@ -272,6 +349,7 @@ async fn run_detail(State(api): State<ApiServer>, Path(id): Path<String>) -> imp
                 finished_at: task.finished_at.map(fmt_time),
                 dispatched_at: task.dispatched_at.map(fmt_time),
                 output: task.output.as_ref().map(|out| json_inner(out).clone()),
+                logs: task.logs,
                 error: task.error,
             }
         })
@@ -339,4 +417,95 @@ async fn load_workflow_names(
 fn is_not_found(err: &anyhow::Error) -> bool {
     let msg = err.to_string().to_lowercase();
     msg.contains("row not found") || msg.contains("no rows") || msg.contains("not found")
+}
+
+fn build_workflow_tasks(
+    compiled: &ork_core::compiled::CompiledWorkflow,
+) -> Vec<ork_core::database::NewWorkflowTask> {
+    let mut tasks = Vec::with_capacity(compiled.tasks.len());
+    for (idx, task) in compiled.tasks.iter().enumerate() {
+        let depends_on: Vec<String> = task
+            .depends_on
+            .iter()
+            .filter_map(|dep_idx| compiled.tasks.get(*dep_idx).map(|t| t.name.clone()))
+            .collect();
+
+        let executor_type = match task.executor {
+            ork_core::workflow::ExecutorKind::CloudRun => "cloudrun",
+            ork_core::workflow::ExecutorKind::Process | ork_core::workflow::ExecutorKind::Python => {
+                "process"
+            }
+        };
+
+        let mut params = serde_json::Map::new();
+        if !task.input.is_null() {
+            params.insert("task_input".to_string(), task.input.clone());
+        }
+        if !task.env.is_empty() {
+            let env_json = task
+                .env
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect::<serde_json::Map<_, _>>();
+            params.insert("env".to_string(), serde_json::Value::Object(env_json));
+        }
+
+        match task.executor {
+            ork_core::workflow::ExecutorKind::CloudRun => {
+                if let Some(job) = task.job.as_deref() {
+                    params.insert(
+                        "job_name".to_string(),
+                        serde_json::Value::String(job.to_string()),
+                    );
+                }
+            }
+            ork_core::workflow::ExecutorKind::Process => {
+                if let Some(command) = task.command.as_deref() {
+                    params.insert(
+                        "command".to_string(),
+                        serde_json::Value::String(command.to_string()),
+                    );
+                } else if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "command".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+            }
+            ork_core::workflow::ExecutorKind::Python => {
+                if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "task_file".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+                if let Some(module) = task.module.as_deref() {
+                    params.insert(
+                        "task_module".to_string(),
+                        serde_json::Value::String(module.to_string()),
+                    );
+                }
+                if let Some(function) = task.function.as_deref() {
+                    params.insert(
+                        "task_function".to_string(),
+                        serde_json::Value::String(function.to_string()),
+                    );
+                }
+                params.insert(
+                    "python_path".to_string(),
+                    serde_json::Value::String(compiled.root.to_string_lossy().to_string()),
+                );
+            }
+        }
+
+        tasks.push(ork_core::database::NewWorkflowTask {
+            task_index: idx as i32,
+            task_name: task.name.clone(),
+            executor_type: executor_type.to_string(),
+            depends_on,
+            params: serde_json::Value::Object(params),
+        });
+    }
+
+    tasks
 }

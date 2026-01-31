@@ -144,10 +144,11 @@ pub struct Task {
     pub task_name: String,
     pub executor_type: String,
     pub depends_on: Vec<String>,
-    status: String,
+    pub status: String,
     pub execution_name: Option<String>,
     pub params: Option<JsonValue>,
     pub output: Option<JsonValue>,
+    pub logs: Option<String>,
     pub error: Option<String>,
     pub dispatched_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
@@ -174,7 +175,7 @@ pub struct TaskWithWorkflow {
     pub executor_type: String,
     pub depends_on: Vec<String>,
     #[allow(dead_code)]
-    task_status: String,
+    pub task_status: String,
     pub execution_name: Option<String>,
     pub params: Option<JsonValue>,
 
