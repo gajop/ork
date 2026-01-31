@@ -17,6 +17,9 @@ CREATE TABLE public.tasks (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     run_id uuid NOT NULL,
     task_index integer NOT NULL,
+    task_name text NOT NULL,
+    executor_type text NOT NULL,
+    depends_on text[] DEFAULT '{}'::text[] NOT NULL,
     status text NOT NULL,
     execution_name text,
     params jsonb,
@@ -38,8 +41,19 @@ CREATE TABLE public.workflows (
     task_params jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    executor_type text DEFAULT 'cloudrun'::text NOT NULL,
-    CONSTRAINT workflows_executor_type_check CHECK ((executor_type = ANY (ARRAY['cloudrun'::text, 'process'::text])))
+    executor_type text DEFAULT 'cloudrun'::text NOT NULL
+);
+CREATE TABLE public.workflow_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    workflow_id uuid NOT NULL,
+    task_index integer NOT NULL,
+    task_name text NOT NULL,
+    executor_type text NOT NULL,
+    depends_on text[] DEFAULT '{}'::text[] NOT NULL,
+    params jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT workflow_tasks_pkey PRIMARY KEY (id),
+    CONSTRAINT workflow_tasks_workflow_id_task_name_key UNIQUE (workflow_id, task_name)
 );
 ALTER TABLE ONLY public.runs
     ADD CONSTRAINT runs_pkey PRIMARY KEY (id);
@@ -55,11 +69,16 @@ CREATE INDEX idx_runs_status ON public.runs USING btree (status);
 CREATE INDEX idx_runs_workflow_id ON public.runs USING btree (workflow_id);
 CREATE INDEX idx_tasks_execution_name ON public.tasks USING btree (execution_name) WHERE (execution_name IS NOT NULL);
 CREATE INDEX idx_tasks_run_id ON public.tasks USING btree (run_id);
+CREATE INDEX idx_tasks_run_task_name ON public.tasks USING btree (run_id, task_name);
 CREATE INDEX idx_tasks_run_status ON public.tasks USING btree (run_id, status);
 CREATE INDEX idx_tasks_status ON public.tasks USING btree (status);
 CREATE INDEX idx_tasks_status_run_id ON public.tasks USING btree (status, run_id) WHERE (status = ANY (ARRAY['pending'::text, 'dispatched'::text, 'running'::text]));
+CREATE INDEX idx_tasks_executor_type ON public.tasks USING btree (executor_type);
+CREATE INDEX idx_workflow_tasks_workflow_id ON public.workflow_tasks USING btree (workflow_id);
 CREATE INDEX idx_workflows_executor_type ON public.workflows USING btree (executor_type);
 ALTER TABLE ONLY public.runs
     ADD CONSTRAINT runs_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES public.workflows(id);
 ALTER TABLE ONLY public.tasks
     ADD CONSTRAINT tasks_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.runs(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.workflow_tasks
+    ADD CONSTRAINT workflow_tasks_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES public.workflows(id) ON DELETE CASCADE;

@@ -23,6 +23,7 @@ just status
 ```bash
 # Workflows
 ork create-workflow --name <name> --job-name <job> --executor <cloudrun|process>
+ork create-workflow-yaml --file <workflow.yaml> [--project local] [--region local]
 ork list-workflows
 ork trigger <workflow-name>
 

@@ -97,12 +97,37 @@ impl CloudRunClient {
             params
                 .as_object()
                 .map(|obj| {
-                    obj.iter()
-                        .map(|(k, v)| EnvVar {
-                            name: k.clone(),
-                            value: v.to_string(),
-                        })
-                        .collect()
+                    let mut vars = Vec::new();
+                    for (k, v) in obj.iter() {
+                        match k.as_str() {
+                            "env" => {
+                                if let Some(env_obj) = v.as_object() {
+                                    for (env_key, env_val) in env_obj {
+                                        vars.push(EnvVar {
+                                            name: env_key.clone(),
+                                            value: env_val.to_string().trim_matches('"').to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                            "task_input" => {
+                                vars.push(EnvVar {
+                                    name: "ORK_INPUT_JSON".to_string(),
+                                    value: v.to_string(),
+                                });
+                            }
+                            "job_name" | "command" | "script" | "task_file" | "runner_path" => {}
+                            _ => {
+                                if v.is_string() || v.is_number() || v.is_boolean() {
+                                    vars.push(EnvVar {
+                                        name: k.clone(),
+                                        value: v.to_string().trim_matches('"').to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    vars
                 })
                 .unwrap_or_default()
         } else {

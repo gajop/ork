@@ -3,8 +3,6 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use uuid::Uuid;
-
 use crate::executor::Executor;
 use crate::models::Workflow;
 
@@ -14,9 +12,10 @@ use crate::models::Workflow;
 /// Different implementations can handle different executor backends.
 #[async_trait]
 pub trait ExecutorManager: Send + Sync {
-    /// Register a workflow and create its executor
-    async fn register_workflow(&self, workflow: &Workflow) -> anyhow::Result<()>;
-
-    /// Get the executor for a workflow
-    async fn get_executor(&self, workflow_id: Uuid) -> anyhow::Result<Arc<dyn Executor>>;
+    /// Get or create an executor for a task.
+    async fn get_executor(
+        &self,
+        executor_type: &str,
+        workflow: &Workflow,
+    ) -> anyhow::Result<Arc<dyn Executor>>;
 }

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use crate::error::{OrkError, OrkResult, WorkflowValidationError};
-use crate::workflow::{ExecutorKind, TaskDefinition, Workflow};
+use crate::workflow::{ExecutorKind, Workflow};
 
 #[derive(Debug, Clone)]
 pub struct CompiledWorkflow {
@@ -17,7 +17,9 @@ pub struct CompiledWorkflow {
 pub struct CompiledTask {
     pub name: String,
     pub executor: ExecutorKind,
-    pub file: PathBuf,
+    pub file: Option<PathBuf>,
+    pub command: Option<String>,
+    pub job: Option<String>,
     pub input: serde_json::Value,
     pub depends_on: Vec<usize>,
     pub timeout: u64,
@@ -37,7 +39,24 @@ impl Workflow {
 
         let mut tasks = Vec::with_capacity(self.tasks.len());
         for (name, task) in &self.tasks {
-            let file = resolve_file(root, name, task)?;
+            let file = match task.executor {
+                ExecutorKind::Python => {
+                    let file = task.file.as_ref().ok_or_else(|| {
+                        OrkError::InvalidWorkflow(WorkflowValidationError::MissingTaskFile {
+                            task: name.clone(),
+                        })
+                    })?;
+                    Some(resolve_file(root, name, file)?)
+                }
+                ExecutorKind::Process => {
+                    if let Some(file) = task.file.as_ref() {
+                        Some(resolve_file(root, name, file)?)
+                    } else {
+                        None
+                    }
+                }
+                ExecutorKind::CloudRun => None,
+            };
             let depends_on: Vec<usize> = task
                 .depends_on
                 .iter()
@@ -47,6 +66,8 @@ impl Workflow {
                 name: name.clone(),
                 executor: task.executor.clone(),
                 file,
+                command: task.command.clone(),
+                job: task.job.clone(),
                 input: task.input.clone(),
                 depends_on,
                 timeout: task.timeout,
@@ -66,16 +87,11 @@ impl Workflow {
     }
 }
 
-fn resolve_file(root: &Path, task_name: &str, task: &TaskDefinition) -> OrkResult<PathBuf> {
-    let file = task.file.as_ref().ok_or_else(|| {
-        OrkError::InvalidWorkflow(WorkflowValidationError::MissingTaskFile {
-            task: task_name.to_string(),
-        })
-    })?;
+fn resolve_file(root: &Path, task_name: &str, file: &Path) -> OrkResult<PathBuf> {
     let resolved = if file.is_relative() {
         root.join(file)
     } else {
-        file.clone()
+        file.to_path_buf()
     };
     resolved.canonicalize().map_err(|_| {
         OrkError::InvalidWorkflow(WorkflowValidationError::TaskFileNotFound {

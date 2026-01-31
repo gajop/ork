@@ -12,7 +12,7 @@ use tokio::{
 };
 
 use ork_core::compiled::CompiledTask;
-use ork_core::error::{OrkError, OrkResult};
+use ork_core::error::{OrkError, OrkResult, WorkflowValidationError};
 
 const MIN_TASK_DURATION: Duration = Duration::from_secs(5);
 
@@ -57,7 +57,12 @@ pub async fn execute_task(
         })?;
 
     let log_path = context.task_dir.join("log.txt");
-    let file_path = resolve_task_file(&task.file);
+    let file = task.file.as_ref().ok_or_else(|| {
+        OrkError::InvalidWorkflow(WorkflowValidationError::MissingTaskFile {
+            task: task.name.clone(),
+        })
+    })?;
+    let file_path = resolve_task_file(file);
     let workdir = file_path
         .parent()
         .map(PathBuf::from)

@@ -4,20 +4,23 @@ Ork uses a relational database (PostgreSQL or SQLite) for all state management.
 
 ## Core Tables
 
-- **workflows** - Workflow definitions with executor configuration
+- **workflows** - Workflow definitions and defaults (executor labels, Cloud Run metadata)
+- **workflow_tasks** - Compiled DAG tasks for each workflow (executor + dependencies + params)
 - **runs** - Workflow execution instances
-- **tasks** - Individual task executions within a run
+- **tasks** - Individual task executions within a run (includes `task_name` + `depends_on` for DAGs)
 
 ## Schema Source
 
 The complete canonical schema showing the final state after all migrations is in [crates/ork-cli/schema.sql](../../crates/ork-cli/schema.sql). This file is auto-generated from the database using `just dump-schema`.
 
-For the migration history that produces this schema, see [crates/ork-cli/migrations/](../../crates/ork-cli/migrations/):
+For the migration history that produces this schema, see [crates/ork-cli/migrations/](../../crates/ork-cli/migrations/) (mirrored in [crates/ork-state/migrations/](../../crates/ork-state/migrations/)):
 
 - [001_init.sql](../../crates/ork-cli/migrations/001_init.sql) - Initial tables and indexes
 - [002_add_executor_type.sql](../../crates/ork-cli/migrations/002_add_executor_type.sql) - Executor type column
 - [003_add_indexes.sql](../../crates/ork-cli/migrations/003_add_indexes.sql) - Composite indexes for query optimization
 - [004_rename_executor_agnostic.sql](../../crates/ork-cli/migrations/004_rename_executor_agnostic.sql) - Rename to executor-agnostic names
+- [005_add_dag_support.sql](../../crates/ork-cli/migrations/005_add_dag_support.sql) - DAG workflows (task dependencies)
+- [006_workflow_tasks.sql](../../crates/ork-cli/migrations/006_workflow_tasks.sql) - Compiled DAG storage + per-task executors
 
 Migrations are applied automatically via `ork init` using sqlx.
 
@@ -29,6 +32,7 @@ The Rust models that map to these tables are in [crates/ork-core/src/models.rs](
 - `Run` - Maps to runs table
 - `Task` - Maps to tasks table
 - `TaskWithWorkflow` - JOIN result for optimized queries
+- `WorkflowTask` - Compiled DAG rows stored per workflow
 
 ## Database Implementations
 
@@ -47,6 +51,7 @@ Implementation: [crates/ork-state/src/postgres.rs](../../crates/ork-state/src/po
 Implementation: [crates/ork-state/src/file_database.rs](../../crates/ork-state/src/file_database.rs)
 
 - JSON file storage: `{base}/workflows/`, `{base}/runs/`, `{base}/tasks/`
+- Compiled DAGs stored in `{base}/workflow_tasks/`
 - Uses serde_json for serialization
 - No indexes (file-based, not query-optimized)
 - Good for development/testing

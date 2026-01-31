@@ -11,13 +11,13 @@ use uuid::Uuid;
 
 use crate::config::OrchestratorConfig;
 
-use crate::database::Database;
+use crate::database::{Database, NewTask};
 
 use crate::executor::StatusUpdate;
 
 use crate::executor_manager::ExecutorManager;
 
-use crate::models::{TaskStatus, Workflow, json_inner};
+use crate::models::{TaskStatus, Workflow, WorkflowTask, json_inner};
 
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
@@ -165,18 +165,11 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         let workflow_map: HashMap<Uuid, Workflow> =
             workflows.into_iter().map(|w| (w.id, w)).collect();
 
-        // Register all workflow executors and set status channels
-        for workflow in workflow_map.values() {
-            if self
-                .executor_manager
-                .get_executor(workflow.id)
-                .await
-                .is_err()
-            {
-                self.executor_manager.register_workflow(workflow).await?;
-                if let Ok(executor) = self.executor_manager.get_executor(workflow.id).await {
-                    executor.set_status_channel(self.status_tx.clone()).await;
-                }
+        let mut workflow_tasks_map: HashMap<Uuid, Vec<WorkflowTask>> = HashMap::new();
+        for workflow_id in workflow_map.keys() {
+            let tasks = self.db.list_workflow_tasks(*workflow_id).await?;
+            if !tasks.is_empty() {
+                workflow_tasks_map.insert(*workflow_id, tasks);
             }
         }
 
@@ -184,19 +177,28 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         // This ensures runs are only marked as running if tasks were successfully created
         for run in &runs {
             if let Some(workflow) = workflow_map.get(&run.workflow_id) {
-                let task_count = workflow
-                    .task_params
-                    .as_ref()
-                    .and_then(|p| json_inner(p).get("task_count"))
-                    .and_then(|v: &serde_json::Value| v.as_i64())
-                    .unwrap_or(3) as i32;
+                let create_result = if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id) {
+                    let tasks = self.build_run_tasks(run.id, workflow, workflow_tasks);
+                    self.db.batch_create_dag_tasks(run.id, &tasks).await
+                } else if workflow.executor_type == "dag" {
+                    Err(anyhow::anyhow!(
+                        "workflow '{}' is missing compiled workflow_tasks",
+                        workflow.name
+                    ))
+                } else {
+                    let task_count = workflow
+                        .task_params
+                        .as_ref()
+                        .and_then(|p| json_inner(p).get("task_count"))
+                        .and_then(|v: &serde_json::Value| v.as_i64())
+                        .unwrap_or(3) as i32;
+                    self.db
+                        .batch_create_tasks(run.id, task_count, &workflow.name, &workflow.executor_type)
+                        .await
+                };
 
                 // Create tasks
-                if let Err(e) = self
-                    .db
-                    .batch_create_tasks(run.id, task_count, &workflow.name)
-                    .await
-                {
+                if let Err(e) = create_result {
                     error!("Failed to create tasks for run {}: {}", run.id, e);
                     // Mark run as failed
                     let _ = self
@@ -229,45 +231,47 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         let count = tasks.len();
 
-        // Ensure all workflows have registered executors
-        let mut workflow_ids = HashSet::new();
-        for task in &tasks {
-            workflow_ids.insert(task.workflow_id);
-        }
-
-        for workflow_id in workflow_ids {
-            // Check if executor already registered, if not register it
-            if self
-                .executor_manager
-                .get_executor(workflow_id)
-                .await
-                .is_err()
-            {
-                let workflow = self.db.get_workflow_by_id(workflow_id).await?;
-                self.executor_manager.register_workflow(&workflow).await?;
-
-                // Set status channel on the executor
-                if let Ok(executor) = self.executor_manager.get_executor(workflow_id).await {
-                    executor.set_status_channel(self.status_tx.clone()).await;
-                }
-            }
-        }
+        let workflow_ids: Vec<Uuid> = tasks
+            .iter()
+            .map(|task| task.workflow_id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let workflows = self.db.get_workflows_by_ids(&workflow_ids).await?;
+        let workflow_map: HashMap<Uuid, Workflow> =
+            workflows.into_iter().map(|w| (w.id, w)).collect();
+        let workflow_map = Arc::new(workflow_map);
 
         // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
         let results = stream::iter(tasks)
             .map(|task_with_workflow| {
                 let executor_manager = &self.executor_manager;
+                let status_tx = self.status_tx.clone();
+                let workflow_map = workflow_map.clone();
 
                 async move {
+                    let workflow = match workflow_map.get(&task_with_workflow.workflow_id) {
+                        Some(workflow) => workflow,
+                        None => {
+                            let err = anyhow::anyhow!(
+                                "workflow {} not found for task {}",
+                                task_with_workflow.workflow_id,
+                                task_with_workflow.task_id
+                            );
+                            return (task_with_workflow.task_id, Err(err));
+                        }
+                    };
+                    let job_name = resolve_job_name(&task_with_workflow, workflow);
                     let execution_result = match executor_manager
-                        .get_executor(task_with_workflow.workflow_id)
+                        .get_executor(&task_with_workflow.executor_type, &workflow)
                         .await
                     {
                         Ok(executor) => {
+                            executor.set_status_channel(status_tx).await;
                             executor
                                 .execute(
                                     task_with_workflow.task_id,
-                                    &task_with_workflow.job_name,
+                                    &job_name,
                                     task_with_workflow
                                         .params
                                         .as_ref()
@@ -317,6 +321,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     async fn process_status_updates(&self, updates: Vec<StatusUpdate>) -> Result<()> {
         let mut task_updates: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = Vec::new();
         let mut runs_to_check = std::collections::HashSet::new();
+        let mut failed_by_run: HashMap<Uuid, Vec<String>> = HashMap::new();
 
         for update in &updates {
             let new_status = match update.status.as_str() {
@@ -329,8 +334,11 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             task_updates.push((update.task_id, new_status.as_str(), None, None));
 
             if matches!(new_status, TaskStatus::Success | TaskStatus::Failed) {
-                let run_id = self.db.get_task_run_id(update.task_id).await?;
+                let (run_id, task_name) = self.db.get_task_identity(update.task_id).await?;
                 runs_to_check.insert(run_id);
+                if matches!(new_status, TaskStatus::Failed) {
+                    failed_by_run.entry(run_id).or_default().push(task_name);
+                }
             }
         }
 
@@ -342,11 +350,73 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             );
         }
 
+        // Propagate dependency failures to downstream tasks
+        for (run_id, names) in failed_by_run {
+            let mut pending = names;
+            let mut seen = std::collections::HashSet::new();
+            while !pending.is_empty() {
+                let next = self
+                    .db
+                    .mark_tasks_failed_by_dependency(
+                        run_id,
+                        &pending,
+                        "dependency failed",
+                    )
+                    .await?;
+                let mut new_pending = Vec::new();
+                for name in next {
+                    if seen.insert(name.clone()) {
+                        new_pending.push(name);
+                    }
+                }
+                pending = new_pending;
+            }
+            runs_to_check.insert(run_id);
+        }
+
         for run_id in runs_to_check {
             self.check_run_completion(run_id).await?;
         }
 
         Ok(())
+    }
+
+    fn build_run_tasks(
+        &self,
+        run_id: Uuid,
+        workflow: &Workflow,
+        workflow_tasks: &[WorkflowTask],
+    ) -> Vec<NewTask> {
+        workflow_tasks
+            .iter()
+            .map(|task| {
+                let mut params = task
+                    .params
+                    .as_ref()
+                    .map(|p| json_inner(p).clone())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if !params.is_object() {
+                    params = serde_json::json!({});
+                }
+                let obj = params.as_object_mut().expect("params object");
+                obj.entry("task_index".to_string())
+                    .or_insert_with(|| serde_json::json!(task.task_index));
+                obj.entry("task_name".to_string())
+                    .or_insert_with(|| serde_json::json!(task.task_name.clone()));
+                obj.entry("workflow_name".to_string())
+                    .or_insert_with(|| serde_json::json!(workflow.name.clone()));
+                obj.entry("run_id".to_string())
+                    .or_insert_with(|| serde_json::json!(run_id.to_string()));
+
+                NewTask {
+                    task_index: task.task_index,
+                    task_name: task.task_name.clone(),
+                    executor_type: task.executor_type.clone(),
+                    depends_on: task.depends_on.clone(),
+                    params,
+                }
+            })
+            .collect()
     }
 
     async fn check_run_completion(&self, run_id: Uuid) -> Result<()> {
@@ -374,4 +444,16 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         Ok(())
     }
+}
+
+fn resolve_job_name(task: &crate::models::TaskWithWorkflow, workflow: &Workflow) -> String {
+    let params = task.params.as_ref().map(json_inner);
+    let override_name = params
+        .and_then(|p| p.get("job_name").and_then(|v| v.as_str()))
+        .or_else(|| params.and_then(|p| p.get("command").and_then(|v| v.as_str())))
+        .or_else(|| params.and_then(|p| p.get("script").and_then(|v| v.as_str())));
+
+    override_name
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| workflow.job_name.clone())
 }

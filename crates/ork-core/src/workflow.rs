@@ -18,6 +18,8 @@ pub struct Workflow {
 pub struct TaskDefinition {
     pub executor: ExecutorKind,
     pub file: Option<PathBuf>,
+    pub command: Option<String>,
+    pub job: Option<String>,
     #[serde(default)]
     pub input: serde_json::Value,
     #[serde(default)]
@@ -33,6 +35,10 @@ pub struct TaskDefinition {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ExecutorKind {
+    #[serde(alias = "shell")]
+    Process,
+    #[serde(alias = "cloud_run")]
+    CloudRun,
     Python,
 }
 
@@ -86,8 +92,22 @@ impl Workflow {
                 }
             }
 
-            if task.file.is_none() {
-                return Err(WorkflowValidationError::MissingTaskFile { task: name.clone() });
+            match task.executor {
+                ExecutorKind::Python => {
+                    if task.file.is_none() {
+                        return Err(WorkflowValidationError::MissingTaskFile { task: name.clone() });
+                    }
+                }
+                ExecutorKind::Process => {
+                    if task.command.is_none() && task.file.is_none() {
+                        return Err(WorkflowValidationError::MissingTaskCommand { task: name.clone() });
+                    }
+                }
+                ExecutorKind::CloudRun => {
+                    if task.job.as_deref().unwrap_or_default().is_empty() {
+                        return Err(WorkflowValidationError::MissingTaskJob { task: name.clone() });
+                    }
+                }
             }
         }
 

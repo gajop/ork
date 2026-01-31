@@ -141,6 +141,9 @@ pub struct Task {
     pub id: Uuid,
     pub run_id: Uuid,
     pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: Vec<String>,
     status: String,
     pub execution_name: Option<String>,
     pub params: Option<JsonValue>,
@@ -167,6 +170,9 @@ pub struct TaskWithWorkflow {
     pub task_id: Uuid,
     pub run_id: Uuid,
     pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: Vec<String>,
     #[allow(dead_code)]
     task_status: String,
     pub execution_name: Option<String>,
@@ -175,8 +181,20 @@ pub struct TaskWithWorkflow {
     // Workflow fields
     pub workflow_id: Uuid,
     #[allow(dead_code)]
-    executor_type: String,
     pub job_name: String,
     pub project: String,
     pub region: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct WorkflowTask {
+    pub id: Uuid,
+    pub workflow_id: Uuid,
+    pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: Vec<String>,
+    pub params: Option<JsonValue>,
+    pub created_at: DateTime<Utc>,
 }
