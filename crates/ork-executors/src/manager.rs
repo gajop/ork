@@ -1,9 +1,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
+#[cfg(feature = "cloudrun")]
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(feature = "cloudrun")]
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use ork_core::executor::Executor;
 use ork_core::executor_manager::ExecutorManager as ExecutorManagerTrait;
@@ -15,25 +16,34 @@ use crate::process::ProcessExecutor;
 use crate::cloud_run::CloudRunClient;
 
 pub struct ExecutorManager {
-    executors: Arc<RwLock<HashMap<Uuid, Arc<dyn Executor>>>>,
     #[cfg(feature = "process")]
     process_executor: Arc<ProcessExecutor>,
+    #[cfg(feature = "cloudrun")]
+    cloudrun_clients: Arc<RwLock<HashMap<(String, String), Arc<CloudRunClient>>>>,
 }
 
 impl ExecutorManager {
     pub fn new() -> Self {
         Self {
-            executors: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(feature = "process")]
             process_executor: Arc::new(ProcessExecutor::new(Some("test-scripts".to_string()))),
+            #[cfg(feature = "cloudrun")]
+            cloudrun_clients: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
 
 #[async_trait]
 impl ExecutorManagerTrait for ExecutorManager {
-    async fn register_workflow(&self, workflow: &Workflow) -> Result<()> {
-        let executor_type = ExecutorType::from_str(&workflow.executor_type).unwrap_or(ExecutorType::CloudRun);
+    async fn get_executor(
+        &self,
+        executor_type: &str,
+        workflow: &Workflow,
+    ) -> Result<Arc<dyn Executor>> {
+        #[cfg(not(feature = "cloudrun"))]
+        let _ = workflow;
+        let executor_type = ExecutorType::from_str(executor_type)
+            .ok_or_else(|| anyhow::anyhow!("Unknown executor type: {}", executor_type))?;
 
         let executor: Arc<dyn Executor> = match executor_type {
             #[cfg(feature = "process")]
@@ -44,9 +54,20 @@ impl ExecutorManagerTrait for ExecutorManager {
             }
             #[cfg(feature = "cloudrun")]
             ExecutorType::CloudRun => {
-                let client = Arc::new(CloudRunClient::new(workflow.project.clone(), workflow.region.clone()).await?);
-                client.clone().start_polling_task();
-                client
+                let key = (workflow.project.clone(), workflow.region.clone());
+                let existing = {
+                    let clients = self.cloudrun_clients.read().await;
+                    clients.get(&key).cloned()
+                };
+                if let Some(client) = existing {
+                    client
+                } else {
+                    let client = Arc::new(CloudRunClient::new(key.0.clone(), key.1.clone()).await?);
+                    client.clone().start_polling_task();
+                    let mut clients = self.cloudrun_clients.write().await;
+                    clients.insert(key, client.clone());
+                    client
+                }
             }
             #[cfg(not(feature = "cloudrun"))]
             ExecutorType::CloudRun => {
@@ -54,16 +75,6 @@ impl ExecutorManagerTrait for ExecutorManager {
             }
         };
 
-        let mut executors = self.executors.write().await;
-        executors.insert(workflow.id, executor);
-        Ok(())
-    }
-
-    async fn get_executor(&self, workflow_id: Uuid) -> Result<Arc<dyn Executor>> {
-        let executors = self.executors.read().await;
-        executors
-            .get(&workflow_id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Executor not found for workflow {}", workflow_id))
+        Ok(executor)
     }
 }

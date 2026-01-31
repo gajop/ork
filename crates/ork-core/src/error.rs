@@ -55,8 +55,12 @@ pub enum WorkflowValidationError {
     UnknownDependency { task: String, dependency: String },
     #[error("task {task} cannot depend on itself")]
     SelfDependency { task: String },
-    #[error("task {task} (python executor) requires a `file` path")]
+    #[error("task {task} requires a `file` path")]
     MissingTaskFile { task: String },
+    #[error("task {task} requires a `command` or `file` path")]
+    MissingTaskCommand { task: String },
+    #[error("task {task} requires a `job` name")]
+    MissingTaskJob { task: String },
     #[error("task {task} file not found at {path}")]
     TaskFileNotFound { task: String, path: PathBuf },
     #[error("workflow contains a cycle involving task {task}")]

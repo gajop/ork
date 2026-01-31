@@ -6,6 +6,8 @@ use tracing_subscriber::FmtSubscriber;
 
 use ork_core::config::OrchestratorConfig;
 use ork_core::scheduler::Scheduler;
+use ork_core::database::NewWorkflowTask;
+use ork_core::workflow::{Workflow as YamlWorkflow, ExecutorKind};
 use ork_executors::ExecutorManager;
 
 #[cfg(feature = "postgres")]
@@ -66,6 +68,21 @@ enum Commands {
         /// Executor type: cloudrun or process
         #[arg(short, long, default_value = "cloudrun")]
         executor: String,
+    },
+
+    /// Create a workflow from a YAML definition (DAG)
+    CreateWorkflowYaml {
+        /// Path to workflow YAML file
+        #[arg(short, long)]
+        file: String,
+
+        /// Project label for the workflow (default: local)
+        #[arg(short, long, default_value = "local")]
+        project: String,
+
+        /// Region label for the workflow (default: local)
+        #[arg(short, long, default_value = "local")]
+        region: String,
     },
 
     /// List all workflows
@@ -168,6 +185,46 @@ async fn main() -> Result<()> {
             println!("  Region: {}", workflow.region);
         }
 
+        Commands::CreateWorkflowYaml { file, project, region } => {
+            let yaml = std::fs::read_to_string(&file)?;
+            let definition: YamlWorkflow = serde_yaml::from_str(&yaml)?;
+            definition
+                .validate()
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+            let root = std::path::Path::new(&file)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| {
+                    std::env::current_dir()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+            let compiled = definition
+                .compile(&root)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+            let workflow = db
+                .create_workflow(
+                    &definition.name,
+                    None,
+                    "dag",
+                    &region,
+                    &project,
+                    "dag",
+                    None,
+                )
+                .await?;
+
+            let workflow_tasks = build_workflow_tasks(&compiled);
+            db.create_workflow_tasks(workflow.id, &workflow_tasks).await?;
+
+            println!("✓ Created workflow from YAML: {}", workflow.name);
+            println!("  ID: {}", workflow.id);
+            println!("  Executor: {}", workflow.executor_type);
+            println!("  Project: {}", workflow.project);
+            println!("  Region: {}", workflow.region);
+        }
+
         Commands::ListWorkflows => {
             let workflows = db.list_workflows().await?;
 
@@ -246,10 +303,10 @@ async fn main() -> Result<()> {
             } else {
                 println!("Tasks for run {}:", run_id);
                 println!(
-                    "{:<5} {:<36} {:<12} {:<40} {:<20}",
-                    "Index", "Task ID", "Status", "Execution", "Finished"
+                    "{:<5} {:<24} {:<36} {:<12} {:<40} {:<20}",
+                    "Index", "Task", "Task ID", "Status", "Execution", "Finished"
                 );
-                println!("{}", "-".repeat(113));
+                println!("{}", "-".repeat(149));
 
                 for task in tasks {
                     let execution = task.execution_name.as_deref().unwrap_or("-");
@@ -260,8 +317,13 @@ async fn main() -> Result<()> {
                         .unwrap_or_else(|| "-".to_string());
 
                     println!(
-                        "{:<5} {:<36} {:<12} {:<40} {:<20}",
-                        task.task_index, task.id, task.status_str(), execution, finished
+                        "{:<5} {:<24} {:<36} {:<12} {:<40} {:<20}",
+                        task.task_index,
+                        task.task_name,
+                        task.id,
+                        task.status_str(),
+                        execution,
+                        finished
                     );
                 }
             }
@@ -269,4 +331,69 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<NewWorkflowTask> {
+    let mut tasks = Vec::with_capacity(compiled.tasks.len());
+    for (idx, task) in compiled.tasks.iter().enumerate() {
+        let depends_on: Vec<String> = task
+            .depends_on
+            .iter()
+            .filter_map(|dep_idx| compiled.tasks.get(*dep_idx).map(|t| t.name.clone()))
+            .collect();
+
+        let executor_type = match task.executor {
+            ExecutorKind::CloudRun => "cloudrun",
+            ExecutorKind::Process | ExecutorKind::Python => "process",
+        };
+
+        let mut params = serde_json::Map::new();
+        if !task.input.is_null() {
+            params.insert("task_input".to_string(), task.input.clone());
+        }
+        if !task.env.is_empty() {
+            let env_json = task
+                .env
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect::<serde_json::Map<_, _>>();
+            params.insert("env".to_string(), serde_json::Value::Object(env_json));
+        }
+
+        match task.executor {
+            ExecutorKind::CloudRun => {
+                if let Some(job) = task.job.as_deref() {
+                    params.insert("job_name".to_string(), serde_json::Value::String(job.to_string()));
+                }
+            }
+            ExecutorKind::Process => {
+                if let Some(command) = task.command.as_deref() {
+                    params.insert("command".to_string(), serde_json::Value::String(command.to_string()));
+                } else if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "command".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+            }
+            ExecutorKind::Python => {
+                if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "task_file".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+            }
+        }
+
+        tasks.push(NewWorkflowTask {
+            task_index: idx as i32,
+            task_name: task.name.clone(),
+            executor_type: executor_type.to_string(),
+            depends_on,
+            params: serde_json::Value::Object(params),
+        });
+    }
+
+    tasks
 }

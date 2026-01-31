@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use uuid::Uuid;
 
-use ork_core::database::Database;
-use ork_core::models::{Run, Task, TaskWithWorkflow, Workflow};
+use ork_core::database::{Database, NewTask, NewWorkflowTask};
+use ork_core::models::{Run, Task, TaskWithWorkflow, Workflow, WorkflowTask};
 
 #[derive(Clone)]
 pub struct FileDatabase {
@@ -51,10 +51,19 @@ impl FileDatabase {
         self.tasks_dir().join(format!("{}.json", id))
     }
 
+    fn workflow_tasks_dir(&self) -> PathBuf {
+        self.base.join("workflow_tasks")
+    }
+
+    fn workflow_tasks_path(&self, workflow_id: Uuid) -> PathBuf {
+        self.workflow_tasks_dir().join(format!("{}.json", workflow_id))
+    }
+
     async fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(self.workflows_dir()).await?;
         fs::create_dir_all(self.runs_dir()).await?;
         fs::create_dir_all(self.tasks_dir()).await?;
+        fs::create_dir_all(self.workflow_tasks_dir()).await?;
         Ok(())
     }
 
@@ -223,22 +232,31 @@ impl Database for FileDatabase {
         &self,
         run_id: Uuid,
         task_count: i32,
-        _workflow_name: &str,
+        workflow_name: &str,
+        executor_type: &str,
     ) -> Result<()> {
         self.ensure_dirs().await?;
 
         for i in 0..task_count {
             let id = Uuid::new_v4();
             let now = Utc::now();
+            let params = serde_json::json!({
+                "task_index": i,
+                "run_id": run_id,
+                "workflow_name": workflow_name,
+            });
 
             // Use serde_json to construct Task with private fields
             let task: Task = serde_json::from_value(serde_json::json!({
                 "id": id,
                 "run_id": run_id,
                 "task_index": i,
+                "task_name": format!("task_{}", i),
+                "executor_type": executor_type,
+                "depends_on": [],
                 "status": "pending",
                 "execution_name": null,
-                "params": null,
+                "params": params,
                 "output": null,
                 "error": null,
                 "dispatched_at": null,
@@ -248,6 +266,35 @@ impl Database for FileDatabase {
             }))?;
 
             self.write_json(&self.task_path(task.id), &task).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn batch_create_dag_tasks(&self, run_id: Uuid, tasks: &[NewTask]) -> Result<()> {
+        self.ensure_dirs().await?;
+        let now = Utc::now();
+
+        for task in tasks {
+            let task_json: Task = serde_json::from_value(serde_json::json!({
+                "id": Uuid::new_v4(),
+                "run_id": run_id,
+                "task_index": task.task_index,
+                "task_name": task.task_name,
+                "executor_type": task.executor_type,
+                "depends_on": task.depends_on,
+                "status": "pending",
+                "execution_name": null,
+                "params": task.params,
+                "output": null,
+                "error": null,
+                "dispatched_at": null,
+                "started_at": null,
+                "finished_at": null,
+                "created_at": now,
+            }))?;
+
+            self.write_json(&self.task_path(task_json.id), &task_json).await?;
         }
 
         Ok(())
@@ -287,6 +334,9 @@ impl Database for FileDatabase {
             "id": task.id,
             "run_id": task.run_id,
             "task_index": task.task_index,
+            "task_name": task.task_name,
+            "executor_type": task.executor_type,
+            "depends_on": task.depends_on,
             "status": status,
             "execution_name": execution_name.or(task.execution_name.as_deref()),
             "params": task.params,
@@ -392,6 +442,62 @@ impl Database for FileDatabase {
         Ok(task.run_id)
     }
 
+    async fn get_task_identity(&self, task_id: Uuid) -> Result<(Uuid, String)> {
+        let task: Task = self.read_json(&self.task_path(task_id)).await?;
+        Ok((task.run_id, task.task_name))
+    }
+
+    async fn mark_tasks_failed_by_dependency(
+        &self,
+        run_id: Uuid,
+        failed_task_names: &[String],
+        error: &str,
+    ) -> Result<Vec<String>> {
+        if failed_task_names.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut updated = Vec::new();
+        let mut entries = fs::read_dir(self.tasks_dir()).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            let task = match self.read_json::<Task>(&path).await {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            if task.run_id != run_id || task.status_str() != "pending" {
+                continue;
+            }
+            if task
+                .depends_on
+                .iter()
+                .any(|name| failed_task_names.contains(name))
+            {
+                let updated_task: Task = serde_json::from_value(serde_json::json!({
+                    "id": task.id,
+                    "run_id": task.run_id,
+                    "task_index": task.task_index,
+                    "task_name": task.task_name,
+                    "executor_type": task.executor_type,
+                    "depends_on": task.depends_on,
+                    "status": "failed",
+                    "execution_name": task.execution_name,
+                    "params": task.params,
+                    "output": task.output,
+                    "error": error,
+                    "dispatched_at": task.dispatched_at,
+                    "started_at": task.started_at,
+                    "finished_at": Utc::now(),
+                    "created_at": task.created_at,
+                }))?;
+                updated.push(updated_task.task_name.clone());
+                self.write_json(&path, &updated_task).await?;
+            }
+        }
+
+        Ok(updated)
+    }
+
     async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
         let tasks = self.list_tasks(run_id).await?;
 
@@ -400,5 +506,43 @@ impl Database for FileDatabase {
         let failed = tasks.iter().filter(|t| t.status_str() == "failed").count() as i64;
 
         Ok((total, completed, failed))
+    }
+
+    async fn create_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> Result<()> {
+        self.ensure_dirs().await?;
+
+        let now = Utc::now();
+        let mut workflow_tasks = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            workflow_tasks.push(WorkflowTask {
+                id: Uuid::new_v4(),
+                workflow_id,
+                task_index: task.task_index,
+                task_name: task.task_name.clone(),
+                executor_type: task.executor_type.clone(),
+                depends_on: task.depends_on.clone(),
+                params: Some(task.params.clone()),
+                created_at: now,
+            });
+        }
+
+        self.write_json(&self.workflow_tasks_path(workflow_id), &workflow_tasks)
+            .await?;
+        Ok(())
+    }
+
+    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+        let path = self.workflow_tasks_path(workflow_id);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut tasks: Vec<WorkflowTask> = self.read_json(&path).await?;
+        tasks.sort_by_key(|task| task.task_index);
+        Ok(tasks)
     }
 }

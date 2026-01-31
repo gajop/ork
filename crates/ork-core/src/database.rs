@@ -9,6 +9,24 @@ use async_trait::async_trait;
 
 use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
 
+#[derive(Debug, Clone)]
+pub struct NewTask {
+    pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: Vec<String>,
+    pub params: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewWorkflowTask {
+    pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: Vec<String>,
+    pub params: serde_json::Value,
+}
+
 /// Database interface for orchestration state management
 ///
 /// This trait abstracts over different database backends (Postgres, SQLite, etc.)
@@ -51,7 +69,22 @@ pub trait Database: Send + Sync {
         run_id: Uuid,
         task_count: i32,
         workflow_name: &str,
+        executor_type: &str,
     ) -> anyhow::Result<()>;
+
+    async fn batch_create_dag_tasks(
+        &self,
+        run_id: Uuid,
+        tasks: &[NewTask],
+    ) -> anyhow::Result<()>;
+
+    async fn create_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> anyhow::Result<()>;
+
+    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> anyhow::Result<Vec<crate::models::WorkflowTask>>;
 
     async fn update_task_status(
         &self,
@@ -85,6 +118,18 @@ pub trait Database: Send + Sync {
 
     /// Get run ID for a task (used by scheduler to check run completion)
     async fn get_task_run_id(&self, task_id: Uuid) -> anyhow::Result<Uuid>;
+
+    /// Get run ID + task name for a task (used for dependency propagation)
+    async fn get_task_identity(&self, task_id: Uuid) -> anyhow::Result<(Uuid, String)>;
+
+    /// Mark pending tasks as failed if they depend on any of the given task names.
+    /// Returns the names of tasks updated (used for transitive failure propagation).
+    async fn mark_tasks_failed_by_dependency(
+        &self,
+        run_id: Uuid,
+        failed_task_names: &[String],
+        error: &str,
+    ) -> anyhow::Result<Vec<String>>;
 
     /// Get run completion stats (total, completed, failed counts)
     /// Used by scheduler to check if a run is complete
