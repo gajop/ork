@@ -1,238 +1,192 @@
-Status: Pending Review
+# Database Schema
 
-# Schema
+Ork uses a relational database (PostgreSQL or SQLite) for all state management. No object store or external state required.
 
-## State Store
+## Tables
 
-### Workflows Collection
+### Workflows
 
-```
-workflows/{workflow_id}
-```
-
-```json
-{
-  "id": "uuid",
-  "name": "my_etl",
-  "definition": {
-    "tasks": [
-      {
-        "name": "extract",
-        "executor": "python",
-        "file": "tasks/extract.py",
-        "depends_on": [],
-        "timeout_seconds": 600,
-        "retries": 0,
-        "resources": {"cpu": 1000, "memory_mb": 512}
-      }
-    ]
-  },
-  "schedule": "0 2 * * *",
-  "version": "abc123",
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": "2024-01-01T00:00:00Z"
-}
-```
-
-### Runs Collection
-
-```
-runs/{run_id}
-```
-
-```json
-{
-  "id": "uuid",
-  "workflow_id": "uuid",
-  "workflow_name": "my_etl",
-  "workflow_version": "abc123",
-  "status": "running",
-  "triggered_by": "schedule",
-  "input": {},
-  "owner": "scheduler-abc",
-  "lease_expires": "2024-01-01T00:01:00Z",
-  "started_at": "2024-01-01T00:00:00Z",
-  "finished_at": null,
-  "created_at": "2024-01-01T00:00:00Z"
-}
-```
-
-Status values: `pending`, `running`, `success`, `failed`, `cancelled`
-
-### Task Runs Collection
-
-```
-runs/{run_id}/tasks/{task_id}
-```
-
-```json
-{
-  "id": "uuid",
-  "run_id": "uuid",
-  "task_name": "extract",
-  "status": "running",
-  "attempt": 1,
-  "max_retries": 0,
-  "parallel_index": null,
-  "parallel_count": null,
-  "executor_id": "job-xyz",
-  "input": {},
-  "output": null,
-  "error": null,
-  "dispatched_at": "2024-01-01T00:00:05Z",
-  "started_at": "2024-01-01T00:00:10Z",
-  "finished_at": null,
-  "created_at": "2024-01-01T00:00:00Z"
-}
-```
-
-Status values: `pending`, `dispatched`, `running`, `success`, `failed`, `skipped`
-
-### Schedules Collection
-
-```
-schedules/{schedule_id}
-```
-
-```json
-{
-  "id": "uuid",
-  "workflow_id": "uuid",
-  "cron_expr": "0 2 * * *",
-  "next_run": "2024-01-02T02:00:00Z",
-  "enabled": true,
-  "created_at": "2024-01-01T00:00:00Z"
-}
-```
-
-## Object Store
-
-```
-{bucket}/
-└── runs/
-    └── {run_id}/
-        └── {task_id}/
-            ├── spec.json
-            ├── status.json
-            └── output.json
-```
-
-### spec.json
-
-Written by scheduler before dispatching.
-
-```json
-{
-  "task_id": "uuid",
-  "run_id": "uuid",
-  "task_name": "extract",
-  "executor": "python",
-  "file": "tasks/extract.py",
-  "input": {
-    "api_url": "https://api.example.com"
-  },
-  "upstream": {
-    "other_task": {
-      "field": "value"
-    }
-  },
-  "timeout_seconds": 600,
-  "parallel_index": null,
-  "parallel_count": null,
-  "attempt": 1,
-  "created_at": "2024-01-01T00:00:00Z"
-}
-```
-
-### status.json
-
-Written by worker, polled by scheduler.
-
-```json
-{
-  "status": "running",
-  "heartbeat": "2024-01-01T00:05:30Z",
-  "started_at": "2024-01-01T00:05:00Z",
-  "error": null
-}
-```
-
-Status values: `running`, `success`, `failed`
-
-### output.json
-
-Written by worker on success.
-
-```json
-{
-  "users": [
-    {"id": 1, "name": "Alice", "email": "alice@example.com"},
-    {"id": 2, "name": "Bob", "email": "bob@example.com"}
-  ]
-}
-```
-
-## Postgres Schema
-
-For self-hosted deployments using Postgres:
+Workflow definitions with executor configuration.
 
 ```sql
 CREATE TABLE workflows (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    definition JSONB NOT NULL,
-    schedule TEXT,
-    version TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    description TEXT,
+    job_name TEXT NOT NULL,              -- Script/job to execute
+    region TEXT NOT NULL,                 -- Executor region (e.g., 'us-central1', 'local')
+    project TEXT NOT NULL,                -- GCP project or 'local'
+    executor_type TEXT NOT NULL,          -- 'cloudrun' or 'process'
+    task_params JSONB,                    -- Optional parameters (e.g., task_count)
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
 );
+```
 
+**Example row:**
+```json
+{
+  "id": "d584f91d-7dc3-4637-8d24-ea732e303898",
+  "name": "example-process",
+  "description": null,
+  "job_name": "example-task.sh",
+  "region": "local",
+  "project": "local",
+  "executor_type": "process",
+  "task_params": {"task_count": 5},
+  "created_at": "2024-01-30T12:00:00Z",
+  "updated_at": "2024-01-30T12:00:00Z"
+}
+```
+
+### Runs
+
+Workflow execution instances.
+
+```sql
 CREATE TABLE runs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     workflow_id UUID NOT NULL REFERENCES workflows(id),
-    workflow_name TEXT NOT NULL,
-    workflow_version TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    triggered_by TEXT NOT NULL,
-    input JSONB NOT NULL DEFAULT '{}',
-    owner TEXT,
-    lease_expires TIMESTAMPTZ,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled')),
+    triggered_by TEXT NOT NULL DEFAULT 'manual',
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE task_runs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE INDEX idx_runs_status ON runs(status);
+CREATE INDEX idx_runs_workflow_id ON runs(workflow_id);
+```
+
+**Status flow:** `pending` → `running` → `success`/`failed`
+
+**Example row:**
+```json
+{
+  "id": "f0888034-0abe-4d9c-af81-1137dff6c359",
+  "workflow_id": "d584f91d-7dc3-4637-8d24-ea732e303898",
+  "status": "success",
+  "triggered_by": "manual",
+  "started_at": "2024-01-30T23:50:31Z",
+  "finished_at": "2024-01-30T23:50:34Z",
+  "error": null,
+  "created_at": "2024-01-30T23:50:31Z"
+}
+```
+
+### Tasks
+
+Individual task executions within a run.
+
+```sql
+CREATE TABLE tasks (
+    id UUID PRIMARY KEY,
     run_id UUID NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    task_name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    attempt INT NOT NULL DEFAULT 0,
-    max_retries INT NOT NULL DEFAULT 0,
-    parallel_index INT,
-    parallel_count INT,
-    executor_id TEXT,
-    input JSONB NOT NULL DEFAULT '{}',
+    task_index INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'dispatched', 'running', 'success', 'failed', 'cancelled')),
+    execution_name TEXT,                  -- Process ID or Cloud Run execution name
+    params JSONB,
     output JSONB,
     error TEXT,
     dispatched_at TIMESTAMPTZ,
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(run_id, task_name, parallel_index)
+    created_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(run_id, task_index)
 );
 
-CREATE TABLE schedules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workflow_id UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-    cron_expr TEXT NOT NULL,
-    next_run TIMESTAMPTZ NOT NULL,
-    enabled BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_runs_status ON runs(status);
-CREATE INDEX idx_runs_lease ON runs(status, lease_expires) WHERE status = 'running';
-CREATE INDEX idx_task_runs_status ON task_runs(run_id, status);
-CREATE INDEX idx_schedules_next_run ON schedules(next_run) WHERE enabled = true;
+CREATE INDEX idx_tasks_run_id ON tasks(run_id);
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_status_run_id ON tasks(status, run_id)
+    WHERE status IN ('pending', 'dispatched', 'running');
+CREATE INDEX idx_tasks_run_status ON tasks(run_id, status);
+CREATE INDEX idx_tasks_execution_name ON tasks(execution_name)
+    WHERE execution_name IS NOT NULL;
 ```
+
+**Status flow:** `pending` → `dispatched` → `running` → `success`/`failed`
+
+**Example row:**
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "run_id": "f0888034-0abe-4d9c-af81-1137dff6c359",
+  "task_index": 0,
+  "status": "success",
+  "execution_name": "12345",
+  "params": null,
+  "output": null,
+  "error": null,
+  "dispatched_at": "2024-01-30T23:50:31Z",
+  "started_at": "2024-01-30T23:50:31Z",
+  "finished_at": "2024-01-30T23:50:31Z",
+  "created_at": "2024-01-30T23:50:31Z"
+}
+```
+
+## Performance Indexes
+
+### Composite Indexes
+
+Critical for query performance:
+
+```sql
+-- Finding pending tasks with run info (JOIN query)
+CREATE INDEX idx_tasks_status_run_id ON tasks(status, run_id)
+    WHERE status IN ('pending', 'dispatched', 'running');
+
+-- Checking run completion
+CREATE INDEX idx_tasks_run_status ON tasks(run_id, status);
+```
+
+These enable the scheduler to:
+1. Fetch pending tasks + workflow in single JOIN query (not N+1)
+2. Check if all tasks in a run are complete with a single COUNT query
+
+### Executor Type Index
+
+```sql
+CREATE INDEX idx_workflows_executor_type ON workflows(executor_type);
+```
+
+Allows filtering workflows by executor (future use).
+
+### Execution Name Index
+
+```sql
+CREATE INDEX idx_tasks_execution_name ON tasks(execution_name)
+    WHERE execution_name IS NOT NULL;
+```
+
+Used by Cloud Run executor to look up tasks by execution name during status polling.
+
+## Database Trait Implementations
+
+### PostgresDatabase
+
+- Uses sqlx connection pool
+- Transactions for batch operations
+- Prepared statements for all queries
+- Connection pooling with max 10 connections
+
+### FileDatabase (SQLite-based)
+
+- JSON files in directory structure:
+  - `workflows/{workflow_id}.json`
+  - `runs/{run_id}.json`
+  - `tasks/{task_id}.json`
+- Uses serde_json for serialization
+- No indexes (file-based, not query-optimized)
+- Suitable for development/testing
+
+## Migrations
+
+Located in `crates/ork-cli/migrations/`:
+
+1. **001_initial.sql** - Create workflows, runs, tasks tables
+2. **002_add_executor_type.sql** - Add executor_type column
+3. **003_performance_indexes.sql** - Add composite indexes
+4. **004_rename_cloud_run_columns.sql** - Rename to executor-agnostic names
+
+Applied via `sqlx migrate run` (embedded in binary).
