@@ -7,8 +7,10 @@ import sys
 
 def main() -> int:
     path = os.environ.get("ORK_TASK_FILE")
-    if not path:
-        print("ORK_TASK_FILE not set", file=sys.stderr)
+    module_name = os.environ.get("ORK_TASK_MODULE")
+    function_name = os.environ.get("ORK_TASK_FUNCTION", "main")
+    if not path and not module_name:
+        print("ORK_TASK_FILE or ORK_TASK_MODULE not set", file=sys.stderr)
         return 1
 
     input_json = os.environ.get("ORK_INPUT_JSON", "{}")
@@ -18,17 +20,23 @@ def main() -> int:
         print(f"Failed to parse ORK_INPUT_JSON: {err}", file=sys.stderr)
         return 1
 
-    spec = importlib.util.spec_from_file_location("ork_task", path)
-    if spec is None or spec.loader is None:
-        print(f"Failed to load task file: {path}", file=sys.stderr)
-        return 1
+    if path:
+        spec = importlib.util.spec_from_file_location("ork_task", path)
+        if spec is None or spec.loader is None:
+            print(f"Failed to load task file: {path}", file=sys.stderr)
+            return 1
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    else:
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as err:
+            print(f"Failed to import module {module_name}: {err}", file=sys.stderr)
+            return 1
 
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    fn = getattr(module, "main", None)
+    fn = getattr(module, function_name, None)
     if fn is None:
-        print("Task file has no main()", file=sys.stderr)
+        print(f"Task function not found: {function_name}", file=sys.stderr)
         return 1
 
     sig = inspect.signature(fn)

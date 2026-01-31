@@ -18,8 +18,8 @@ Execution backends and the executor manager. Implements [`ork-core::Executor`](.
 
 | File | Purpose | Updated | File SHA |
 |------|---------|---------|----------|
-| [Cargo.toml](../../../crates/ork-executors/Cargo.toml) | Crate manifest and executor feature flags. | 2026-01-30 | 1e7d702 |
-| [src/cloud_run.rs](../../../crates/ork-executors/src/cloud_run.rs) | Cloud Run executor client and polling loop. | 2026-01-31 | a0f8740 |
+| [Cargo.toml](../../../crates/ork-executors/Cargo.toml) | Crate manifest and executor feature flags. | 2026-01-31 | 5a4e746 |
+| [src/cloud_run.rs](../../../crates/ork-executors/src/cloud_run.rs) | Cloud Run executor client and polling loop. | 2026-01-31 | ff05bea |
 | [src/lib.rs](../../../crates/ork-executors/src/lib.rs) | Re-exports executors and gates features. | 2026-01-31 | beafa5a |
-| [src/manager.rs](../../../crates/ork-executors/src/manager.rs) | `ExecutorManager` implementation and backend selection per task. | 2026-01-31 | 485c2dd |
-| [src/process.rs](../../../crates/ork-executors/src/process.rs) | Local script/Python execution and task status reporting. | 2026-01-31 | 5c2e653 |
+| [src/manager.rs](../../../crates/ork-executors/src/manager.rs) | `ExecutorManager` implementation and backend selection per task. | 2026-01-31 | b1cd5f1 |
+| [src/process.rs](../../../crates/ork-executors/src/process.rs) | Local script/Python execution and task status reporting. | 2026-01-31 | 7bb29a0 |

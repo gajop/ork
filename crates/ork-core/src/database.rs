@@ -3,9 +3,7 @@
 
 use uuid::Uuid;
 
-
 use async_trait::async_trait;
-
 
 use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
 
@@ -48,6 +46,7 @@ pub trait Database: Send + Sync {
 
     async fn get_workflow(&self, name: &str) -> anyhow::Result<Workflow>;
     async fn list_workflows(&self) -> anyhow::Result<Vec<Workflow>>;
+    async fn delete_workflow(&self, name: &str) -> anyhow::Result<()>;
 
     // Run operations
     async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> anyhow::Result<Run>;
@@ -72,11 +71,7 @@ pub trait Database: Send + Sync {
         executor_type: &str,
     ) -> anyhow::Result<()>;
 
-    async fn batch_create_dag_tasks(
-        &self,
-        run_id: Uuid,
-        tasks: &[NewTask],
-    ) -> anyhow::Result<()>;
+    async fn batch_create_dag_tasks(&self, run_id: Uuid, tasks: &[NewTask]) -> anyhow::Result<()>;
 
     async fn create_workflow_tasks(
         &self,
@@ -84,7 +79,10 @@ pub trait Database: Send + Sync {
         tasks: &[NewWorkflowTask],
     ) -> anyhow::Result<()>;
 
-    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> anyhow::Result<Vec<crate::models::WorkflowTask>>;
+    async fn list_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+    ) -> anyhow::Result<Vec<crate::models::WorkflowTask>>;
 
     async fn update_task_status(
         &self,
@@ -108,7 +106,10 @@ pub trait Database: Send + Sync {
 
     /// Get pending tasks with workflow info in a single query (avoids N+1)
     /// Used by scheduler for efficient task dispatching
-    async fn get_pending_tasks_with_workflow(&self, limit: i64) -> anyhow::Result<Vec<TaskWithWorkflow>>;
+    async fn get_pending_tasks_with_workflow(
+        &self,
+        limit: i64,
+    ) -> anyhow::Result<Vec<TaskWithWorkflow>>;
 
     /// Batch fetch workflows by IDs (used by scheduler)
     async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> anyhow::Result<Vec<Workflow>>;

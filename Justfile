@@ -3,6 +3,19 @@ set shell := ["sh", "-c"]
 default:
     @just --list
 
+# Start Postgres, run migrations, then start the scheduler (DB-backed examples).
+example-up:
+    docker compose -f crates/ork-cli/docker-compose.yml up -d
+    cargo run -p ork-cli --bin ork -- init
+    cargo run -p ork-cli --bin ork -- run
+
+# Alias.
+up: example-up
+
+# Create + trigger an example workflow by folder name (expects examples/<name>/<name>.yaml).
+example-run name:
+    ./scripts/example-run.sh "{{name}}"
+
 # Run the demo workflow locally (uses file-backed state and runs dirs)
 run-demo:
     cargo run -p ork-cli -- run examples/demo/demo.yaml --run-dir .ork/runs --state-dir .ork/state

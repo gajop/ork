@@ -1,13 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 use ork_core::config::OrchestratorConfig;
-use ork_core::scheduler::Scheduler;
 use ork_core::database::NewWorkflowTask;
-use ork_core::workflow::{Workflow as YamlWorkflow, ExecutorKind};
+use ork_core::scheduler::Scheduler;
+use ork_core::workflow::{ExecutorKind, Workflow as YamlWorkflow};
 use ork_executors::ExecutorManager;
 
 #[cfg(feature = "postgres")]
@@ -88,6 +88,12 @@ enum Commands {
     /// List all workflows
     ListWorkflows,
 
+    /// Delete a workflow (and all associated runs/tasks)
+    DeleteWorkflow {
+        /// Workflow name to delete
+        workflow_name: String,
+    },
+
     /// Trigger a workflow run
     Trigger {
         /// Workflow name to trigger
@@ -144,7 +150,8 @@ async fn main() -> Result<()> {
             let executor_manager = Arc::new(ExecutorManager::new());
             let scheduler = if let Some(config_path) = config {
                 let config_content = std::fs::read_to_string(&config_path)?;
-                let orchestrator_config: OrchestratorConfig = serde_yaml::from_str(&config_content)?;
+                let orchestrator_config: OrchestratorConfig =
+                    serde_yaml::from_str(&config_content)?;
                 Scheduler::new_with_config(db.clone(), executor_manager, orchestrator_config)
             } else {
                 Scheduler::new(db.clone(), executor_manager)
@@ -185,7 +192,11 @@ async fn main() -> Result<()> {
             println!("  Region: {}", workflow.region);
         }
 
-        Commands::CreateWorkflowYaml { file, project, region } => {
+        Commands::CreateWorkflowYaml {
+            file,
+            project,
+            region,
+        } => {
             let yaml = std::fs::read_to_string(&file)?;
             let definition: YamlWorkflow = serde_yaml::from_str(&yaml)?;
             definition
@@ -196,9 +207,9 @@ async fn main() -> Result<()> {
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| {
-                    std::env::current_dir()
-                        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
                 });
+            let root = root.canonicalize().unwrap_or(root);
             let compiled = definition
                 .compile(&root)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -216,7 +227,8 @@ async fn main() -> Result<()> {
                 .await?;
 
             let workflow_tasks = build_workflow_tasks(&compiled);
-            db.create_workflow_tasks(workflow.id, &workflow_tasks).await?;
+            db.create_workflow_tasks(workflow.id, &workflow_tasks)
+                .await?;
 
             println!("✓ Created workflow from YAML: {}", workflow.name);
             println!("  ID: {}", workflow.id);
@@ -236,12 +248,14 @@ async fn main() -> Result<()> {
                 println!("{}", "-".repeat(96));
 
                 for wf in workflows {
-                    println!(
-                        "{:<36} {:<30} {:<30}",
-                        wf.id, wf.name, wf.job_name
-                    );
+                    println!("{:<36} {:<30} {:<30}", wf.id, wf.name, wf.job_name);
                 }
             }
+        }
+
+        Commands::DeleteWorkflow { workflow_name } => {
+            db.delete_workflow(&workflow_name).await?;
+            println!("✓ Deleted workflow: {}", workflow_name);
         }
 
         Commands::Trigger { workflow_name } => {
@@ -288,7 +302,11 @@ async fn main() -> Result<()> {
 
                     println!(
                         "{:<36} {:<36} {:<12} {:<20} {:<20}",
-                        run.id, run.workflow_id, run.status_str(), started, finished
+                        run.id,
+                        run.workflow_id,
+                        run.status_str(),
+                        started,
+                        finished
                     );
                 }
             }
@@ -363,12 +381,18 @@ fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<
         match task.executor {
             ExecutorKind::CloudRun => {
                 if let Some(job) = task.job.as_deref() {
-                    params.insert("job_name".to_string(), serde_json::Value::String(job.to_string()));
+                    params.insert(
+                        "job_name".to_string(),
+                        serde_json::Value::String(job.to_string()),
+                    );
                 }
             }
             ExecutorKind::Process => {
                 if let Some(command) = task.command.as_deref() {
-                    params.insert("command".to_string(), serde_json::Value::String(command.to_string()));
+                    params.insert(
+                        "command".to_string(),
+                        serde_json::Value::String(command.to_string()),
+                    );
                 } else if let Some(file) = task.file.as_ref() {
                     params.insert(
                         "command".to_string(),
@@ -383,6 +407,22 @@ fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<
                         serde_json::Value::String(file.to_string_lossy().to_string()),
                     );
                 }
+                if let Some(module) = task.module.as_deref() {
+                    params.insert(
+                        "task_module".to_string(),
+                        serde_json::Value::String(module.to_string()),
+                    );
+                }
+                if let Some(function) = task.function.as_deref() {
+                    params.insert(
+                        "task_function".to_string(),
+                        serde_json::Value::String(function.to_string()),
+                    );
+                }
+                params.insert(
+                    "python_path".to_string(),
+                    serde_json::Value::String(compiled.root.to_string_lossy().to_string()),
+                );
             }
         }
 

@@ -1,9 +1,9 @@
 // Event-driven executor trait with channel-based status updates
 // This replaces polling with push-based notifications for better performance
 
-use uuid::Uuid;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Status update event from executor to scheduler
 #[derive(Debug, Clone)]

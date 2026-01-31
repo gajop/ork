@@ -1,0 +1,19 @@
+name: simple_demo
+
+tasks:
+  hello:
+    executor: python
+    module: simple
+    function: hello
+
+  wait:
+    executor: python
+    module: simple
+    function: wait
+    depends_on: [hello]
+
+  note:
+    executor: python
+    module: simple
+    function: note
+    depends_on: [wait]

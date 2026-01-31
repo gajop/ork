@@ -56,7 +56,8 @@ impl FileDatabase {
     }
 
     fn workflow_tasks_path(&self, workflow_id: Uuid) -> PathBuf {
-        self.workflow_tasks_dir().join(format!("{}.json", workflow_id))
+        self.workflow_tasks_dir()
+            .join(format!("{}.json", workflow_id))
     }
 
     async fn ensure_dirs(&self) -> Result<()> {
@@ -106,7 +107,8 @@ impl Database for FileDatabase {
             updated_at: Utc::now(),
         };
 
-        self.write_json(&self.workflow_path(workflow.id), &workflow).await?;
+        self.write_json(&self.workflow_path(workflow.id), &workflow)
+            .await?;
         Ok(workflow)
     }
 
@@ -139,6 +141,25 @@ impl Database for FileDatabase {
 
         workflows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(workflows)
+    }
+
+    async fn delete_workflow(&self, name: &str) -> Result<()> {
+        self.ensure_dirs().await?;
+
+        let workflow = self.get_workflow(name).await?;
+
+        let runs = self.list_runs(Some(workflow.id)).await?;
+        for run in runs {
+            let tasks = self.list_tasks(run.id).await?;
+            for task in tasks {
+                let _ = fs::remove_file(self.task_path(task.id)).await;
+            }
+            let _ = fs::remove_file(self.run_path(run.id)).await;
+        }
+
+        let _ = fs::remove_file(self.workflow_tasks_path(workflow.id)).await;
+        let _ = fs::remove_file(self.workflow_path(workflow.id)).await;
+        Ok(())
     }
 
     async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> Result<Run> {
@@ -225,7 +246,10 @@ impl Database for FileDatabase {
 
     async fn get_pending_runs(&self) -> Result<Vec<Run>> {
         let all_runs = self.list_runs(None).await?;
-        Ok(all_runs.into_iter().filter(|r| r.status_str() == "pending").collect())
+        Ok(all_runs
+            .into_iter()
+            .filter(|r| r.status_str() == "pending")
+            .collect())
     }
 
     async fn batch_create_tasks(
@@ -294,7 +318,8 @@ impl Database for FileDatabase {
                 "created_at": now,
             }))?;
 
-            self.write_json(&self.task_path(task_json.id), &task_json).await?;
+            self.write_json(&self.task_path(task_json.id), &task_json)
+                .await?;
         }
 
         Ok(())
@@ -357,7 +382,8 @@ impl Database for FileDatabase {
         updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         for (task_id, status, execution_name, error) in updates {
-            self.update_task_status(*task_id, status, *execution_name, *error).await?;
+            self.update_task_status(*task_id, status, *execution_name, *error)
+                .await?;
         }
         Ok(())
     }
@@ -418,7 +444,9 @@ impl Database for FileDatabase {
         // TaskWithWorkflow has private fields and no public constructor
         // This method is only used by the scheduler for optimization
         // FileDatabase doesn't need this optimization since it's file-based
-        anyhow::bail!("FileDatabase::get_pending_tasks_with_workflow not yet implemented - use get_pending_tasks instead");
+        anyhow::bail!(
+            "FileDatabase::get_pending_tasks_with_workflow not yet implemented - use get_pending_tasks instead"
+        );
     }
 
     async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
@@ -502,7 +530,10 @@ impl Database for FileDatabase {
         let tasks = self.list_tasks(run_id).await?;
 
         let total = tasks.len() as i64;
-        let completed = tasks.iter().filter(|t| matches!(t.status_str(), "success" | "failed")).count() as i64;
+        let completed = tasks
+            .iter()
+            .filter(|t| matches!(t.status_str(), "success" | "failed"))
+            .count() as i64;
         let failed = tasks.iter().filter(|t| t.status_str() == "failed").count() as i64;
 
         Ok((total, completed, failed))

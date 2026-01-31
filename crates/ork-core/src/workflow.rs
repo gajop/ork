@@ -20,6 +20,8 @@ pub struct TaskDefinition {
     pub file: Option<PathBuf>,
     pub command: Option<String>,
     pub job: Option<String>,
+    pub module: Option<String>,
+    pub function: Option<String>,
     #[serde(default)]
     pub input: serde_json::Value,
     #[serde(default)]
@@ -94,13 +96,22 @@ impl Workflow {
 
             match task.executor {
                 ExecutorKind::Python => {
-                    if task.file.is_none() {
-                        return Err(WorkflowValidationError::MissingTaskFile { task: name.clone() });
+                    let has_module = task
+                        .module
+                        .as_deref()
+                        .map(|module| !module.is_empty())
+                        .unwrap_or(false);
+                    if task.file.is_none() && !has_module {
+                        return Err(WorkflowValidationError::MissingTaskFile {
+                            task: name.clone(),
+                        });
                     }
                 }
                 ExecutorKind::Process => {
                     if task.command.is_none() && task.file.is_none() {
-                        return Err(WorkflowValidationError::MissingTaskCommand { task: name.clone() });
+                        return Err(WorkflowValidationError::MissingTaskCommand {
+                            task: name.clone(),
+                        });
                     }
                 }
                 ExecutorKind::CloudRun => {

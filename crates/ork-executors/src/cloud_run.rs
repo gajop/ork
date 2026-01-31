@@ -4,8 +4,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-use tokio::time::{sleep, Duration};
+use tokio::sync::{RwLock, mpsc};
+use tokio::time::{Duration, sleep};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -73,7 +73,9 @@ impl CloudRunClient {
         let provider = gcp_auth::provider().await
             .context("Failed to get GCP auth provider. Set GOOGLE_APPLICATION_CREDENTIALS or use workload identity")?;
         let scopes = &["https://www.googleapis.com/auth/cloud-platform"];
-        let token = provider.token(scopes).await
+        let token = provider
+            .token(scopes)
+            .await
             .context("Failed to get access token")?;
         debug!("Got access token from GCP auth");
         Ok(token.as_str().to_string())
@@ -105,7 +107,10 @@ impl CloudRunClient {
                                     for (env_key, env_val) in env_obj {
                                         vars.push(EnvVar {
                                             name: env_key.clone(),
-                                            value: env_val.to_string().trim_matches('"').to_string(),
+                                            value: env_val
+                                                .to_string()
+                                                .trim_matches('"')
+                                                .to_string(),
                                         });
                                     }
                                 }
@@ -275,7 +280,10 @@ impl CloudRunClient {
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to get status for {}: {}", exec_state.execution_name, e);
+                    warn!(
+                        "Failed to get status for {}: {}",
+                        exec_state.execution_name, e
+                    );
                 }
             }
         }
@@ -293,7 +301,12 @@ impl CloudRunClient {
 
 #[async_trait]
 impl Executor for CloudRunClient {
-    async fn execute(&self, task_id: Uuid, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
+    async fn execute(
+        &self,
+        task_id: Uuid,
+        job_name: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<String> {
         self.execute_job(task_id, job_name, params).await
     }
 

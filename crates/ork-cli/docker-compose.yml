@@ -16,7 +16,9 @@ services:
       retries: 5
 
   orchestrator:
-    build: .
+    build:
+      context: ../..
+      dockerfile: crates/ork-cli/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/orchestrator
       RUST_LOG: info

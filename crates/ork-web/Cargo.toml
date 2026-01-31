@@ -3,6 +3,10 @@ name = "ork-web"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["postgres"]
+postgres = ["ork-state/postgres", "ork-core/sqlx"]
+
 [dependencies]
 axum = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
@@ -13,6 +17,7 @@ serde_json = { workspace = true }
 clap = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
-ork-core = { path = "../ork-core" }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+ork-core = { path = "../ork-core", features = ["sqlx"] }
 ork-state = { path = "../ork-state" }
-ork-runner = { path = "../ork-runner" }
