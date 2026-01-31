@@ -220,13 +220,26 @@
       target.innerHTML = renderGraph(workflowGraph, {});
     }
     function showDetail(data) {
+      if (data.workflow && data.workflow.tasks && data.workflow.tasks.length) {
+        workflowGraph = data.workflow.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
+      } else if (data.tasks && data.tasks.length) {
+        workflowGraph = data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
+      }
+      if (data.run && data.run.workflow) {
+        currentWorkflow = data.run.workflow;
+        if (workflowSelect && currentWorkflow) {
+          const hasOption = Array.from(workflowSelect.options).some(opt => opt.value === currentWorkflow);
+          if (hasOption) {
+            workflowSelect.value = currentWorkflow;
+          }
+        }
+      }
+      renderWorkflowGraph();
+
       const statusMap = Object.fromEntries(data.tasks.map(t => [t.name, t.status]));
-      const workflowNodes = data.workflow && data.workflow.tasks
-        ? data.workflow.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }))
-        : [];
-      const graphNodes = workflowNodes.length
-        ? workflowNodes
-        : (workflowGraph.length ? workflowGraph : data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] })));
+      const graphNodes = workflowGraph.length
+        ? workflowGraph
+        : data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
       const graphSvg = renderGraph(graphNodes, statusMap);
       const taskRows = data.tasks.map(t => `
         <tr>
