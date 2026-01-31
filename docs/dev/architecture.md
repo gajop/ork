@@ -32,6 +32,10 @@ graph TB
         CloudExec["CloudRunClient"]
     end
 
+    subgraph Web["crates/ork-web"]
+        WebUI["ork-web (UI/API)"]
+    end
+
     subgraph Workers["Workers"]
         LocalJob["local script: {script_dir}/{command}"]
         PyTask["python task: scripts/run_python_task.py + {task_file}"]
@@ -54,6 +58,7 @@ graph TB
     CloudExec -->|create + poll| CloudJob
     ProcExec -. "StatusUpdate via mpsc::unbounded_channel" .-> Scheduler
     CloudExec -. "StatusUpdate via mpsc::unbounded_channel" .-> Scheduler
+    WebUI -->|list + trigger runs| DB
 ```
 
 ## Component Responsibilities
@@ -69,8 +74,11 @@ graph TB
 | [ork-executors::ExecutorManager](../../crates/ork-executors/src/manager.rs) | Chooses executor per task and caches backends |
 | [ork-executors::ProcessExecutor](../../crates/ork-executors/src/process.rs) | Executes local scripts or Python tasks via [scripts/run_python_task.py](../../scripts/run_python_task.py), reports status |
 | [ork-executors::CloudRunClient](../../crates/ork-executors/src/cloud_run.rs) | Creates and polls Cloud Run executions, reports status |
-| [ork-runner::LocalScheduler (legacy)](../../crates/ork-runner/src/scheduler.rs) | Old scheduler used by ork-web; pending migration |
-| [ork-web (legacy)](crates/ork-web.md) | Axum UI/API built on ork-runner |
+| [ork-web](crates/ork-web.md) | Axum UI/API backed by Postgres (read runs/workflows, trigger runs) |
+
+### Legacy (deprecated)
+
+- [ork-runner::LocalScheduler](../../crates/ork-runner/src/scheduler.rs) is retained for reference only; ork-web no longer uses it.
 
 ## Data Flow
 

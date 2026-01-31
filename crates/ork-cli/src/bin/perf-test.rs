@@ -78,7 +78,10 @@ async fn main() -> Result<()> {
     println!("Runs to trigger: {}", config.workflows);
     println!("Tasks per run: {}", config.tasks_per_workflow);
     println!("Task duration: {}s", config.duration);
-    println!("Total tasks: {}", config.workflows * config.tasks_per_workflow);
+    println!(
+        "Total tasks: {}",
+        config.workflows * config.tasks_per_workflow
+    );
     println!();
 
     // Create test script
@@ -132,8 +135,14 @@ async fn main() -> Result<()> {
     println!("Starting scheduler...");
     println!("  Poll interval: {}s", config.scheduler.poll_interval_secs);
     println!("  Max batch: {}", config.scheduler.max_tasks_per_batch);
-    println!("  Max concurrent dispatches: {}", config.scheduler.max_concurrent_dispatches);
-    println!("  Max concurrent status checks: {}", config.scheduler.max_concurrent_status_checks);
+    println!(
+        "  Max concurrent dispatches: {}",
+        config.scheduler.max_concurrent_dispatches
+    );
+    println!(
+        "  Max concurrent status checks: {}",
+        config.scheduler.max_concurrent_status_checks
+    );
 
     // Redirect scheduler logs to file so we can read them
     let scheduler_log_path = format!("/tmp/ork-scheduler-{}.log", std::process::id());
@@ -194,11 +203,10 @@ async fn main() -> Result<()> {
         sleep(Duration::from_millis(500)).await;
 
         // Get task counts by status
-        let status_counts: Vec<(String, i64)> = sqlx::query_as(
-            "SELECT status, COUNT(*) FROM tasks GROUP BY status"
-        )
-        .fetch_all(&pool)
-        .await?;
+        let status_counts: Vec<(String, i64)> =
+            sqlx::query_as("SELECT status, COUNT(*) FROM tasks GROUP BY status")
+                .fetch_all(&pool)
+                .await?;
 
         let mut pending = 0i64;
         let mut dispatched = 0i64;
@@ -258,7 +266,10 @@ async fn main() -> Result<()> {
         let metrics_display = if !all_metrics.is_empty() {
             let total_runs: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
             let total_tasks: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
-            let total_status_updates: u128 = all_metrics.iter().map(|m| m.process_status_updates_ms).sum();
+            let total_status_updates: u128 = all_metrics
+                .iter()
+                .map(|m| m.process_status_updates_ms)
+                .sum();
             let total_sleep: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
             let total_time: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
 
@@ -269,10 +280,14 @@ async fn main() -> Result<()> {
 
             format!(
                 "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% updates:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops)",
-                total_runs as f64 / 1000.0, runs_pct,
-                total_tasks as f64 / 1000.0, tasks_pct,
-                total_status_updates as f64 / 1000.0, status_updates_pct,
-                total_sleep as f64 / 1000.0, sleep_pct,
+                total_runs as f64 / 1000.0,
+                runs_pct,
+                total_tasks as f64 / 1000.0,
+                tasks_pct,
+                total_status_updates as f64 / 1000.0,
+                status_updates_pct,
+                total_sleep as f64 / 1000.0,
+                sleep_pct,
                 total_time as f64 / 1000.0,
                 all_metrics.len()
             )
@@ -305,26 +320,40 @@ async fn main() -> Result<()> {
     if !all_metrics.is_empty() {
         let total_runs_ms: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
         let total_tasks_ms: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
-        let total_status_updates_ms: u128 = all_metrics.iter().map(|m| m.process_status_updates_ms).sum();
+        let total_status_updates_ms: u128 = all_metrics
+            .iter()
+            .map(|m| m.process_status_updates_ms)
+            .sum();
         let total_sleep_ms: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
         let total_loop_ms: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
 
         println!();
         println!("Scheduler Time Breakdown:");
         println!("  Total scheduler loops: {}", all_metrics.len());
-        println!("  Time processing runs: {:.2}s ({:.1}%)",
+        println!(
+            "  Time processing runs: {:.2}s ({:.1}%)",
             total_runs_ms as f64 / 1000.0,
-            (total_runs_ms as f64 / total_loop_ms as f64) * 100.0);
-        println!("  Time processing tasks: {:.2}s ({:.1}%)",
+            (total_runs_ms as f64 / total_loop_ms as f64) * 100.0
+        );
+        println!(
+            "  Time processing tasks: {:.2}s ({:.1}%)",
             total_tasks_ms as f64 / 1000.0,
-            (total_tasks_ms as f64 / total_loop_ms as f64) * 100.0);
-        println!("  Time processing status updates: {:.2}s ({:.1}%)",
+            (total_tasks_ms as f64 / total_loop_ms as f64) * 100.0
+        );
+        println!(
+            "  Time processing status updates: {:.2}s ({:.1}%)",
             total_status_updates_ms as f64 / 1000.0,
-            (total_status_updates_ms as f64 / total_loop_ms as f64) * 100.0);
-        println!("  Time sleeping: {:.2}s ({:.1}%)",
+            (total_status_updates_ms as f64 / total_loop_ms as f64) * 100.0
+        );
+        println!(
+            "  Time sleeping: {:.2}s ({:.1}%)",
             total_sleep_ms as f64 / 1000.0,
-            (total_sleep_ms as f64 / total_loop_ms as f64) * 100.0);
-        println!("  Total scheduler time: {:.2}s", total_loop_ms as f64 / 1000.0);
+            (total_sleep_ms as f64 / total_loop_ms as f64) * 100.0
+        );
+        println!(
+            "  Total scheduler time: {:.2}s",
+            total_loop_ms as f64 / 1000.0
+        );
     }
 
     // Query latency stats
@@ -362,7 +391,10 @@ async fn main() -> Result<()> {
     println!("  Total duration: {:.2}s", total_duration);
     println!();
     println!("Explanation:");
-    println!("  - {} runs created ({} tasks each = {} total tasks)", config.workflows, config.tasks_per_workflow, total_tasks);
+    println!(
+        "  - {} runs created ({} tasks each = {} total tasks)",
+        config.workflows, config.tasks_per_workflow, total_tasks
+    );
     println!("  - Run submission measures how fast we enqueue work");
     println!("  - Task completion measures actual work throughput");
 

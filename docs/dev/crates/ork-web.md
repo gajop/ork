@@ -1,21 +1,22 @@
-# ork-web (legacy)
+# ork-web
 
-Axum-based web UI/API. Currently uses [`ork-runner::LocalScheduler`](../../../crates/ork-runner/src/scheduler.rs) and legacy state store types.
+Axum-based web UI/API backed by the primary database. It reads workflows/runs/tasks and triggers new runs against the DB-backed scheduler.
 
 ## Owns
 
-- Web API routes for viewing workflows, runs, and tasks
+- Web API routes for listing workflows, runs, and tasks
+- Run trigger endpoint that creates `runs` rows in Postgres
 - Web server bootstrapping
 
-## Migration Note
+## Notes
 
-- Should be migrated to [`ork-core::Scheduler`](../../../crates/ork-core/src/scheduler.rs) + [`ork-state::Database`](../../../crates/ork-core/src/database.rs).
+- Does not run the scheduler loop; it expects `ork run` (or another scheduler host) to be running.
 
 ## Files
 
 | File | Purpose | Updated | File SHA |
 |------|---------|---------|----------|
-| [Cargo.toml](../../../crates/ork-web/Cargo.toml) | Crate manifest for the web UI/API. | 2026-01-25 | fe6c43c |
-| [src/api.rs](../../../crates/ork-web/src/api.rs) | HTTP routes and handlers for workflows, runs, and tasks. | 2026-01-30 | 44e74dc |
-| [src/main.rs](../../../crates/ork-web/src/main.rs) | Boots the Axum server and configures the app. | 2026-01-30 | 4e9032f |
-| [ui/index.html](../../../crates/ork-web/ui/index.html) | Static HTML for the legacy web UI. | 2026-01-25 | e12f841 |
+| [Cargo.toml](../../../crates/ork-web/Cargo.toml) | Crate manifest for the web UI/API. | 2026-01-31 | cf1ea18 |
+| [src/api.rs](../../../crates/ork-web/src/api.rs) | HTTP routes and handlers for workflows, runs, and tasks. | 2026-01-31 | 92c321c |
+| [src/main.rs](../../../crates/ork-web/src/main.rs) | Boots the Axum server and configures the app. | 2026-01-31 | d229db8 |
+| [ui/index.html](../../../crates/ork-web/ui/index.html) | Static HTML for the web UI. | 2026-01-31 | e0e3fd0 |

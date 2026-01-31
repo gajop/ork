@@ -177,25 +177,31 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         // This ensures runs are only marked as running if tasks were successfully created
         for run in &runs {
             if let Some(workflow) = workflow_map.get(&run.workflow_id) {
-                let create_result = if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id) {
-                    let tasks = self.build_run_tasks(run.id, workflow, workflow_tasks);
-                    self.db.batch_create_dag_tasks(run.id, &tasks).await
-                } else if workflow.executor_type == "dag" {
-                    Err(anyhow::anyhow!(
-                        "workflow '{}' is missing compiled workflow_tasks",
-                        workflow.name
-                    ))
-                } else {
-                    let task_count = workflow
-                        .task_params
-                        .as_ref()
-                        .and_then(|p| json_inner(p).get("task_count"))
-                        .and_then(|v: &serde_json::Value| v.as_i64())
-                        .unwrap_or(3) as i32;
-                    self.db
-                        .batch_create_tasks(run.id, task_count, &workflow.name, &workflow.executor_type)
-                        .await
-                };
+                let create_result =
+                    if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id) {
+                        let tasks = self.build_run_tasks(run.id, workflow, workflow_tasks);
+                        self.db.batch_create_dag_tasks(run.id, &tasks).await
+                    } else if workflow.executor_type == "dag" {
+                        Err(anyhow::anyhow!(
+                            "workflow '{}' is missing compiled workflow_tasks",
+                            workflow.name
+                        ))
+                    } else {
+                        let task_count = workflow
+                            .task_params
+                            .as_ref()
+                            .and_then(|p| json_inner(p).get("task_count"))
+                            .and_then(|v: &serde_json::Value| v.as_i64())
+                            .unwrap_or(3) as i32;
+                        self.db
+                            .batch_create_tasks(
+                                run.id,
+                                task_count,
+                                &workflow.name,
+                                &workflow.executor_type,
+                            )
+                            .await
+                    };
 
                 // Create tasks
                 if let Err(e) = create_result {
@@ -357,11 +363,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             while !pending.is_empty() {
                 let next = self
                     .db
-                    .mark_tasks_failed_by_dependency(
-                        run_id,
-                        &pending,
-                        "dependency failed",
-                    )
+                    .mark_tasks_failed_by_dependency(run_id, &pending, "dependency failed")
                     .await?;
                 let mut new_pending = Vec::new();
                 for name in next {

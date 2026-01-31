@@ -8,7 +8,7 @@
     header { padding: 12px 16px; background: #14141a; border-bottom: 1px solid #22232b; display: flex; align-items: center; justify-content: space-between; }
     header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
     header .controls { display: flex; gap: 8px; align-items: center; }
-    header input { background:#1a1b23; color:#e8e8ec; border:1px solid #22232b; border-radius:6px; padding:6px 8px; width:280px; }
+    header select { background:#1a1b23; color:#e8e8ec; border:1px solid #22232b; border-radius:6px; padding:6px 8px; width:280px; }
     header button { background:#3a89ff; border:none; color:#0c1220; padding:6px 10px; border-radius:6px; font-weight:700; cursor:pointer; }
     main { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 52px); }
     #runs { border-right: 1px solid #22232b; overflow-y: auto; }
@@ -31,7 +31,7 @@
   <header>
     <h1>Ork Runs</h1>
     <div class="controls">
-      <input id="workflow-path" placeholder="path to workflow yaml" />
+      <select id="workflow-select"></select>
       <button id="run-btn">Run</button>
       <button id="refresh">Refresh</button>
     </div>
@@ -54,34 +54,67 @@
     let selectedRunId = null;
     let detailInterval = null;
     let lastRuns = [];
-    let currentWorkflow = 'examples/demo/workflows/demo.yaml';
+    let currentWorkflow = null;
     let lastRunsHash = '';
     let workflowGraph = [];
+    let workflows = [];
 
     const runsEl = document.getElementById('runs');
-    document.getElementById('refresh').onclick = () => fetchRuns();
+    const workflowSelect = document.getElementById('workflow-select');
+    document.getElementById('refresh').onclick = () => {
+      fetchRuns();
+      fetchWorkflows();
+    };
     document.getElementById('run-btn').onclick = () => triggerRun();
-    document.getElementById('workflow-path').value = currentWorkflow;
     runsEl.addEventListener('click', (e) => {
       const target = e.target.closest('.run');
       if (target && target.dataset.id) {
         selectRun(target.dataset.id);
       }
     });
-    document.getElementById('workflow-path').addEventListener('change', (e) => {
+    workflowSelect.addEventListener('change', (e) => {
       currentWorkflow = e.target.value || currentWorkflow;
       fetchWorkflowGraph(currentWorkflow);
     });
     fetchRuns();
-    fetchWorkflowGraph(currentWorkflow);
+    fetchWorkflows();
     setInterval(fetchRuns, 100);
 
     function fetchRuns() {
       fetch('/api/runs').then(r => r.json()).then(renderRuns).catch(() => {});
     }
 
-    function fetchWorkflowGraph(path) {
-      fetch('/api/workflow?path=' + encodeURIComponent(path))
+    function fetchWorkflows() {
+      workflowSelect.innerHTML = '<option>Loading workflows...</option>';
+      fetch('/api/workflows')
+        .then(r => r.json())
+        .then(items => {
+          workflows = Array.isArray(items) ? items : [];
+          renderWorkflowOptions();
+          if (!currentWorkflow && workflows.length > 0) {
+            currentWorkflow = workflows[0].name;
+          }
+          if (currentWorkflow) {
+            workflowSelect.value = currentWorkflow;
+            fetchWorkflowGraph(currentWorkflow);
+          }
+        })
+        .catch(() => {});
+    }
+
+    function renderWorkflowOptions() {
+      if (!workflows.length) {
+        workflowSelect.innerHTML = '<option value=\"\">No workflows</option>';
+        workflowGraph = [];
+        renderWorkflowGraph();
+        return;
+      }
+      workflowSelect.innerHTML = workflows.map(wf => `<option value=\"${wf.name}\">${wf.name}</option>`).join('');
+    }
+
+    function fetchWorkflowGraph(name) {
+      if (!name) return;
+      fetch('/api/workflows/' + encodeURIComponent(name))
         .then(r => r.json())
         .then(data => {
           workflowGraph = data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
@@ -141,8 +174,8 @@
     }
 
     function triggerRun() {
-      const wf = document.getElementById('workflow-path').value || currentWorkflow;
-      currentWorkflow = wf;
+      const wf = workflowSelect.value || currentWorkflow;
+      currentWorkflow = wf || currentWorkflow;
       fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -187,16 +220,21 @@
       target.innerHTML = renderGraph(workflowGraph, {});
     }
     function showDetail(data) {
-      const statusMap = Object.fromEntries(data.tasks.map(t => [t.task.task, t.task.status]));
-      const graphNodes = workflowGraph.length ? workflowGraph : data.tasks.map(t => ({ id: t.task.task, deps: t.deps || [] }));
+      const statusMap = Object.fromEntries(data.tasks.map(t => [t.name, t.status]));
+      const workflowNodes = data.workflow && data.workflow.tasks
+        ? data.workflow.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }))
+        : [];
+      const graphNodes = workflowNodes.length
+        ? workflowNodes
+        : (workflowGraph.length ? workflowGraph : data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] })));
       const graphSvg = renderGraph(graphNodes, statusMap);
       const taskRows = data.tasks.map(t => `
         <tr>
-          <td>${t.task.task}</td>
-          <td>${badge(t.task.status)}</td>
-          <td>${fmtTime(t.task.started_at)}</td>
-          <td>${fmtTime(t.task.finished_at)}</td>
-          <td>${fmtDuration(t.task.started_at, t.task.finished_at)}</td>
+          <td>${t.name}</td>
+          <td>${badge(t.status)}</td>
+          <td>${fmtTime(t.started_at)}</td>
+          <td>${fmtTime(t.finished_at)}</td>
+          <td>${fmtDuration(t.started_at, t.finished_at)}</td>
           <td><code>${truncate(JSON.stringify(t.output ?? {}), 120)}</code></td>
         </tr>
       `).join('');

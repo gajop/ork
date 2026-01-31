@@ -1,10 +1,10 @@
 // ExecutorManager trait for managing executor instances
 // Concrete implementation in ork-executors crate
 
-use async_trait::async_trait;
-use std::sync::Arc;
 use crate::executor::Executor;
 use crate::models::Workflow;
+use async_trait::async_trait;
+use std::sync::Arc;
 
 /// ExecutorManager trait for managing workflow executors
 ///

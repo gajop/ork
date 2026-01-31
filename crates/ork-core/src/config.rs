@@ -50,11 +50,11 @@ impl OrchestratorConfig {
     /// Create a low-latency, low-memory configuration
     pub fn optimized() -> Self {
         Self {
-            poll_interval_secs: 2.0,         // Faster polling
-            max_tasks_per_batch: 50,        // Smaller batches
-            max_concurrent_dispatches: 5,   // Limited concurrency
+            poll_interval_secs: 2.0,          // Faster polling
+            max_tasks_per_batch: 50,          // Smaller batches
+            max_concurrent_dispatches: 5,     // Limited concurrency
             max_concurrent_status_checks: 20, // Moderate status checks
-            db_pool_size: 5,                // Minimal connections
+            db_pool_size: 5,                  // Minimal connections
         }
     }
 

@@ -10,10 +10,10 @@ use ork_core::executor::Executor;
 use ork_core::executor_manager::ExecutorManager as ExecutorManagerTrait;
 use ork_core::models::{ExecutorType, Workflow};
 
-#[cfg(feature = "process")]
-use crate::process::ProcessExecutor;
 #[cfg(feature = "cloudrun")]
 use crate::cloud_run::CloudRunClient;
+#[cfg(feature = "process")]
+use crate::process::ProcessExecutor;
 
 pub struct ExecutorManager {
     #[cfg(feature = "process")]

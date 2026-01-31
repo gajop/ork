@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use ork_core::database::Database as DatabaseTrait;
@@ -88,6 +88,32 @@ impl PostgresDatabase {
         .await?;
 
         Ok(workflows)
+    }
+
+    pub async fn delete_workflow(&self, name: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            DELETE FROM runs
+            WHERE workflow_id = (SELECT id FROM workflows WHERE name = $1)
+            "#,
+        )
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            DELETE FROM workflows WHERE name = $1
+            "#,
+        )
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
     }
 
     // Run operations
@@ -179,7 +205,6 @@ impl PostgresDatabase {
 
         Ok(runs)
     }
-
 
     pub async fn batch_create_tasks(
         &self,
@@ -322,7 +347,10 @@ impl PostgresDatabase {
     // Optimized batch queries to avoid N+1 queries
 
     /// Get pending tasks with workflow info in a single query (eliminates N+1)
-    pub async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
+    pub async fn get_pending_tasks_with_workflow(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<TaskWithWorkflow>> {
         let tasks = sqlx::query_as::<_, TaskWithWorkflow>(
             r#"
             SELECT
@@ -401,7 +429,10 @@ impl PostgresDatabase {
         Ok(())
     }
 
-    pub async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<ork_core::models::WorkflowTask>> {
+    pub async fn list_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Vec<ork_core::models::WorkflowTask>> {
         let tasks = sqlx::query_as::<_, ork_core::models::WorkflowTask>(
             r#"
             SELECT * FROM workflow_tasks
@@ -415,7 +446,6 @@ impl PostgresDatabase {
 
         Ok(tasks)
     }
-
 
     /// Batch update task statuses (more efficient than one-by-one)
     pub async fn batch_update_task_status(
@@ -459,42 +489,35 @@ impl PostgresDatabase {
 
     // Scheduler-specific methods
     pub async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
-        let workflows = sqlx::query_as::<_, Workflow>(
-            "SELECT * FROM workflows WHERE id = ANY($1)"
-        )
-        .bind(workflow_ids)
-        .fetch_all(&self.pool)
-        .await?;
+        let workflows = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = ANY($1)")
+            .bind(workflow_ids)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(workflows)
     }
 
     pub async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
-        let workflow = sqlx::query_as::<_, Workflow>(
-            "SELECT * FROM workflows WHERE id = $1"
-        )
-        .bind(workflow_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = $1")
+            .bind(workflow_id)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(workflow)
     }
 
     pub async fn get_task_run_id(&self, task_id: Uuid) -> Result<Uuid> {
-        let (run_id,): (Uuid,) = sqlx::query_as(
-            "SELECT run_id FROM tasks WHERE id = $1"
-        )
-        .bind(task_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let (run_id,): (Uuid,) = sqlx::query_as("SELECT run_id FROM tasks WHERE id = $1")
+            .bind(task_id)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(run_id)
     }
 
     pub async fn get_task_identity(&self, task_id: Uuid) -> Result<(Uuid, String)> {
-        let (run_id, task_name): (Uuid, String) = sqlx::query_as(
-            "SELECT run_id, task_name FROM tasks WHERE id = $1"
-        )
-        .bind(task_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let (run_id, task_name): (Uuid, String) =
+            sqlx::query_as("SELECT run_id, task_name FROM tasks WHERE id = $1")
+                .bind(task_id)
+                .fetch_one(&self.pool)
+                .await?;
         Ok((run_id, task_name))
     }
 
@@ -538,7 +561,7 @@ impl PostgresDatabase {
                 COUNT(*) FILTER (WHERE status = 'failed') as failed
             FROM tasks
             WHERE run_id = $1
-            "#
+            "#,
         )
         .bind(run_id)
         .fetch_one(&self.pool)
@@ -581,6 +604,10 @@ impl DatabaseTrait for PostgresDatabase {
         PostgresDatabase::list_workflows(self).await
     }
 
+    async fn delete_workflow(&self, name: &str) -> Result<()> {
+        PostgresDatabase::delete_workflow(self, name).await
+    }
+
     async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> Result<Run> {
         PostgresDatabase::create_run(self, workflow_id, triggered_by).await
     }
@@ -613,7 +640,8 @@ impl DatabaseTrait for PostgresDatabase {
         workflow_name: &str,
         executor_type: &str,
     ) -> Result<()> {
-        PostgresDatabase::batch_create_tasks(self, run_id, task_count, workflow_name, executor_type).await
+        PostgresDatabase::batch_create_tasks(self, run_id, task_count, workflow_name, executor_type)
+            .await
     }
 
     async fn batch_create_dag_tasks(
@@ -632,7 +660,10 @@ impl DatabaseTrait for PostgresDatabase {
         PostgresDatabase::create_workflow_tasks(self, workflow_id, tasks).await
     }
 
-    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<ork_core::models::WorkflowTask>> {
+    async fn list_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Vec<ork_core::models::WorkflowTask>> {
         PostgresDatabase::list_workflow_tasks(self, workflow_id).await
     }
 
@@ -691,7 +722,8 @@ impl DatabaseTrait for PostgresDatabase {
         failed_task_names: &[String],
         error: &str,
     ) -> Result<Vec<String>> {
-        PostgresDatabase::mark_tasks_failed_by_dependency(self, run_id, failed_task_names, error).await
+        PostgresDatabase::mark_tasks_failed_by_dependency(self, run_id, failed_task_names, error)
+            .await
     }
 
     async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {

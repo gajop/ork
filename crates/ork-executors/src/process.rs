@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -46,7 +46,15 @@ impl ProcessExecutor {
             command, execution_id
         );
 
-        let (mut env_vars, task_file, task_input, runner_path) = build_env_vars(params);
+        let (
+            mut env_vars,
+            task_file,
+            task_module,
+            task_function,
+            task_input,
+            runner_path,
+            python_path,
+        ) = build_env_vars(params);
 
         // Add execution ID to env
         env_vars.insert("EXECUTION_ID".to_string(), execution_id.clone());
@@ -66,11 +74,24 @@ impl ProcessExecutor {
 
         tokio::spawn(async move {
             let mut cmd = if let Some(task_file) = task_file.as_ref() {
-                let mut python_cmd = build_python_command(task_file);
+                let mut python_cmd = build_python_command(task_file, python_path.as_ref());
                 if let Some(runner_path) = runner_path.or_else(find_python_runner) {
                     python_cmd.arg(runner_path);
                 } else {
-                    warn!("Python runner not found. Set runner_path in params or run from repo root.");
+                    warn!(
+                        "Python runner not found. Set runner_path in params or run from repo root."
+                    );
+                    python_cmd.arg("scripts/run_python_task.py");
+                }
+                python_cmd
+            } else if task_module.is_some() {
+                let mut python_cmd = build_python_command(Path::new("."), python_path.as_ref());
+                if let Some(runner_path) = runner_path.or_else(find_python_runner) {
+                    python_cmd.arg(runner_path);
+                } else {
+                    warn!(
+                        "Python runner not found. Set runner_path in params or run from repo root."
+                    );
                     python_cmd.arg("scripts/run_python_task.py");
                 }
                 python_cmd
@@ -82,7 +103,10 @@ impl ProcessExecutor {
             };
 
             if let Some(task_file) = task_file.as_ref() {
-                env_vars.insert("ORK_TASK_FILE".to_string(), task_file.to_string_lossy().to_string());
+                env_vars.insert(
+                    "ORK_TASK_FILE".to_string(),
+                    task_file.to_string_lossy().to_string(),
+                );
                 if let Some(input) = task_input {
                     env_vars.insert("ORK_INPUT_JSON".to_string(), input.to_string());
                 }
@@ -95,8 +119,29 @@ impl ProcessExecutor {
                 if let Some(run_id) = env_vars.get("run_id").cloned() {
                     env_vars.insert("ORK_RUN_ID".to_string(), run_id);
                 }
-                if let Some(root) = find_project_root(task_file) {
+                if let Some(root) = python_path.as_ref().cloned().or_else(|| find_project_root(task_file)) {
                     cmd.current_dir(&root);
+                    env_vars.insert("PYTHONPATH".to_string(), root.to_string_lossy().to_string());
+                }
+            } else if let Some(module) = task_module.as_ref() {
+                env_vars.insert("ORK_TASK_MODULE".to_string(), module.to_string());
+                if let Some(function) = task_function.as_ref() {
+                    env_vars.insert("ORK_TASK_FUNCTION".to_string(), function.to_string());
+                }
+                if let Some(input) = task_input {
+                    env_vars.insert("ORK_INPUT_JSON".to_string(), input.to_string());
+                }
+                if let Some(name) = env_vars.get("task_name").cloned() {
+                    env_vars.insert("ORK_TASK_NAME".to_string(), name);
+                }
+                if let Some(name) = env_vars.get("workflow_name").cloned() {
+                    env_vars.insert("ORK_WORKFLOW_NAME".to_string(), name);
+                }
+                if let Some(run_id) = env_vars.get("run_id").cloned() {
+                    env_vars.insert("ORK_RUN_ID".to_string(), run_id);
+                }
+                if let Some(root) = python_path.as_ref() {
+                    cmd.current_dir(root);
                     env_vars.insert("PYTHONPATH".to_string(), root.to_string_lossy().to_string());
                 }
             }
@@ -135,7 +180,8 @@ impl ProcessExecutor {
                     ProcessStatus::Running => "running",
                     ProcessStatus::Success => "success",
                     ProcessStatus::Failed => "failed",
-                }.to_string();
+                }
+                .to_string();
 
                 let _ = tx.send(StatusUpdate {
                     task_id,
@@ -146,7 +192,6 @@ impl ProcessExecutor {
 
         Ok(execution_id)
     }
-
 }
 
 fn build_env_vars(
@@ -154,13 +199,19 @@ fn build_env_vars(
 ) -> (
     HashMap<String, String>,
     Option<PathBuf>,
+    Option<String>,
+    Option<String>,
     Option<serde_json::Value>,
+    Option<PathBuf>,
     Option<PathBuf>,
 ) {
     let mut env_vars = HashMap::new();
     let mut task_file = None;
+    let mut task_module = None;
+    let mut task_function = None;
     let mut task_input = None;
     let mut runner_path = None;
+    let mut python_path = None;
 
     if let Some(params) = params {
         if let Some(obj) = params.as_object() {
@@ -174,6 +225,21 @@ fn build_env_vars(
                     "task_input" => {
                         task_input = Some(v.clone());
                         env_vars.insert("ORK_INPUT_JSON".to_string(), v.to_string());
+                    }
+                    "task_module" => {
+                        if let Some(module) = v.as_str() {
+                            task_module = Some(module.to_string());
+                        }
+                    }
+                    "task_function" => {
+                        if let Some(function) = v.as_str() {
+                            task_function = Some(function.to_string());
+                        }
+                    }
+                    "python_path" => {
+                        if let Some(path) = v.as_str() {
+                            python_path = Some(PathBuf::from(path));
+                        }
                     }
                     "runner_path" => {
                         if let Some(path) = v.as_str() {
@@ -203,23 +269,35 @@ fn build_env_vars(
         }
     }
 
-    (env_vars, task_file, task_input, runner_path)
+    (
+        env_vars,
+        task_file,
+        task_module,
+        task_function,
+        task_input,
+        runner_path,
+        python_path,
+    )
 }
 
 fn resolve_command_path(working_dir: &str, command: &str) -> String {
     let command_path = Path::new(command);
-    if command_path.is_absolute() || command.contains('/') || command.chars().any(|c| c.is_whitespace()) {
+    if command_path.is_absolute()
+        || command.contains('/')
+        || command.chars().any(|c| c.is_whitespace())
+    {
         command.to_string()
     } else {
         format!("{}/{}", working_dir, command)
     }
 }
 
-fn build_python_command(task_file: &Path) -> Command {
-    if find_project_root(task_file)
-        .as_ref()
-        .map(|root| root.join("pyproject.toml").exists())
-        .unwrap_or(false)
+fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> Command {
+    let root = python_path
+        .cloned()
+        .or_else(|| find_project_root(task_file))
+        .unwrap_or_else(|| PathBuf::from("."));
+    if root.join("pyproject.toml").exists()
     {
         let mut cmd = Command::new("uv");
         cmd.args(["run", "python3"]);
@@ -252,7 +330,12 @@ fn find_python_runner() -> Option<PathBuf> {
 
 #[async_trait]
 impl Executor for ProcessExecutor {
-    async fn execute(&self, task_id: Uuid, job_name: &str, params: Option<serde_json::Value>) -> Result<String> {
+    async fn execute(
+        &self,
+        task_id: Uuid,
+        job_name: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<String> {
         self.execute_process(task_id, job_name, params).await
     }
 

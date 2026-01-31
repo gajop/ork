@@ -11,6 +11,7 @@ pub struct CompiledWorkflow {
     pub tasks: Vec<CompiledTask>,
     pub name_index: IndexMap<String, usize>,
     pub topo: Vec<usize>,
+    pub root: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,8 @@ pub struct CompiledTask {
     pub file: Option<PathBuf>,
     pub command: Option<String>,
     pub job: Option<String>,
+    pub module: Option<String>,
+    pub function: Option<String>,
     pub input: serde_json::Value,
     pub depends_on: Vec<usize>,
     pub timeout: u64,
@@ -41,12 +44,11 @@ impl Workflow {
         for (name, task) in &self.tasks {
             let file = match task.executor {
                 ExecutorKind::Python => {
-                    let file = task.file.as_ref().ok_or_else(|| {
-                        OrkError::InvalidWorkflow(WorkflowValidationError::MissingTaskFile {
-                            task: name.clone(),
-                        })
-                    })?;
-                    Some(resolve_file(root, name, file)?)
+                    if let Some(file) = task.file.as_ref() {
+                        Some(resolve_file(root, name, file)?)
+                    } else {
+                        None
+                    }
                 }
                 ExecutorKind::Process => {
                     if let Some(file) = task.file.as_ref() {
@@ -68,6 +70,8 @@ impl Workflow {
                 file,
                 command: task.command.clone(),
                 job: task.job.clone(),
+                module: task.module.clone(),
+                function: task.function.clone(),
                 input: task.input.clone(),
                 depends_on,
                 timeout: task.timeout,
@@ -83,6 +87,7 @@ impl Workflow {
             tasks,
             name_index,
             topo,
+            root: root.to_path_buf(),
         })
     }
 }

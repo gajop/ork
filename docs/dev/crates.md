@@ -10,15 +10,15 @@ This is a compressed map of the workspace so you do not have to read code to ori
 | **ork-core**      | Domain models + traits + scheduler loop               | [docs/dev/crates/ork-core.md](crates/ork-core.md)           |
 | **ork-state**     | Database implementations of `ork-core::Database`      | [docs/dev/crates/ork-state.md](crates/ork-state.md)         |
 | **ork-executors** | Executor backends + `ExecutorManager`                 | [docs/dev/crates/ork-executors.md](crates/ork-executors.md) |
-| **ork-runner**    | Legacy scheduler + state store glue                   | [docs/dev/crates/ork-runner.md](crates/ork-runner.md)       |
-| **ork-web**       | Legacy Axum UI/API on ork-runner                      | [docs/dev/crates/ork-web.md](crates/ork-web.md)             |
+| **ork-runner**    | Legacy scheduler + state store glue (deprecated)      | [docs/dev/crates/ork-runner.md](crates/ork-runner.md)       |
+| **ork-web**       | Axum UI/API backed by the DB                          | [docs/dev/crates/ork-web.md](crates/ork-web.md)             |
 
 ## Dependency Direction
 
 - [ork-core](crates/ork-core.md) is the base layer (traits + models + scheduler).
 - [ork-state](crates/ork-state.md) and [ork-executors](crates/ork-executors.md) implement `ork-core` traits.
 - [ork-cli](crates/ork-cli.md) wires everything together and runs the scheduler loop.
-- [ork-web](crates/ork-web.md) depends on legacy [ork-runner](crates/ork-runner.md) and [ork-state](crates/ork-state.md).
+- [ork-web](crates/ork-web.md) reads and writes Postgres state via [ork-state](crates/ork-state.md).
 
 ## Where to go next
 
