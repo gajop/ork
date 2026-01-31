@@ -586,7 +586,23 @@
       ];
       runMetaEl.innerHTML = meta.map(m => `<span>${m}</span>`).join('');
 
-      const taskRows = data.tasks.map(t => `
+      const displayTasks = (data.tasks && data.tasks.length)
+        ? data.tasks.map(t => ({ ...t }))
+        : (data.workflow && data.workflow.tasks ? data.workflow.tasks.map(t => ({
+            id: t.name,
+            name: t.name,
+            status: 'pending',
+            executor: t.executor,
+            depends_on: t.depends_on,
+            started_at: null,
+            finished_at: null,
+            dispatched_at: null,
+            output: null,
+            logs: null,
+            error: null
+          })) : []);
+
+      const taskRows = displayTasks.map(t => `
         <tr>
           <td>${t.name}</td>
           <td>${badge(t.status)}</td>
@@ -597,7 +613,7 @@
         </tr>
       `).join('');
 
-      const logsHtml = data.tasks.map(t => {
+      const logsHtml = displayTasks.map(t => {
         const logs = t.logs ? escapeHtml(t.logs) : '';
         const body = logs ? `<pre>${logs}</pre>` : `<p style="color: var(--muted);">No logs yet.</p>`;
         return `
@@ -608,10 +624,10 @@
         `;
       }).join('');
 
-      const statusMap = Object.fromEntries(data.tasks.map(t => [t.name, t.status]));
+      const statusMap = Object.fromEntries(displayTasks.map(t => [t.name, t.status]));
       const graphNodes = workflowGraph.length
         ? workflowGraph
-        : data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
+        : displayTasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
       const graphSvg = renderGraph(graphNodes, statusMap);
 
       const html = `
@@ -658,7 +674,13 @@
       if (!val) return '—';
       const d = new Date(val);
       if (isNaN(d.getTime())) return val;
-      return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
     }
 
     function fmtDuration(start, end) {
@@ -669,10 +691,10 @@
       const ms = e - s;
       if (ms < 0) return '';
       const secs = ms / 1000;
-      if (secs < 60) return secs.toFixed(1) + 's';
+      if (secs < 60) return secs.toFixed(2) + 's';
       const mins = Math.floor(secs / 60);
-      const rem = Math.floor(secs % 60);
-      return `${mins}m ${rem}s`;
+      const rem = (secs % 60);
+      return `${mins}m ${rem.toFixed(2)}s`;
     }
 
     function truncate(str, len) {
