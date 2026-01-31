@@ -330,6 +330,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         let mut failed_by_run: HashMap<Uuid, Vec<String>> = HashMap::new();
 
         for update in &updates {
+            if let Some(log) = update.log.as_ref() {
+                if let Err(e) = self.db.append_task_log(update.task_id, log).await {
+                    error!("Failed to append log for task {}: {}", update.task_id, e);
+                }
+            }
+
             let new_status = match update.status.as_str() {
                 "success" => TaskStatus::Success,
                 "failed" => TaskStatus::Failed,

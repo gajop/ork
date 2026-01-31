@@ -2,10 +2,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{RwLock, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use ork_core::executor::{Executor, StatusUpdate};
@@ -151,15 +153,71 @@ impl ProcessExecutor {
                 cmd.env(key, value);
             }
 
-            let status = match cmd.output().await {
-                Ok(output) => {
-                    if output.status.success() {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let mut child = match cmd.spawn() {
+                Ok(child) => child,
+                Err(e) => {
+                    warn!("Failed to execute process {}: {}", exec_id_clone, e);
+                    return;
+                }
+            };
+
+            if let Some(tx) = status_tx_clone.read().await.as_ref() {
+                let _ = tx.send(StatusUpdate {
+                    task_id,
+                    status: "running".to_string(),
+                    log: None,
+                });
+            }
+
+            let mut stdout_reader = child
+                .stdout
+                .take()
+                .map(|out| BufReader::new(out).lines());
+            let mut stderr_reader = child
+                .stderr
+                .take()
+                .map(|err| BufReader::new(err).lines());
+
+            let status_tx_logs = status_tx_clone.clone();
+            let log_task_id = task_id;
+            let stdout_handle = tokio::spawn(async move {
+                if let Some(reader) = stdout_reader.as_mut() {
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        if let Some(tx) = status_tx_logs.read().await.as_ref() {
+                            let _ = tx.send(StatusUpdate {
+                                task_id: log_task_id,
+                                status: "log".to_string(),
+                                log: Some(format!("stdout: {}\n", line)),
+                            });
+                        }
+                    }
+                }
+            });
+
+            let status_tx_logs = status_tx_clone.clone();
+            let log_task_id = task_id;
+            let stderr_handle = tokio::spawn(async move {
+                if let Some(reader) = stderr_reader.as_mut() {
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        if let Some(tx) = status_tx_logs.read().await.as_ref() {
+                            let _ = tx.send(StatusUpdate {
+                                task_id: log_task_id,
+                                status: "log".to_string(),
+                                log: Some(format!("stderr: {}\n", line)),
+                            });
+                        }
+                    }
+                }
+            });
+
+            let status = match child.wait().await {
+                Ok(exit_status) => {
+                    if exit_status.success() {
                         info!("Process completed successfully: {}", exec_id_clone);
-                        debug!("Output: {}", String::from_utf8_lossy(&output.stdout));
                         ProcessStatus::Success
                     } else {
                         warn!("Process failed: {}", exec_id_clone);
-                        warn!("Error: {}", String::from_utf8_lossy(&output.stderr));
                         ProcessStatus::Failed
                     }
                 }
@@ -168,6 +226,9 @@ impl ProcessExecutor {
                     ProcessStatus::Failed
                 }
             };
+
+            let _ = stdout_handle.await;
+            let _ = stderr_handle.await;
 
             // Update status
             let mut states = states_clone.write().await;
@@ -187,6 +248,7 @@ impl ProcessExecutor {
                 let _ = tx.send(StatusUpdate {
                     task_id,
                     status: status_str,
+                    log: None,
                 });
             }
         });

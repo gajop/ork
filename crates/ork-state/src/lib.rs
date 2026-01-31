@@ -14,11 +14,17 @@ pub mod file_database;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
 #[cfg(feature = "file")]
 pub use file_database::FileDatabase;
 
 #[cfg(feature = "postgres")]
 pub use postgres::PostgresDatabase;
+
+#[cfg(feature = "sqlite")]
+pub use sqlite::SqliteDatabase;
 
 use async_trait::async_trait;
 use ork_core::error::OrkResult;

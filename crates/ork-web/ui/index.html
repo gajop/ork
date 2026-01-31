@@ -2,114 +2,427 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Ork Runs</title>
+  <title>Ork Control</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #0e0e12; color: #e8e8ec; }
-    header { padding: 12px 16px; background: #14141a; border-bottom: 1px solid #22232b; display: flex; align-items: center; justify-content: space-between; }
-    header h1 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
-    header .controls { display: flex; gap: 8px; align-items: center; }
-    header select { background:#1a1b23; color:#e8e8ec; border:1px solid #22232b; border-radius:6px; padding:6px 8px; width:280px; }
-    header button { background:#3a89ff; border:none; color:#0c1220; padding:6px 10px; border-radius:6px; font-weight:700; cursor:pointer; }
-    main { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 52px); }
-    #runs { border-right: 1px solid #22232b; overflow-y: auto; }
-    .run { padding: 12px 14px; border-bottom: 1px solid #22232b; cursor: pointer; }
-    .run:hover { background: #1a1b23; }
-    .run.selected { background: #1a1b23; }
-    .run .id { font-weight: 600; }
-    .run .meta { font-size: 12px; color: #a8a8b3; }
-    #detail { padding: 16px; overflow-y: auto; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { padding: 8px; border-bottom: 1px solid #22232b; text-align: left; font-size: 13px; }
-    .badge { padding: 2px 6px; border-radius: 6px; font-size: 12px; font-weight: 600; }
-    .ok { background: #143018; color: #8ff0a0; }
-    .fail { background: #3a1116; color: #ff9da4; }
-    .pending { background: #31313d; color: #d1d1dd; }
-    code { background: #16161d; padding: 2px 4px; border-radius: 4px; }
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg: #0b0d12;
+      --bg-2: #0f1320;
+      --panel: #121622;
+      --panel-2: #161b2a;
+      --border: #232a3f;
+      --text: #e8ecf2;
+      --muted: #9aa3b2;
+      --accent: #ffb84d;
+      --accent-2: #6ee7ff;
+      --accent-3: #a7f3d0;
+      --danger: #ff6b6b;
+      --shadow: 0 12px 40px rgba(6, 10, 20, 0.5);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(110, 231, 255, 0.16), transparent 60%),
+        radial-gradient(800px 400px at 0% 10%, rgba(255, 184, 77, 0.16), transparent 60%),
+        linear-gradient(160deg, var(--bg), var(--bg-2));
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 20px 20px;
+      pointer-events: none;
+      opacity: 0.35;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(14px);
+      background: rgba(10, 12, 20, 0.75);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    button {
+      font-family: inherit;
+      background: var(--accent);
+      border: none;
+      color: #20150a;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+      box-shadow: 0 6px 16px rgba(255, 184, 77, 0.25);
+    }
+
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+
+    button:hover { transform: translateY(-1px); }
+
+    main {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 16px;
+      padding: 16px 20px 24px;
+      height: calc(100% - 72px);
+    }
+
+    aside {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel {
+      background: linear-gradient(160deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 240px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .list.large { max-height: 360px; }
+
+    .item {
+      border: 1px solid transparent;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(12, 15, 25, 0.7);
+      cursor: pointer;
+      transition: border 120ms ease, transform 120ms ease, background 120ms ease;
+      animation: rise 240ms ease;
+    }
+
+    .item:hover { transform: translateY(-1px); border-color: rgba(110,231,255,0.35); }
+    .item.selected { border-color: var(--accent); background: rgba(255, 184, 77, 0.08); }
+
+    .item .title {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .item .meta {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+
+    .ok { background: rgba(25, 89, 56, 0.45); color: #a7f3d0; border-color: rgba(25, 89, 56, 0.7); }
+    .pending { background: rgba(82, 72, 26, 0.45); color: #fbd38d; border-color: rgba(82, 72, 26, 0.7); }
+    .fail { background: rgba(92, 33, 39, 0.55); color: #fecaca; border-color: rgba(92, 33, 39, 0.7); }
+
+    #detail {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 16px;
+      overflow: hidden;
+    }
+
+    .overview {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .overview h3 {
+      margin: 0 0 4px 0;
+      font-size: 20px;
+    }
+
+    .overview .meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    code {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px;
+      background: rgba(15, 18, 30, 0.7);
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(35, 42, 63, 0.6);
+    }
+
+    .log-block {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(12, 15, 25, 0.6);
+      margin-top: 12px;
+    }
+
+    .log-title {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px;
+      color: #c8d1de;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+
+    .tab {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .tab.active {
+      background: rgba(110, 231, 255, 0.15);
+      color: var(--text);
+      border-color: rgba(110, 231, 255, 0.45);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; height: auto; }
+      .list.large { max-height: 260px; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Ork Runs</h1>
+    <h1>Ork Control</h1>
     <div class="controls">
-      <select id="workflow-select"></select>
-      <button id="run-btn">Run</button>
-      <button id="refresh">Refresh</button>
+      <span id="active-workflow" class="pill">Workflow: —</span>
+      <button id="run-btn">Run Workflow</button>
+      <button id="refresh" class="secondary">Refresh</button>
     </div>
   </header>
+
   <main>
-    <div id="runs"></div>
-    <div id="detail">
-      <div id="workflow-panel">
-        <div style="display:flex;align-items:center;justify-content:space-between; gap:8px;">
-          <h2 style="margin:0;">Workflow graph</h2>
-          <span style="color:#a8a8b3;font-size:12px;">static structure</span>
+    <aside>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Workflows</h2>
+          <span id="workflow-count" class="pill">0</span>
         </div>
-        <div id="workflow-graph" style="margin-top:8px;"></div>
+        <div id="workflow-list" class="list"></div>
       </div>
-      <div id="run-detail"><p style="color:#a8a8b3;">Select a run to view details.</p></div>
-    </div>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Run History</h2>
+          <span id="run-count" class="pill">0</span>
+        </div>
+        <div id="runs-list" class="list large"></div>
+      </div>
+    </aside>
+
+    <section id="detail">
+      <div class="panel">
+        <div class="overview">
+          <div>
+            <h3 id="run-title">No run selected</h3>
+            <div class="meta" id="run-meta"></div>
+          </div>
+          <div id="run-status"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="overflow:auto;">
+        <div class="tabs">
+          <button id="tab-run" class="tab active" data-tab="run">Run</button>
+          <button id="tab-graph" class="tab" data-tab="graph">Workflow Graph</button>
+        </div>
+        <div id="tab-content-run" class="tab-panel active">
+          <div id="run-graph" style="margin-bottom: 12px;"></div>
+          <div id="run-detail">
+            <p style="color: var(--muted);">Select a run to view task details.</p>
+          </div>
+        </div>
+        <div id="tab-content-graph" class="tab-panel">
+          <div class="panel-header">
+            <h2>Workflow graph</h2>
+            <span class="pill">static structure</span>
+          </div>
+          <div id="workflow-graph"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script>
+    let selectedWorkflow = null;
     let selectedRunId = null;
-    let detailInterval = null;
-    let lastRuns = [];
-    let currentWorkflow = null;
-    let lastRunsHash = '';
-    let workflowGraph = [];
     let workflows = [];
+    let runs = [];
+    let workflowGraph = [];
+    let detailInterval = null;
+    let lastRunsHash = '';
+    let lastWorkflowsHash = '';
 
-    const runsEl = document.getElementById('runs');
-    const workflowSelect = document.getElementById('workflow-select');
+    const workflowListEl = document.getElementById('workflow-list');
+    const runsListEl = document.getElementById('runs-list');
+    const workflowCountEl = document.getElementById('workflow-count');
+    const runCountEl = document.getElementById('run-count');
+    const activeWorkflowEl = document.getElementById('active-workflow');
+    const runTitleEl = document.getElementById('run-title');
+    const runMetaEl = document.getElementById('run-meta');
+    const runStatusEl = document.getElementById('run-status');
+    const tabRunBtn = document.getElementById('tab-run');
+    const tabGraphBtn = document.getElementById('tab-graph');
+    const tabRunPanel = document.getElementById('tab-content-run');
+    const tabGraphPanel = document.getElementById('tab-content-graph');
+
     document.getElementById('refresh').onclick = () => {
-      fetchRuns();
       fetchWorkflows();
+      fetchRuns();
     };
     document.getElementById('run-btn').onclick = () => triggerRun();
-    runsEl.addEventListener('click', (e) => {
-      const target = e.target.closest('.run');
-      if (target && target.dataset.id) {
-        selectRun(target.dataset.id);
-      }
-    });
-    workflowSelect.addEventListener('change', (e) => {
-      currentWorkflow = e.target.value || currentWorkflow;
-      fetchWorkflowGraph(currentWorkflow);
-    });
-    fetchRuns();
-    fetchWorkflows();
-    setInterval(fetchRuns, 100);
+    tabRunBtn.onclick = () => setActiveTab('run');
+    tabGraphBtn.onclick = () => setActiveTab('graph');
 
-    function fetchRuns() {
-      fetch('/api/runs').then(r => r.json()).then(renderRuns).catch(() => {});
-    }
+    fetchWorkflows();
+    fetchRuns();
+    setInterval(fetchRuns, 1200);
 
     function fetchWorkflows() {
-      workflowSelect.innerHTML = '<option>Loading workflows...</option>';
       fetch('/api/workflows')
         .then(r => r.json())
         .then(items => {
           workflows = Array.isArray(items) ? items : [];
-          renderWorkflowOptions();
-          if (!currentWorkflow && workflows.length > 0) {
-            currentWorkflow = workflows[0].name;
+          if (!selectedWorkflow && workflows.length) {
+            selectedWorkflow = workflows[0].name;
+            fetchWorkflowGraph(selectedWorkflow);
           }
-          if (currentWorkflow) {
-            workflowSelect.value = currentWorkflow;
-            fetchWorkflowGraph(currentWorkflow);
-          }
+          renderWorkflows();
+          renderRuns();
         })
         .catch(() => {});
     }
 
-    function renderWorkflowOptions() {
-      if (!workflows.length) {
-        workflowSelect.innerHTML = '<option value=\"\">No workflows</option>';
-        workflowGraph = [];
-        renderWorkflowGraph();
-        return;
-      }
-      workflowSelect.innerHTML = workflows.map(wf => `<option value=\"${wf.name}\">${wf.name}</option>`).join('');
+    function fetchRuns() {
+      fetch('/api/runs')
+        .then(r => r.json())
+        .then(items => {
+          runs = Array.isArray(items) ? items : [];
+          renderRuns();
+          renderWorkflows();
+        })
+        .catch(() => {});
     }
 
     function fetchWorkflowGraph(name) {
@@ -123,169 +436,268 @@
         .catch(() => {});
     }
 
-    function renderRuns(runs) {
-      lastRuns = runs;
-      const hash = runs.map(r => `${r.id}|${r.status}|${r.created_at}`).join(',');
-      const el = document.getElementById('runs');
-      if (hash === lastRunsHash && el.children.length === runs.length) {
-        highlightRuns();
-        return;
-      }
-      lastRunsHash = hash;
-      const list = runs.map(run => {
-        return `
-          <div class="run ${run.id === selectedRunId ? 'selected' : ''}" data-id="${run.id}">
-            <div class="id">${run.id}</div>
-            <div class="meta">${run.workflow} · ${run.status} · ${run.created_at}</div>
-          </div>
-        `;
-      }).join('');
-      el.innerHTML = list || '<p style="color:#a8a8b3;padding:12px;">No runs yet.</p>';
-      if (!selectedRunId && runs.length > 0) {
-        selectRun(runs[0].id);
-      } else {
-        highlightRuns();
-      }
+    function selectWorkflow(name) {
+      selectedWorkflow = name;
+      selectedRunId = null;
+      if (detailInterval) clearInterval(detailInterval);
+      detailInterval = null;
+      activeWorkflowEl.textContent = `Workflow: ${name || '—'}`;
+      renderWorkflows();
+      renderRuns();
+      fetchWorkflowGraph(name);
+      setActiveTab('graph');
     }
 
     function selectRun(id) {
       selectedRunId = id;
-      highlightRuns();
-      fetchRunDetail(selectedRunId);
+      renderRuns();
+      fetchRunDetail(id);
       if (detailInterval) clearInterval(detailInterval);
-      detailInterval = setInterval(() => fetchRunDetail(selectedRunId), 100);
+      detailInterval = setInterval(() => fetchRunDetail(id), 1200);
+      setActiveTab('run');
     }
 
-    function highlightRuns() {
-      document.querySelectorAll('.run').forEach(el => {
-        if (el.dataset.id === selectedRunId) {
-          el.classList.add('selected');
-        } else {
-          el.classList.remove('selected');
-        }
+    function renderWorkflows() {
+      workflowCountEl.textContent = workflows.length;
+      activeWorkflowEl.textContent = `Workflow: ${selectedWorkflow || '—'}`;
+      if (!workflows.length) {
+        workflowListEl.innerHTML = '<p style="color: var(--muted);">No workflows found.</p>';
+        return;
+      }
+
+      const list = workflows.map(wf => {
+        const wfRuns = runs.filter(r => r.workflow === wf.name).sort((a, b) => {
+          return new Date(b.created_at) - new Date(a.created_at);
+        });
+        const last = wfRuns[0];
+        const status = last ? badge(last.status) : '<span class="badge pending">no runs</span>';
+        const time = last ? fmtDateTime(last.started_at || last.created_at) : '—';
+        return `
+          <div class="item ${wf.name === selectedWorkflow ? 'selected' : ''}" data-workflow="${wf.name}">
+            <div class="title">${wf.name}</div>
+            <div class="meta">${status}<span>last run: ${time}</span></div>
+          </div>
+        `;
+      }).join('');
+      const hash = list;
+      if (hash === lastWorkflowsHash && workflowListEl.children.length === workflows.length) {
+        return;
+      }
+      lastWorkflowsHash = hash;
+
+      workflowListEl.innerHTML = list;
+      workflowListEl.querySelectorAll('.item').forEach(el => {
+        el.onclick = () => selectWorkflow(el.dataset.workflow);
       });
     }
 
+    function renderRuns() {
+      const filtered = selectedWorkflow
+        ? runs.filter(r => r.workflow === selectedWorkflow)
+        : runs;
+      runCountEl.textContent = filtered.length;
+
+      if (selectedRunId && !filtered.some(r => r.id === selectedRunId)) {
+        selectedRunId = null;
+      }
+
+      if (!filtered.length) {
+        runsListEl.innerHTML = '<p style="color: var(--muted);">No runs yet.</p>';
+        return;
+      }
+
+      const hash = filtered.map(r => `${r.id}|${r.status}|${r.created_at}`).join(',');
+      if (hash === lastRunsHash && runsListEl.children.length === filtered.length) {
+        return;
+      }
+      lastRunsHash = hash;
+
+      const list = filtered.map(run => {
+        const started = run.started_at || run.created_at;
+        const duration = fmtDuration(run.started_at, run.finished_at);
+        return `
+          <div class="item ${run.id === selectedRunId ? 'selected' : ''}" data-id="${run.id}">
+            <div class="title">${run.id}</div>
+            <div class="meta">
+              ${badge(run.status)}
+              <span>Started: ${fmtDateTime(started)}</span>
+              <span>Duration: ${duration || '—'}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      runsListEl.innerHTML = list;
+      runsListEl.querySelectorAll('.item').forEach(el => {
+        el.onclick = () => selectRun(el.dataset.id);
+      });
+
+      if (!selectedRunId && filtered.length) {
+        selectRun(filtered[0].id);
+      }
+    }
+
     function fetchRunDetail(id) {
-      fetch('/api/runs/' + id).then(r => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      }).then(showDetail).catch(() => {});
+      if (!id) return;
+      fetch('/api/runs/' + id)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data) return;
+          showDetail(data);
+        })
+        .catch(() => {});
     }
 
     function triggerRun() {
-      const wf = workflowSelect.value || currentWorkflow;
-      currentWorkflow = wf || currentWorkflow;
+      if (!selectedWorkflow) return;
       fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow: wf })
+        body: JSON.stringify({ workflow: selectedWorkflow })
       }).then(r => r.json()).then(resp => {
-        const id = resp.run_id;
-        if (id) {
-          selectedRunId = id;
-          highlightRuns();
+        if (resp.run_id) {
+          selectRun(resp.run_id);
           fetchRuns();
-          fetchRunDetail(id);
         }
       }).catch(() => {});
     }
 
-    function badge(status) {
-      const lower = (status || '').toLowerCase();
-      const cls = lower === 'success' ? 'ok' : (lower === 'running' || lower === 'pending' ? 'pending' : 'fail');
-      return `<span class="badge ${cls}">${status}</span>`;
-    }
-    function fmtTime(val) {
-      if (!val) return '';
-      const d = new Date(val);
-      if (isNaN(d.getTime())) return val;
-      return d.toLocaleTimeString([], { hour12: false });
-    }
-    function fmtDuration(start, end) {
-      const s = start ? new Date(start) : null;
-      const e = end ? new Date(end) : new Date();
-      if (!s || !e || isNaN(s.getTime()) || isNaN(e.getTime())) return '';
-      const ms = e - s;
-      if (ms < 0) return '';
-      return (ms / 1000).toFixed(2) + 's';
-    }
-    function renderWorkflowGraph() {
-      const target = document.getElementById('workflow-graph');
-      if (!target) return;
-      if (!workflowGraph.length) {
-        target.innerHTML = '<p style="color:#a8a8b3;">No workflow loaded.</p>';
-        return;
-      }
-      target.innerHTML = renderGraph(workflowGraph, {});
-    }
     function showDetail(data) {
       if (data.workflow && data.workflow.tasks && data.workflow.tasks.length) {
         workflowGraph = data.workflow.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
       } else if (data.tasks && data.tasks.length) {
         workflowGraph = data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
       }
-      if (data.run && data.run.workflow) {
-        currentWorkflow = data.run.workflow;
-        if (workflowSelect && currentWorkflow) {
-          const hasOption = Array.from(workflowSelect.options).some(opt => opt.value === currentWorkflow);
-          if (hasOption) {
-            workflowSelect.value = currentWorkflow;
-          }
-        }
+
+      if (!selectedWorkflow && data.run && data.run.workflow) {
+        selectedWorkflow = data.run.workflow;
+        activeWorkflowEl.textContent = `Workflow: ${selectedWorkflow}`;
       }
+
       renderWorkflowGraph();
+
+      runTitleEl.textContent = `Run ${data.run.id}`;
+      runStatusEl.innerHTML = badge(data.run.status);
+      const meta = [
+        `Workflow: ${data.run.workflow}`,
+        `Created: ${fmtDateTime(data.run.created_at)}`,
+        `Started: ${data.run.started_at ? fmtDateTime(data.run.started_at) : '—'}`,
+        `Duration: ${fmtDuration(data.run.started_at, data.run.finished_at) || '—'}`
+      ];
+      runMetaEl.innerHTML = meta.map(m => `<span>${m}</span>`).join('');
+
+      const taskRows = data.tasks.map(t => `
+        <tr>
+          <td>${t.name}</td>
+          <td>${badge(t.status)}</td>
+          <td>${fmtDateTime(t.started_at)}</td>
+          <td>${fmtDateTime(t.finished_at)}</td>
+          <td>${fmtDuration(t.started_at, t.finished_at)}</td>
+          <td><code>${truncate(JSON.stringify(t.output ?? {}), 120)}</code></td>
+        </tr>
+      `).join('');
+
+      const logsHtml = data.tasks.map(t => {
+        const logs = t.logs ? escapeHtml(t.logs) : '';
+        const body = logs ? `<pre>${logs}</pre>` : `<p style="color: var(--muted);">No logs yet.</p>`;
+        return `
+          <div class="log-block">
+            <div class="log-title">${t.name} logs</div>
+            ${body}
+          </div>
+        `;
+      }).join('');
 
       const statusMap = Object.fromEntries(data.tasks.map(t => [t.name, t.status]));
       const graphNodes = workflowGraph.length
         ? workflowGraph
         : data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
       const graphSvg = renderGraph(graphNodes, statusMap);
-      const taskRows = data.tasks.map(t => `
-        <tr>
-          <td>${t.name}</td>
-          <td>${badge(t.status)}</td>
-          <td>${fmtTime(t.started_at)}</td>
-          <td>${fmtTime(t.finished_at)}</td>
-          <td>${fmtDuration(t.started_at, t.finished_at)}</td>
-          <td><code>${truncate(JSON.stringify(t.output ?? {}), 120)}</code></td>
-        </tr>
-      `).join('');
+
       const html = `
-        <div>
-          <h2 style="margin:0 0 8px 0;">Run ${data.run.id}</h2>
-          <div style="color:#a8a8b3; font-size:13px;">workflow=${data.run.workflow} · status=${data.run.status}</div>
-          <div style="margin:12px 0;">${graphSvg}</div>
-          <table>
-            <thead><tr><th>Task</th><th>Status</th><th>Started</th><th>Finished</th><th>Duration</th><th>Output</th></tr></thead>
-            <tbody>${taskRows}</tbody>
-          </table>
-        </div>
+        <table>
+          <thead>
+            <tr><th>Task</th><th>Status</th><th>Started</th><th>Finished</th><th>Duration</th><th>Output</th></tr>
+          </thead>
+          <tbody>${taskRows}</tbody>
+        </table>
+        ${logsHtml}
       `;
+      document.getElementById('run-graph').innerHTML = graphSvg || '<p style="color: var(--muted);">No graph data.</p>';
       document.getElementById('run-detail').innerHTML = html;
     }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function setActiveTab(tab) {
+      const isRun = tab === 'run';
+      tabRunBtn.classList.toggle('active', isRun);
+      tabGraphBtn.classList.toggle('active', !isRun);
+      tabRunPanel.classList.toggle('active', isRun);
+      tabGraphPanel.classList.toggle('active', !isRun);
+    }
+
+    function badge(status) {
+      const lower = (status || '').toLowerCase();
+      const cls = lower === 'success'
+        ? 'ok'
+        : (lower === 'running' || lower === 'pending' || lower === 'dispatched'
+          ? 'pending'
+          : 'fail');
+      return `<span class="badge ${cls}">${status}</span>`;
+    }
+
+    function fmtDateTime(val) {
+      if (!val) return '—';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return val;
+      return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function fmtDuration(start, end) {
+      const s = start ? new Date(start) : null;
+      const e = end ? new Date(end) : new Date();
+      if (!s || isNaN(s.getTime())) return '';
+      if (isNaN(e.getTime())) return '';
+      const ms = e - s;
+      if (ms < 0) return '';
+      const secs = ms / 1000;
+      if (secs < 60) return secs.toFixed(1) + 's';
+      const mins = Math.floor(secs / 60);
+      const rem = Math.floor(secs % 60);
+      return `${mins}m ${rem}s`;
+    }
+
     function truncate(str, len) {
       return str.length > len ? str.slice(0, len) + '…' : str;
+    }
+
+    function renderWorkflowGraph() {
+      const target = document.getElementById('workflow-graph');
+      if (!target) return;
+      if (!workflowGraph.length) {
+        target.innerHTML = '<p style="color: var(--muted);">No workflow loaded.</p>';
+        return;
+      }
+      target.innerHTML = renderGraph(workflowGraph, {});
     }
 
     // simple layered DAG drawing
     function renderGraph(nodes, statusMap = {}) {
       if (!nodes.length) return '';
-      // compute layers by distance from roots
-      const indeg = Object.fromEntries(nodes.map(n => [n.id, 0]));
-      nodes.forEach(n => n.deps.forEach(d => indeg[n.id] = (indeg[n.id] || 0) + 0));
       const depsMap = Object.fromEntries(nodes.map(n => [n.id, n.deps || []]));
       const layerMap = {};
-      const visited = new Set();
       function dfs(id) {
         if (layerMap[id] !== undefined) return layerMap[id];
         const deps = depsMap[id] || [];
-        if (deps.length === 0) {
-          layerMap[id] = 0;
-        } else {
-          layerMap[id] = Math.max(...deps.map(d => dfs(d))) + 1;
-        }
-        visited.add(id);
+        layerMap[id] = deps.length ? Math.max(...deps.map(d => dfs(d))) + 1 : 0;
         return layerMap[id];
       }
       nodes.forEach(n => dfs(n.id));
@@ -295,30 +707,28 @@
         layers[layer].push(id);
       });
       const layerKeys = Object.keys(layers).map(Number).sort((a, b) => a - b);
-      const width = 140 * (layerKeys.length || 1);
-      const height = 80 * Math.max(...Object.values(layers).map(v => v.length), 1);
-      let svg = `<svg width="${width}" height="${height}" style="border:1px solid #22232b; border-radius:8px; background:#0f1016;">`;
+      const width = 160 * (layerKeys.length || 1);
+      const height = 88 * Math.max(...Object.values(layers).map(v => v.length), 1);
+      let svg = `<svg width="${width}" height="${height}" style="border:1px solid var(--border); border-radius:12px; background:#0f111a;">`;
       const positions = {};
       layerKeys.forEach((layer, idx) => {
         const items = layers[layer];
         items.forEach((id, i) => {
-          const x = 80 + idx * 120;
-          const y = 40 + i * 80;
+          const x = 90 + idx * 140;
+          const y = 44 + i * 88;
           positions[id] = { x, y };
         });
       });
-      // edges
       nodes.forEach(n => {
         (n.deps || []).forEach(dep => {
           if (positions[dep] && positions[n.id]) {
             const a = positions[dep];
             const b = positions[n.id];
-            svg += `<line x1="${a.x+30}" y1="${a.y}" x2="${b.x-30}" y2="${b.y}" stroke="#3a89ff" stroke-width="2" marker-end="url(#arrow)"/>`;
+            svg += `<line x1="${a.x+34}" y1="${a.y}" x2="${b.x-34}" y2="${b.y}" stroke="#6ee7ff" stroke-width="2" marker-end="url(#arrow)"/>`;
           }
         });
       });
-      svg += `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3a89ff"/></marker></defs>`;
-      // nodes
+      svg += `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6ee7ff"/></marker></defs>`;
       nodes.forEach(n => {
         const pos = positions[n.id];
         if (!pos) return;
@@ -326,14 +736,14 @@
         const fill = status === 'success' ? '#12331b' :
                      status === 'running' || status === 'dispatched' ? '#2c2c1a' :
                      status === 'failed' || status === 'skipped' ? '#33181c' :
-                     '#1b1c25';
-        const stroke = status === 'success' ? '#63e6a1' :
-                       status === 'running' || status === 'dispatched' ? '#f0c674' :
-                       status === 'failed' || status === 'skipped' ? '#ff7373' :
-                       '#3a89ff';
+                     '#1b1f2c';
+        const stroke = status === 'success' ? '#a7f3d0' :
+                       status === 'running' || status === 'dispatched' ? '#fbd38d' :
+                       status === 'failed' || status === 'skipped' ? '#ff6b6b' :
+                       '#6ee7ff';
         svg += `<g>
-          <rect x="${pos.x-40}" y="${pos.y-16}" rx="8" ry="8" width="80" height="32" fill="${fill}" stroke="${stroke}" stroke-width="2"></rect>
-          <text x="${pos.x}" y="${pos.y+4}" fill="#e8e8ec" font-size="12" text-anchor="middle" font-family="system-ui,sans-serif">${n.id}</text>
+          <rect x="${pos.x-44}" y="${pos.y-18}" rx="10" ry="10" width="88" height="36" fill="${fill}" stroke="${stroke}" stroke-width="2"></rect>
+          <text x="${pos.x}" y="${pos.y+5}" fill="#e8ecf2" font-size="12" text-anchor="middle" font-family="Space Grotesk, sans-serif">${n.id}</text>
         </g>`;
       });
       svg += `</svg>`;

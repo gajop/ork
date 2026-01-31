@@ -103,6 +103,8 @@ just example-run simple
 
 Open the web UI at `http://127.0.0.1:4000` to see runs and task status.
 
+Prefer SQLite? Use `just up-sqlite` and `just example-run-sqlite simple` instead of Docker.
+
 ### 4. Deploy
 
 See [Deployment](docs/deployment.md) for deployment options.

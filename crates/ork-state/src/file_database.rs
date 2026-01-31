@@ -82,6 +82,11 @@ impl FileDatabase {
 
 #[async_trait]
 impl Database for FileDatabase {
+    async fn run_migrations(&self) -> Result<()> {
+        self.ensure_dirs().await?;
+        Ok(())
+    }
+
     async fn create_workflow(
         &self,
         name: &str,
@@ -282,6 +287,7 @@ impl Database for FileDatabase {
                 "execution_name": null,
                 "params": params,
                 "output": null,
+                "logs": null,
                 "error": null,
                 "dispatched_at": null,
                 "started_at": null,
@@ -311,6 +317,7 @@ impl Database for FileDatabase {
                 "execution_name": null,
                 "params": task.params,
                 "output": null,
+                "logs": null,
                 "error": null,
                 "dispatched_at": null,
                 "started_at": null,
@@ -366,6 +373,7 @@ impl Database for FileDatabase {
             "execution_name": execution_name.or(task.execution_name.as_deref()),
             "params": task.params,
             "output": task.output,
+            "logs": task.logs,
             "error": error.or(task.error.as_deref()),
             "dispatched_at": dispatched_at,
             "started_at": started_at,
@@ -440,6 +448,37 @@ impl Database for FileDatabase {
         Ok(tasks)
     }
 
+    async fn append_task_log(&self, task_id: Uuid, chunk: &str) -> Result<()> {
+        let path = self.task_path(task_id);
+        let task: Task = self.read_json(&path).await?;
+        let logs = task
+            .logs
+            .unwrap_or_default()
+            .chars()
+            .take(2_000_000)
+            .collect::<String>();
+        let updated_task: Task = serde_json::from_value(serde_json::json!({
+            "id": task.id,
+            "run_id": task.run_id,
+            "task_index": task.task_index,
+            "task_name": task.task_name,
+            "executor_type": task.executor_type,
+            "depends_on": task.depends_on,
+            "status": task.status,
+            "execution_name": task.execution_name,
+            "params": task.params,
+            "output": task.output,
+            "logs": format!("{}{}", logs, chunk),
+            "error": task.error,
+            "dispatched_at": task.dispatched_at,
+            "started_at": task.started_at,
+            "finished_at": task.finished_at,
+            "created_at": task.created_at,
+        }))?;
+        self.write_json(&path, &updated_task).await?;
+        Ok(())
+    }
+
     async fn get_pending_tasks_with_workflow(&self, _limit: i64) -> Result<Vec<TaskWithWorkflow>> {
         // TaskWithWorkflow has private fields and no public constructor
         // This method is only used by the scheduler for optimization
@@ -512,6 +551,7 @@ impl Database for FileDatabase {
                     "execution_name": task.execution_name,
                     "params": task.params,
                     "output": task.output,
+                    "logs": task.logs,
                     "error": error,
                     "dispatched_at": task.dispatched_at,
                     "started_at": task.started_at,

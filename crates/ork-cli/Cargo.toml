@@ -37,6 +37,7 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+reqwest = { workspace = true }
 
 # Other
 chrono = { workspace = true }

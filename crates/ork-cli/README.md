@@ -24,6 +24,7 @@ just status
 # Workflows
 ork create-workflow --name <name> --job-name <job> --executor <cloudrun|process>
 ork create-workflow-yaml --file <workflow.yaml> [--project local] [--region local]
+ork run-workflow --file <workflow.yaml> [--api-url http://127.0.0.1:4000]
 ork list-workflows
 ork trigger <workflow-name>
 

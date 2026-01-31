@@ -32,6 +32,9 @@ pub struct NewWorkflowTask {
 
 #[async_trait]
 pub trait Database: Send + Sync {
+    // Migration operations
+    async fn run_migrations(&self) -> anyhow::Result<()>;
+
     // Workflow operations
     async fn create_workflow(
         &self,
@@ -103,6 +106,7 @@ pub trait Database: Send + Sync {
     async fn list_tasks(&self, run_id: Uuid) -> anyhow::Result<Vec<Task>>;
     async fn get_pending_tasks(&self) -> anyhow::Result<Vec<Task>>;
     async fn get_running_tasks(&self) -> anyhow::Result<Vec<Task>>;
+    async fn append_task_log(&self, task_id: Uuid, chunk: &str) -> anyhow::Result<()>;
 
     /// Get pending tasks with workflow info in a single query (avoids N+1)
     /// Used by scheduler for efficient task dispatching

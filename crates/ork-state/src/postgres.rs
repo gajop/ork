@@ -573,6 +573,10 @@ impl PostgresDatabase {
 // Implement the Database trait from ork-core
 #[async_trait]
 impl DatabaseTrait for PostgresDatabase {
+    async fn run_migrations(&self) -> Result<()> {
+        PostgresDatabase::run_migrations(self).await
+    }
+
     async fn create_workflow(
         &self,
         name: &str,
@@ -694,6 +698,21 @@ impl DatabaseTrait for PostgresDatabase {
 
     async fn get_running_tasks(&self) -> Result<Vec<Task>> {
         PostgresDatabase::get_running_tasks(self).await
+    }
+
+    async fn append_task_log(&self, task_id: Uuid, chunk: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET logs = COALESCE(logs, '') || $2
+            WHERE id = $1
+            "#,
+        )
+        .bind(task_id)
+        .bind(chunk)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {

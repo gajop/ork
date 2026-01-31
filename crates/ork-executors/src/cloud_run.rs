@@ -270,6 +270,7 @@ impl CloudRunClient {
                             let _ = tx.send(StatusUpdate {
                                 task_id: exec_state.task_id,
                                 status: normalized_status.to_string(),
+                                log: None,
                             });
                         }
 

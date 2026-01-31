@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub struct StatusUpdate {
     pub task_id: Uuid,
     pub status: String,
+    pub log: Option<String>,
 }
 
 /// Executor trait for running tasks
