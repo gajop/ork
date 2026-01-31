@@ -3,39 +3,25 @@ set shell := ["sh", "-c"]
 default:
     @just --list
 
-# Start Postgres, run migrations, then start the scheduler (DB-backed examples).
-example-up:
-    docker compose -f crates/ork-cli/docker-compose.yml up -d
-    cargo run -p ork-cli --bin ork -- init
-    cargo run -p ork-cli --bin ork -- run
+# Start Postgres, run migrations, then start the scheduler + web UI.
+up:
+    ./scripts/dev-up.sh
 
-# Alias.
-up: example-up
+# Alias for older docs/scripts.
+example-up: up
 
 # Create + trigger an example workflow by folder name (expects examples/<name>/<name>.yaml).
 example-run name:
     ./scripts/example-run.sh "{{name}}"
 
-# Run the demo workflow locally (uses file-backed state and runs dirs)
-run-demo:
-    cargo run -p ork-cli -- run examples/demo/demo.yaml --run-dir .ork/runs --state-dir .ork/state
+# Start only the scheduler (DB-backed).
+run-scheduler:
+    cargo run -p ork-cli --bin ork -- run
 
-run-parallel:
-    cargo run -p ork-cli -- run examples/parallel/parallel.yaml --run-dir .ork/runs --state-dir .ork/state
+# Start only the web UI/API.
+run-web:
+    cargo run -p ork-web -- --addr 127.0.0.1:4000
 
-run-branches:
-    cargo run -p ork-cli -- run examples/branches/branches.yaml --run-dir .ork/runs --state-dir .ork/state
-
-run-retries:
-    cargo run -p ork-cli -- run examples/retries/retries.yaml --run-dir .ork/runs --state-dir .ork/state
-
-run-quickstart:
-    cargo run -p ork-cli -- run examples/quickstart/elt_pipeline.yaml --run-dir .ork/runs --state-dir .ork/state
-
-# Serve the minimal web UI + JSON API
-serve-ui:
-    cargo run -p ork-web -- --run-dir .ork/runs --state-dir .ork/state --addr 127.0.0.1:4000 --parallel 4
-
-# Show persisted runs/status
+# Show persisted runs/status (DB-backed).
 status:
-    cargo run -p ork-cli -- status --run-dir .ork/runs --state-dir .ork/state --show-outputs
+    cargo run -p ork-cli --bin ork -- status

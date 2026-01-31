@@ -17,6 +17,6 @@ Axum-based web UI/API backed by the primary database. It reads workflows/runs/ta
 | File | Purpose | Updated | File SHA |
 |------|---------|---------|----------|
 | [Cargo.toml](../../../crates/ork-web/Cargo.toml) | Crate manifest for the web UI/API. | 2026-01-31 | cf1ea18 |
-| [src/api.rs](../../../crates/ork-web/src/api.rs) | HTTP routes and handlers for workflows, runs, and tasks. | 2026-01-31 | 92c321c |
+| [src/api.rs](../../../crates/ork-web/src/api.rs) | HTTP routes and handlers for workflows, runs, and tasks. | 2026-01-31 | 4a686e2 |
 | [src/main.rs](../../../crates/ork-web/src/main.rs) | Boots the Axum server and configures the app. | 2026-01-31 | d229db8 |
 | [ui/index.html](../../../crates/ork-web/ui/index.html) | Static HTML for the web UI. | 2026-01-31 | e0e3fd0 |

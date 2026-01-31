@@ -6,7 +6,6 @@ DONE?
 
 
 4. This is a big problem, please implement it: No DAG support (tasks run independently)
-5. Why do we have this still? ## ork-runner (Legacy - Deprecated)
 6. Needs to be implemented: No scheduled runs (manual trigger only)
 
 ----
@@ -28,4 +27,3 @@ AI TODO?
 ## P2 - DX
 - Generic `Input`/`Output` names make code unsearchable (every file has same class names)
 - Should use prefixed names: `FetchInput`, `FetchOutput`
-

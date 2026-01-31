@@ -1431,21 +1431,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ork-runner"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "futures",
- "indexmap",
- "ork-core",
- "ork-state",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "ork-state"
 version = "0.1.0"
 dependencies = [
