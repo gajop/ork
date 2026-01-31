@@ -34,11 +34,11 @@ Measure the performance characteristics of the orchestrator:
 3. **Test Workflow**
    - Lightweight task that completes quickly
    - Configurable sleep duration to simulate work
-   - Should already exist in `test-scripts/example-task.sh`
+   - Should already exist in [crates/ork-cli/test-scripts/example-task.sh](../../crates/ork-cli/test-scripts/example-task.sh)
 
 ## Implementation
 
-### Test Binary: `src/bin/perf-test.rs`
+### Test Binary: [crates/ork-cli/src/bin/perf-test.rs](../../crates/ork-cli/src/bin/perf-test.rs)
 
 The performance test binary (written in Rust):
 - Builds a release binary for optimal performance
@@ -71,7 +71,7 @@ The performance test binary (written in Rust):
 
 ### Predefined Configurations
 
-All configs are stored in `perf-configs/*.yaml` and can be customized.
+All configs are stored in [crates/ork-cli/perf-configs/](../../crates/ork-cli/perf-configs/) and can be customized.
 
 **Quick smoke test** - verify basic functionality:
 ```bash
@@ -148,7 +148,7 @@ Resource Usage:
 
 ### Creating Custom Configurations
 
-Create a new YAML file in `perf-configs/`:
+Create a new YAML file in [crates/ork-cli/perf-configs/](../../crates/ork-cli/perf-configs/):
 
 ```yaml
 # perf-configs/my-test.yaml
@@ -180,12 +180,12 @@ cargo run --release --bin perf-test -- --config my-test
 
 The performance testing infrastructure includes:
 
-**Predefined test configs** (in `perf-configs/`):
-1. `quick.yaml` - Quick smoke test (10 runs × 5 tasks)
-2. `standard.yaml` - Standard load test (100 runs × 5 tasks)
-3. `heavy.yaml` - Heavy stress test (1000 runs × 10 tasks)
-4. `latency.yaml` - Latency measurement (50 runs × 5 tasks, 0.01s duration)
-5. `memory.yaml` - Memory test (100 runs × 20 tasks, 2.0s duration)
+**Predefined test configs** (in [crates/ork-cli/perf-configs/](../../crates/ork-cli/perf-configs/)):
+1. [quick.yaml](../../crates/ork-cli/perf-configs/quick.yaml) - Quick smoke test (10 runs × 5 tasks)
+2. [standard.yaml](../../crates/ork-cli/perf-configs/standard.yaml) - Standard load test (100 runs × 5 tasks)
+3. [heavy.yaml](../../crates/ork-cli/perf-configs/heavy.yaml) - Heavy stress test (1000 runs × 10 tasks)
+4. [latency.yaml](../../crates/ork-cli/perf-configs/latency.yaml) - Latency measurement (50 runs × 5 tasks, 0.01s duration)
+5. [memory.yaml](../../crates/ork-cli/perf-configs/memory.yaml) - Memory test (100 runs × 20 tasks, 2.0s duration)
 
 **Just commands** (all in `perf` group):
 - `just perf-quick/standard/heavy/latency/memory` - Run predefined configs
@@ -198,9 +198,8 @@ The performance testing infrastructure includes:
 - This ensures tests run with appropriate execution parameters for their workload
 
 **Implementation details**:
-- Rust binary at `src/bin/perf-test.rs`
+- Rust binary at [crates/ork-cli/src/bin/perf-test.rs](../../crates/ork-cli/src/bin/perf-test.rs)
 - Uses `sqlx` for direct database queries (no SQL parsing)
 - Uses `sysinfo` crate for accurate process resource monitoring
 - Uses Tokio for async concurrent run triggering
 - YAML configs parsed with `serde_yaml`
-
