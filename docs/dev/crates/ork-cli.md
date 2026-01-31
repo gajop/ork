@@ -45,7 +45,7 @@ The main host process for Ork. It owns the CLI surface and starts the scheduler 
 | [src/commands/list_workflows.rs](../../../crates/ork-cli/src/commands/list_workflows.rs) | Implements `ork list-workflows`. | 2026-01-31 | 6c5261b |
 | [src/commands/mod.rs](../../../crates/ork-cli/src/commands/mod.rs) | Command registry + dispatch helpers for CLI subcommands. | 2026-01-31 | 2c4f96e |
 | [src/commands/run.rs](../../../crates/ork-cli/src/commands/run.rs) | Implements `ork run` scheduler startup. | 2026-01-31 | 6cda9fd |
-| [src/commands/run_workflow.rs](../../../crates/ork-cli/src/commands/run_workflow.rs) | Implements `ork run-workflow` via the HTTP API. | 2026-01-31 | 8a242d3 |
+| [src/commands/run_workflow.rs](../../../crates/ork-cli/src/commands/run_workflow.rs) | Implements `ork run-workflow` via the HTTP API. | 2026-01-31 | 9847b53 |
 | [src/commands/status.rs](../../../crates/ork-cli/src/commands/status.rs) | Implements `ork status`. | 2026-01-31 | 58f326e |
 | [src/commands/tasks.rs](../../../crates/ork-cli/src/commands/tasks.rs) | Implements `ork tasks`. | 2026-01-31 | f5bf9c3 |
 | [src/commands/trigger.rs](../../../crates/ork-cli/src/commands/trigger.rs) | Implements `ork trigger`. | 2026-01-31 | fd656f4 |

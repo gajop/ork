@@ -155,25 +155,46 @@ async fn create_workflow(
         Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
     };
 
-    if payload.replace.unwrap_or(true) {
-        let _ = api.db.delete_workflow(&definition.name).await;
-    }
-
-    let workflow = match api
-        .db
-        .create_workflow(
-            &definition.name,
-            None,
-            "dag",
-            &region,
-            &project,
-            "dag",
-            None,
-        )
-        .await
-    {
-        Ok(wf) => wf,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    let replace = payload.replace.unwrap_or(true);
+    let workflow = match api.db.get_workflow(&definition.name).await {
+        Ok(existing) => {
+            if !replace {
+                return (
+                    StatusCode::CONFLICT,
+                    "Workflow already exists; pass replace=true to update tasks.".to_string(),
+                )
+                    .into_response();
+            }
+            existing
+        }
+        Err(err) => {
+            if is_not_found(&err) {
+                match api
+                    .db
+                    .create_workflow(
+                        &definition.name,
+                        None,
+                        "dag",
+                        &region,
+                        &project,
+                        "dag",
+                        None,
+                    )
+                    .await
+                {
+                    Ok(wf) => wf,
+                    Err(err) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            err.to_string(),
+                        )
+                            .into_response()
+                    }
+                }
+            } else {
+                return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+            }
+        }
     };
 
     let workflow_tasks = build_workflow_tasks(&compiled);
