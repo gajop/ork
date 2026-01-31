@@ -1,24 +1,13 @@
-
 use anyhow::Result;
-
 use futures::stream::{self, StreamExt};
-
 use serde::Serialize;
-
 use std::collections::{HashMap, HashSet};
-
 use std::sync::Arc;
-
 use std::time::Instant;
-
 use tokio::sync::mpsc;
-
 use tokio::time::{Duration, interval};
-
 use tracing::{error, info};
-
 use uuid::Uuid;
-
 
 use crate::config::OrchestratorConfig;
 
@@ -28,8 +17,7 @@ use crate::executor::StatusUpdate;
 
 use crate::executor_manager::ExecutorManager;
 
-use crate::models::{json_inner, TaskStatus, Workflow};
-
+use crate::models::{TaskStatus, Workflow, json_inner};
 
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
@@ -42,7 +30,6 @@ pub struct SchedulerMetrics {
     pub total_loop_ms: u128,
 }
 
-
 pub struct Scheduler<D: Database + 'static, E: ExecutorManager + 'static> {
     db: Arc<D>,
     config: OrchestratorConfig,
@@ -51,13 +38,16 @@ pub struct Scheduler<D: Database + 'static, E: ExecutorManager + 'static> {
     status_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<StatusUpdate>>>,
 }
 
-
 impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     pub fn new(db: Arc<D>, executor_manager: Arc<E>) -> Self {
         Self::new_with_config(db, executor_manager, OrchestratorConfig::default())
     }
 
-    pub fn new_with_config(db: Arc<D>, executor_manager: Arc<E>, config: OrchestratorConfig) -> Self {
+    pub fn new_with_config(
+        db: Arc<D>,
+        executor_manager: Arc<E>,
+        config: OrchestratorConfig,
+    ) -> Self {
         let (status_tx, status_rx) = mpsc::unbounded_channel();
         Self {
             db,
@@ -161,20 +151,28 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         let count = runs.len();
 
         // Get all unique workflow IDs
-        let workflow_ids: Vec<Uuid> = runs.iter().map(|r| r.workflow_id).collect::<HashSet<_>>().into_iter().collect();
+        let workflow_ids: Vec<Uuid> = runs
+            .iter()
+            .map(|r| r.workflow_id)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
 
         // Batch fetch all workflows in a single query
         let workflows = self.db.get_workflows_by_ids(&workflow_ids).await?;
 
         // Create workflow lookup map
-        let workflow_map: HashMap<Uuid, Workflow> = workflows
-            .into_iter()
-            .map(|w| (w.id, w))
-            .collect();
+        let workflow_map: HashMap<Uuid, Workflow> =
+            workflows.into_iter().map(|w| (w.id, w)).collect();
 
         // Register all workflow executors and set status channels
         for workflow in workflow_map.values() {
-            if self.executor_manager.get_executor(workflow.id).await.is_err() {
+            if self
+                .executor_manager
+                .get_executor(workflow.id)
+                .await
+                .is_err()
+            {
                 self.executor_manager.register_workflow(workflow).await?;
                 if let Ok(executor) = self.executor_manager.get_executor(workflow.id).await {
                     executor.set_status_channel(self.status_tx.clone()).await;
@@ -194,10 +192,17 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     .unwrap_or(3) as i32;
 
                 // Create tasks
-                if let Err(e) = self.db.batch_create_tasks(run.id, task_count, &workflow.name).await {
+                if let Err(e) = self
+                    .db
+                    .batch_create_tasks(run.id, task_count, &workflow.name)
+                    .await
+                {
                     error!("Failed to create tasks for run {}: {}", run.id, e);
                     // Mark run as failed
-                    let _ = self.db.update_run_status(run.id, "failed", Some(&e.to_string())).await;
+                    let _ = self
+                        .db
+                        .update_run_status(run.id, "failed", Some(&e.to_string()))
+                        .await;
                     continue;
                 }
 
@@ -232,7 +237,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         for workflow_id in workflow_ids {
             // Check if executor already registered, if not register it
-            if self.executor_manager.get_executor(workflow_id).await.is_err() {
+            if self
+                .executor_manager
+                .get_executor(workflow_id)
+                .await
+                .is_err()
+            {
                 let workflow = self.db.get_workflow_by_id(workflow_id).await?;
                 self.executor_manager.register_workflow(&workflow).await?;
 
@@ -258,7 +268,10 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                                 .execute(
                                     task_with_workflow.task_id,
                                     &task_with_workflow.job_name,
-                                    task_with_workflow.params.as_ref().map(|p| json_inner(p).clone()),
+                                    task_with_workflow
+                                        .params
+                                        .as_ref()
+                                        .map(|p| json_inner(p).clone()),
                                 )
                                 .await
                         }
@@ -275,13 +288,11 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         // Batch update statuses
         let updates: Vec<(Uuid, &str, Option<&str>, Option<String>)> = results
             .iter()
-            .map(|(task_id, result)| {
-                match result {
-                    Ok(execution_name) => (*task_id, "dispatched", Some(execution_name.as_str()), None),
-                    Err(e) => {
-                        error!("Failed to dispatch task {}: {}", task_id, e);
-                        (*task_id, "failed", None, Some(e.to_string()))
-                    }
+            .map(|(task_id, result)| match result {
+                Ok(execution_name) => (*task_id, "dispatched", Some(execution_name.as_str()), None),
+                Err(e) => {
+                    error!("Failed to dispatch task {}: {}", task_id, e);
+                    (*task_id, "failed", None, Some(e.to_string()))
                 }
             })
             .collect();
@@ -294,11 +305,14 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         let db_update_start = Instant::now();
         self.db.batch_update_task_status(&updates_ref).await?;
         let db_update_ms = db_update_start.elapsed().as_millis();
-        info!("Batch updated {} tasks in {}ms", updates_ref.len(), db_update_ms);
+        info!(
+            "Batch updated {} tasks in {}ms",
+            updates_ref.len(),
+            db_update_ms
+        );
 
         Ok(count)
     }
-
 
     async fn process_status_updates(&self, updates: Vec<StatusUpdate>) -> Result<()> {
         let mut task_updates: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = Vec::new();
@@ -322,7 +336,10 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         if !task_updates.is_empty() {
             self.db.batch_update_task_status(&task_updates).await?;
-            info!("Processed {} status updates from executors", task_updates.len());
+            info!(
+                "Processed {} status updates from executors",
+                task_updates.len()
+            );
         }
 
         for run_id in runs_to_check {

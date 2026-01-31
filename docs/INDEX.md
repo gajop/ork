@@ -9,7 +9,7 @@ This is the complete documentation hierarchy for Ork. Start with the [main READM
 - **[dev/schema.md](dev/schema.md)** - Database schema, migrations, storage formats
 - **[dev/crates.md](dev/crates.md)** - Rust crate structure and module organization
 - **[dev/spec.md](dev/spec.md)** - Technical specifications and algorithms
-- **[performance.md](performance.md)** - Performance testing infrastructure and benchmarks
+- **[dev/performance.md](dev/performance.md)** - Performance testing infrastructure and benchmarks
 
 ## 🚀 Deployment
 
@@ -47,6 +47,13 @@ This is the complete documentation hierarchy for Ork. Start with the [main READM
 - **[comparisons/](comparisons/)** - Feature comparisons with other workflow orchestrators
   - Airflow, Prefect, Dagster, Metaflow, Kedro, Luigi, and more
 
+## 📋 Reports & Analysis
+
+Temporary documents for reviews, analysis, and investigations:
+
+- **[reports/problems.md](reports/problems.md)** - Known issues and problem analysis
+- **[reports/REVIEW_GUIDE.md](reports/REVIEW_GUIDE.md)** - Code review guidelines
+
 ---
 
 ## Navigation Tips
@@ -59,7 +66,7 @@ This is the complete documentation hierarchy for Ork. Start with the [main READM
 **If you're contributing:**
 1. Review [dev/architecture.md](dev/architecture.md)
 2. Check [dev/crates.md](dev/crates.md) for code organization
-3. Run [performance.md](performance.md) tests to validate changes
+3. Run [dev/performance.md](dev/performance.md) tests to validate changes
 
 **If you're evaluating Ork:**
 1. Read [comparisons/](comparisons/) for feature comparisons

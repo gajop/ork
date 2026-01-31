@@ -90,6 +90,11 @@ db-runs:
 db-tasks run_id:
     docker compose exec postgres psql -U postgres -d orchestrator -c "SELECT task_index, status, cloud_run_execution_name, finished_at FROM tasks WHERE run_id = '{{run_id}}' ORDER BY task_index;"
 
+# Dump canonical schema (generates schema.sql)
+[group('database')]
+dump-schema:
+    ./scripts/dump-schema.sh
+
 # ============================================================================
 # Orchestrator
 # ============================================================================
