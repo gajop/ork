@@ -22,4 +22,4 @@ Execution backends and the executor manager. Implements [`ork-core::Executor`](.
 | [src/cloud_run.rs](../../../crates/ork-executors/src/cloud_run.rs) | Cloud Run executor client and polling loop. | 2026-01-31 | ff05bea |
 | [src/lib.rs](../../../crates/ork-executors/src/lib.rs) | Re-exports executors and gates features. | 2026-01-31 | beafa5a |
 | [src/manager.rs](../../../crates/ork-executors/src/manager.rs) | `ExecutorManager` implementation and backend selection per task. | 2026-01-31 | eda9b7d |
-| [src/process.rs](../../../crates/ork-executors/src/process.rs) | Local script/Python execution and task status reporting. | 2026-01-31 | 6754cbc |
+| [src/process.rs](../../../crates/ork-executors/src/process.rs) | Local script/Python execution and task status reporting. | 2026-01-31 | 8ddd5dc |

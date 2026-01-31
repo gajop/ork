@@ -281,16 +281,17 @@ fn build_env_vars(
     )
 }
 
-fn resolve_command_path(working_dir: &str, command: &str) -> String {
+fn resolve_command_path(_working_dir: &str, command: &str) -> String {
     let command_path = Path::new(command);
     if command_path.is_absolute() || command.chars().any(|c| c.is_whitespace()) {
         return command.to_string();
     }
 
-    Path::new(working_dir)
-        .join(command_path)
-        .to_string_lossy()
-        .to_string()
+    if command.contains('/') {
+        return command.to_string();
+    }
+
+    format!("./{}", command)
 }
 
 fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> Command {
