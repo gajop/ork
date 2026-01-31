@@ -76,10 +76,6 @@ graph TB
 | [ork-executors::CloudRunClient](../../crates/ork-executors/src/cloud_run.rs) | Creates and polls Cloud Run executions, reports status |
 | [ork-web](crates/ork-web.md) | Axum UI/API backed by Postgres (read runs/workflows, trigger runs) |
 
-### Legacy (deprecated)
-
-- [ork-runner::LocalScheduler](../../crates/ork-runner/src/scheduler.rs) is retained for reference only; ork-web no longer uses it.
-
 ## Data Flow
 
 ### Workflow Definition Flow (YAML -> DB)

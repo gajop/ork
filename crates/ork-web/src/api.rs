@@ -260,17 +260,20 @@ async fn run_detail(State(api): State<ApiServer>, Path(id): Path<String>) -> imp
 
     let tasks: Vec<TaskInfo> = task_rows
         .into_iter()
-        .map(|task| TaskInfo {
-            id: task.id.to_string(),
-            name: task.task_name,
-            status: task.status_str().to_string(),
-            executor: task.executor_type,
-            depends_on: task.depends_on,
-            started_at: task.started_at.map(fmt_time),
-            finished_at: task.finished_at.map(fmt_time),
-            dispatched_at: task.dispatched_at.map(fmt_time),
-            output: task.output.as_ref().map(|out| json_inner(out).clone()),
-            error: task.error,
+        .map(|task| {
+            let status = task.status_str().to_string();
+            TaskInfo {
+                id: task.id.to_string(),
+                name: task.task_name,
+                status,
+                executor: task.executor_type,
+                depends_on: task.depends_on,
+                started_at: task.started_at.map(fmt_time),
+                finished_at: task.finished_at.map(fmt_time),
+                dispatched_at: task.dispatched_at.map(fmt_time),
+                output: task.output.as_ref().map(|out| json_inner(out).clone()),
+                error: task.error,
+            }
         })
         .collect();
 

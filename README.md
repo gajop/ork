@@ -91,14 +91,17 @@ fn main(input: Input) -> ork::Result<Output> {
 }
 ```
 
-### 3. Run locally
+### 3. Run locally (DB-backed scheduler + web UI)
 
 ```bash
-docker compose up -d
-ork workflow deploy workflows/etl.yaml
-ork run start my_etl
-ork run logs my_etl --follow
+# Terminal 1: boot everything (Postgres + scheduler + web UI)
+just up
+
+# Terminal 2: create + trigger the example workflow
+just example-run simple
 ```
+
+Open the web UI at `http://127.0.0.1:4000` to see runs and task status.
 
 ### 4. Deploy
 
@@ -129,6 +132,7 @@ See [Deployment](docs/deployment.md) for deployment options.
 
 **Developer Docs:**
 - [Architecture](docs/dev/architecture.md) - System overview, components, data flow
+- [Running Locally](docs/dev/running.md) - One-command boot + example execution
 - [Schema](docs/dev/schema.md) - Database structure, object storage, JSON formats
 - [Spec](docs/dev/spec.md) - Algorithms, state machines, distributed coordination
 - [Crates](docs/dev/crates.md) - Rust crate structure and interfaces
