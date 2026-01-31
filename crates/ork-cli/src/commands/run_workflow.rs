@@ -25,7 +25,7 @@ pub struct RunWorkflow {
     #[arg(long)]
     pub root: Option<String>,
 
-    /// Replace any existing workflow with the same name
+    /// Replace workflow tasks for an existing workflow (runs are preserved)
     #[arg(long, default_value_t = true)]
     pub replace: bool,
 }
