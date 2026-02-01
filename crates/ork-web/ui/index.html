@@ -370,6 +370,7 @@
     let workflows = [];
     let runs = [];
     let workflowGraph = [];
+    let workflowDetail = null;
     let detailInterval = null;
     let lastRunsHash = '';
     let lastWorkflowsHash = '';
@@ -430,6 +431,7 @@
       fetch('/api/workflows/' + encodeURIComponent(name))
         .then(r => r.json())
         .then(data => {
+          workflowDetail = data.workflow || null;
           workflowGraph = data.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
           renderWorkflowGraph();
         })
@@ -472,10 +474,15 @@
         const last = wfRuns[0];
         const status = last ? badge(last.status) : '<span class="badge pending">no runs</span>';
         const time = last ? fmtDateTime(last.started_at || last.created_at) : '—';
+        let scheduleInfo = '';
+        if (wf.schedule_enabled && wf.schedule) {
+          const nextRun = wf.next_scheduled_at ? fmtDateTime(wf.next_scheduled_at) : 'calculating...';
+          scheduleInfo = `<span style="color: var(--accent-3);">⏰ next: ${nextRun}</span>`;
+        }
         return `
           <div class="item ${wf.name === selectedWorkflow ? 'selected' : ''}" data-workflow="${wf.name}">
             <div class="title">${wf.name}</div>
-            <div class="meta">${status}<span>last run: ${time}</span></div>
+            <div class="meta">${status}<span>last run: ${time}</span>${scheduleInfo}</div>
           </div>
         `;
       }).join('');
@@ -708,7 +715,23 @@
         target.innerHTML = '<p style="color: var(--muted);">No workflow loaded.</p>';
         return;
       }
-      target.innerHTML = renderGraph(workflowGraph, {});
+      let scheduleHtml = '';
+      if (workflowDetail && workflowDetail.schedule) {
+        const enabled = workflowDetail.schedule_enabled;
+        const nextRun = workflowDetail.next_scheduled_at ? fmtDateTime(workflowDetail.next_scheduled_at) : 'Not calculated';
+        const statusBadge = enabled ? '<span class="badge success">enabled</span>' : '<span class="badge pending">disabled</span>';
+        scheduleHtml = `
+          <div style="margin-bottom: 16px; padding: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
+              <strong style="color: var(--accent-3);">⏰ Schedule:</strong>
+              <code style="background: var(--panel); padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono', monospace;">${workflowDetail.schedule}</code>
+              ${statusBadge}
+            </div>
+            ${enabled ? `<div style="color: var(--muted); font-size: 14px;">Next run: <strong style="color: var(--text);">${nextRun}</strong></div>` : ''}
+          </div>
+        `;
+      }
+      target.innerHTML = scheduleHtml + renderGraph(workflowGraph, {});
     }
 
     // simple layered DAG drawing
