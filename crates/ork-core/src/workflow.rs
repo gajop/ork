@@ -11,6 +11,8 @@ use crate::error::{OrkError, OrkResult, WorkflowValidationError};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Workflow {
     pub name: String,
+    #[serde(default)]
+    pub schedule: Option<String>,
     pub tasks: IndexMap<String, TaskDefinition>,
 }
 

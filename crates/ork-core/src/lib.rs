@@ -9,6 +9,7 @@ pub mod database;
 pub mod executor;
 pub mod executor_manager;
 pub mod models;
+pub mod schedule_processor;
 pub mod scheduler;
 pub mod task_execution;
 
