@@ -20,6 +20,8 @@ use crate::executor_manager::ExecutorManager;
 
 use crate::models::{TaskStatus, Workflow, WorkflowTask, json_inner};
 
+use crate::task_execution::{build_run_tasks, execute_task, retry_backoff_seconds};
+
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
     #[allow(dead_code)]
@@ -184,7 +186,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             if let Some(workflow) = workflow_map.get(&run.workflow_id) {
                 let create_result =
                     if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id) {
-                        let tasks = self.build_run_tasks(run.id, workflow, workflow_tasks);
+                        let tasks = build_run_tasks(run.id, workflow, workflow_tasks);
                         self.db.batch_create_dag_tasks(run.id, &tasks).await
                     } else if workflow.executor_type == "dag" {
                         Err(anyhow::anyhow!(
@@ -281,97 +283,20 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
         let results = stream::iter(tasks)
             .map(|task_with_workflow| {
-                let executor_manager = &self.executor_manager;
+                let executor_manager = Arc::clone(&self.executor_manager);
                 let status_tx = self.status_tx.clone();
                 let workflow_map = workflow_map.clone();
                 let outputs_by_run = outputs_by_run.clone();
 
                 async move {
-                    let workflow = match workflow_map.get(&task_with_workflow.workflow_id) {
-                        Some(workflow) => workflow,
-                        None => {
-                            let err = anyhow::anyhow!(
-                                "workflow {} not found for task {}",
-                                task_with_workflow.workflow_id,
-                                task_with_workflow.task_id
-                            );
-                            return (task_with_workflow.task_id, Err(err));
-                        }
-                    };
-                    let job_name = resolve_job_name(&task_with_workflow, workflow);
-                    let mut params = task_with_workflow
-                        .params
-                        .as_ref()
-                        .map(|p| json_inner(p).clone())
-                        .unwrap_or_else(|| serde_json::json!({}));
-                    if !params.is_object() {
-                        params = serde_json::json!({});
-                    }
-
-                    if !task_with_workflow.depends_on.is_empty() {
-                        if let Some(outputs) = outputs_by_run.get(&task_with_workflow.run_id) {
-                            let mut upstream_map = serde_json::Map::new();
-                            for dep in &task_with_workflow.depends_on {
-                                let value = outputs
-                                    .get(dep)
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                                upstream_map.insert(dep.clone(), value);
-                            }
-
-                            if !upstream_map.is_empty() {
-                                let upstream_value = serde_json::Value::Object(upstream_map);
-                                if let Some(obj) = params.as_object_mut() {
-                                    obj.entry("upstream".to_string())
-                                        .or_insert(upstream_value.clone());
-
-                                    match obj.get_mut("task_input") {
-                                        Some(task_input) => {
-                                            if task_input.is_null() {
-                                                *task_input = serde_json::json!({
-                                                    "upstream": upstream_value.clone()
-                                                });
-                                            } else if let Some(input_obj) = task_input.as_object_mut() {
-                                                if input_obj.is_empty() {
-                                                    input_obj.insert(
-                                                        "upstream".to_string(),
-                                                        upstream_value.clone(),
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            obj.insert(
-                                                "task_input".to_string(),
-                                                serde_json::json!({
-                                                    "upstream": upstream_value.clone()
-                                                }),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    let execution_result = match executor_manager
-                        .get_executor(&task_with_workflow.executor_type, &workflow)
-                        .await
-                    {
-                        Ok(executor) => {
-                            executor.set_status_channel(status_tx).await;
-                            executor
-                                .execute(
-                                    task_with_workflow.task_id,
-                                    &job_name,
-                                    Some(params),
-                                )
-                                .await
-                        }
-                        Err(e) => Err(e),
-                    };
-
-                    (task_with_workflow.task_id, execution_result)
+                    execute_task(
+                        task_with_workflow,
+                        workflow_map,
+                        outputs_by_run,
+                        &*executor_manager,
+                        status_tx,
+                    )
+                    .await
                 }
             })
             .buffer_unordered(self.config.max_concurrent_dispatches)
@@ -425,11 +350,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         let mut task_updates: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = Vec::new();
         let mut runs_to_check = std::collections::HashSet::new();
         let mut failed_by_run: HashMap<Uuid, Vec<String>> = HashMap::new();
-        let failed_ids: Vec<Uuid> = updates
-            .iter()
-            .filter(|u| u.status == "failed")
-            .map(|u| u.task_id)
-            .collect();
+        let failed_ids: Vec<Uuid> = updates.iter().filter(|u| u.status == "failed").map(|u| u.task_id).collect();
         let retry_meta = if failed_ids.is_empty() {
             HashMap::new()
         } else {
@@ -456,20 +377,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             };
 
             if matches!(new_status, TaskStatus::Failed) {
-                let (attempts, max_retries) = retry_meta
-                    .get(&update.task_id)
-                    .cloned()
-                    .unwrap_or((0, 0));
+                let (attempts, max_retries) = retry_meta.get(&update.task_id).cloned().unwrap_or((0, 0));
                 if attempts < max_retries {
                     let error = update.error.as_deref().unwrap_or("retrying");
                     let backoff = retry_backoff_seconds(attempts + 1);
-                    let retry_at = Utc::now()
-                        + chrono::Duration::seconds(i64::try_from(backoff).unwrap_or(i64::MAX));
-                    if let Err(e) = self
-                        .db
-                        .reset_task_for_retry(update.task_id, Some(error), Some(retry_at))
-                        .await
-                    {
+                    let retry_at = Utc::now() + chrono::Duration::seconds(i64::try_from(backoff).unwrap_or(i64::MAX));
+                    if let Err(e) = self.db.reset_task_for_retry(update.task_id, Some(error), Some(retry_at)).await {
                         error!("Failed to reset task {} for retry: {}", update.task_id, e);
                         task_updates.push((update.task_id, new_status.as_str(), None, update.error.as_deref()));
                     } else {
@@ -505,19 +418,13 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         // Propagate dependency failures to downstream tasks
         for (run_id, names) in failed_by_run {
             let mut pending = names;
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = HashSet::new();
             while !pending.is_empty() {
                 let next = self
                     .db
                     .mark_tasks_failed_by_dependency(run_id, &pending, "dependency failed")
                     .await?;
-                let mut new_pending = Vec::new();
-                for name in next {
-                    if seen.insert(name.clone()) {
-                        new_pending.push(name);
-                    }
-                }
-                pending = new_pending;
+                pending = next.into_iter().filter(|name| seen.insert(name.clone())).collect();
             }
             runs_to_check.insert(run_id);
         }
@@ -565,55 +472,6 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         Ok(())
     }
 
-    fn build_run_tasks(
-        &self,
-        run_id: Uuid,
-        workflow: &Workflow,
-        workflow_tasks: &[WorkflowTask],
-    ) -> Vec<NewTask> {
-        workflow_tasks
-            .iter()
-            .map(|task| {
-                let mut params = task
-                    .params
-                    .as_ref()
-                    .map(|p| json_inner(p).clone())
-                    .unwrap_or_else(|| serde_json::json!({}));
-                if !params.is_object() {
-                    params = serde_json::json!({});
-                }
-                let obj = params.as_object_mut().expect("params object");
-                let max_retries = obj
-                    .get("max_retries")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0)
-                    .clamp(0, i64::from(i32::MAX)) as i32;
-                let timeout_seconds = obj
-                    .get("timeout_seconds")
-                    .and_then(|v| v.as_i64())
-                    .map(|v| v.clamp(0, i64::from(i32::MAX)) as i32);
-                obj.entry("task_index".to_string())
-                    .or_insert_with(|| serde_json::json!(task.task_index));
-                obj.entry("task_name".to_string())
-                    .or_insert_with(|| serde_json::json!(task.task_name.clone()));
-                obj.entry("workflow_name".to_string())
-                    .or_insert_with(|| serde_json::json!(workflow.name.clone()));
-                obj.entry("run_id".to_string())
-                    .or_insert_with(|| serde_json::json!(run_id.to_string()));
-
-                NewTask {
-                    task_index: task.task_index,
-                    task_name: task.task_name.clone(),
-                    executor_type: task.executor_type.clone(),
-                    depends_on: task.depends_on.clone(),
-                    params,
-                    max_retries,
-                    timeout_seconds,
-                }
-            })
-            .collect()
-    }
-
     async fn check_run_completion(&self, run_id: Uuid) -> Result<()> {
         // Use a COUNT query instead of fetching all tasks
         let (total, completed, failed) = self.db.get_run_task_stats(run_id).await?;
@@ -639,25 +497,4 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         Ok(())
     }
-}
-
-fn resolve_job_name(task: &crate::models::TaskWithWorkflow, workflow: &Workflow) -> String {
-    let params = task.params.as_ref().map(json_inner);
-    let override_name = params
-        .and_then(|p| p.get("job_name").and_then(|v| v.as_str()))
-        .or_else(|| params.and_then(|p| p.get("command").and_then(|v| v.as_str())))
-        .or_else(|| params.and_then(|p| p.get("script").and_then(|v| v.as_str())));
-
-    override_name
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| workflow.job_name.clone())
-}
-
-fn retry_backoff_seconds(attempt: i32) -> u64 {
-    if attempt <= 1 {
-        return 1;
-    }
-    let capped = attempt.clamp(1, 10) as u32;
-    let backoff = 2_u64.saturating_pow(capped - 1);
-    backoff.min(60)
 }
