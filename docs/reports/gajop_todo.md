@@ -4,8 +4,6 @@ DONE?
 	- On the second level, per crate, you may want to have a document that goes into more details about this crate. This can be either inside the crate itself or at this level
 
 
-
-4. This is a big problem, please implement it: No DAG support (tasks run independently)
 6. Needs to be implemented: No scheduled runs (manual trigger only)
 
 ----
