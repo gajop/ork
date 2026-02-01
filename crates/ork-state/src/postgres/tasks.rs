@@ -82,8 +82,24 @@ impl PostgresDatabase {
         Ok(())
     }
     pub(super) async fn get_pending_tasks_with_workflow_impl(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
-        let tasks = sqlx::query_as::<_, TaskWithWorkflow>("SELECT t.id as task_id, t.run_id, t.task_index, t.task_name, t.executor_type, t.depends_on, t.status as task_status, t.attempts, t.max_retries, t.timeout_seconds, t.retry_at, t.execution_name, t.params, w.id as workflow_id, w.job_name, w.project, w.region FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id WHERE t.status = 'pending' AND (t.retry_at IS NULL OR t.retry_at <= NOW()) ORDER BY t.created_at LIMIT $1")
-            .bind(limit).fetch_all(&self.pool).await?;
+        let tasks = sqlx::query_as::<_, TaskWithWorkflow>(
+            r#"SELECT t.id as task_id, t.run_id, t.task_index, t.task_name, t.executor_type, t.depends_on,
+            t.status as task_status, t.attempts, t.max_retries, t.timeout_seconds, t.retry_at, t.execution_name, t.params,
+            w.id as workflow_id, w.job_name, w.project, w.region
+            FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
+            WHERE t.status = 'pending'
+            AND (t.retry_at IS NULL OR t.retry_at <= NOW())
+            AND (cardinality(t.depends_on) = 0 OR NOT EXISTS (
+                SELECT 1 FROM unnest(t.depends_on) AS dep_name
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM tasks t2
+                    WHERE t2.run_id = t.run_id
+                    AND t2.task_name = dep_name
+                    AND t2.status IN ('success', 'failed')
+                )
+            ))
+            ORDER BY t.created_at LIMIT $1"#
+        ).bind(limit).fetch_all(&self.pool).await?;
         Ok(tasks)
     }
     pub(super) async fn get_task_outputs_impl(&self, run_id: Uuid, task_names: &[String]) -> Result<HashMap<String, serde_json::Value>> {

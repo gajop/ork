@@ -1,6 +1,5 @@
 use anyhow::Result;
 use uuid::Uuid;
-use sqlx::Row;
 
 use ork_core::database::NewWorkflowTask;
 use ork_core::models::{Workflow, WorkflowTask};
@@ -100,13 +99,14 @@ impl SqliteDatabase {
     }
 
     pub(super) async fn get_due_scheduled_workflows_impl(&self) -> Result<Vec<Workflow>> {
+        let now = chrono::Utc::now();
         let workflows = sqlx::query_as::<_, Workflow>(
             r#"SELECT * FROM workflows
                WHERE schedule_enabled = 1
                AND schedule IS NOT NULL
-               AND (next_scheduled_at IS NULL OR next_scheduled_at <= datetime('now'))
+               AND (next_scheduled_at IS NULL OR next_scheduled_at <= ?)
                ORDER BY next_scheduled_at"#
-        ).fetch_all(&self.pool).await?;
+        ).bind(now).fetch_all(&self.pool).await?;
         Ok(workflows)
     }
 

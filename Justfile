@@ -19,7 +19,12 @@ example-run name:
     cargo run -p ork-cli --bin ork -- run-workflow --file "examples/{{name}}/{{name}}.yaml"
 
 example-run-sqlite name:
-    cargo run -p ork-cli --no-default-features --features sqlite,process --bin ork -- run-workflow --file "examples/{{name}}/{{name}}.yaml"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export DATABASE_URL=${DATABASE_URL:-sqlite://./.ork/ork.db?mode=rwc}
+    mkdir -p .ork
+    cargo run -q -p ork-cli --no-default-features --features sqlite,process --bin ork -- init >/dev/null 2>&1 || true
+    cargo run -p ork-cli --no-default-features --features sqlite,process --bin ork -- execute --file "examples/{{name}}/{{name}}.yaml"
 
 # Start only the scheduler (DB-backed).
 run-scheduler:
@@ -33,7 +38,41 @@ run-web:
 status:
     cargo run -p ork-cli --bin ork -- status
 
+# Run all tests
+test:
+    @echo "Running all tests..."
+    cargo test --workspace
+
+# Run tests with output
+test-verbose:
+    @echo "Running all tests with output..."
+    cargo test --workspace -- --nocapture
+
+# Run tests for SQLite backend
+test-sqlite:
+    @echo "Running SQLite tests..."
+    cargo test --workspace --no-default-features --features sqlite,process
+
+# Run tests for Postgres backend
+test-postgres:
+    @echo "Running Postgres tests..."
+    cargo test --workspace --features postgres
+
+# Run a specific test by name
+test-one name:
+    @echo "Running test: {{name}}"
+    cargo test --workspace {{name}} -- --nocapture --exact
+
+# Run tests and generate coverage report (requires cargo-tarpaulin)
+test-coverage:
+    @echo "Generating test coverage..."
+    cargo tarpaulin --workspace --out Html --output-dir coverage
+
 # Run all linting checks.
 lint:
     ./scripts/check-loc.py
     ./scripts/check-docs.py --check
+
+# Run tests and lint checks
+check: test lint
+    @echo "All checks passed!"

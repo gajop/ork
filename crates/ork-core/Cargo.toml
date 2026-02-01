@@ -26,3 +26,7 @@ anyhow = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
 cron = "0.12"
+
+[dev-dependencies]
+ork-state = { path = "../ork-state", features = ["sqlite"] }
+ork-executors = { path = "../ork-executors", features = ["process"] }

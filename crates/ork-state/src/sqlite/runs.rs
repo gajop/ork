@@ -1,4 +1,5 @@
 use anyhow::Result;
+use sqlx::Row;
 use uuid::Uuid;
 
 use ork_core::models::Run;

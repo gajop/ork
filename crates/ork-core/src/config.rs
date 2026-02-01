@@ -25,7 +25,7 @@ impl Default for OrchestratorConfig {
             poll_interval_secs: std::env::var("POLL_INTERVAL_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(5.0),
+                .unwrap_or(1.0),
             max_tasks_per_batch: std::env::var("MAX_TASKS_PER_BATCH")
                 .ok()
                 .and_then(|v| v.parse().ok())
