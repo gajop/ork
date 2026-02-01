@@ -98,7 +98,7 @@ impl FileDatabase {
         let started_at = if status == "running" && task.started_at.is_none() { Some(now) } else { task.started_at };
         let finished_at = if matches!(status, "success" | "failed") && task.finished_at.is_none() { Some(now) } else { task.finished_at };
         let attempts = if status == "failed" { task.attempts + 1 } else { task.attempts };
-        let retry_at = if status == "pending" { task.retry_at } else { None };
+        let retry_at = if matches!(status, "pending" | "paused") { task.retry_at } else { None };
         let updated_task: Task = serde_json::from_value(serde_json::json!({
             "id": task.id,
             "run_id": task.run_id,
@@ -307,7 +307,7 @@ impl FileDatabase {
                 Ok(t) => t,
                 Err(_) => continue,
             };
-            if task.run_id != run_id || task.status_str() != "pending" {
+            if task.run_id != run_id || !matches!(task.status_str(), "pending" | "paused") {
                 continue;
             }
             if task.depends_on.iter().any(|name| failed_task_names.contains(name)) {

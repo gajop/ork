@@ -50,7 +50,7 @@ impl SqliteDatabase {
         sqlx::query(
             r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
             attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
-            retry_at = CASE WHEN ? = 'pending' THEN retry_at ELSE NULL END,
+            retry_at = CASE WHEN ? IN ('pending', 'paused') THEN retry_at ELSE NULL END,
             dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN CURRENT_TIMESTAMP ELSE dispatched_at END,
             started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
             finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END
@@ -77,7 +77,7 @@ impl SqliteDatabase {
         sqlx::query(
             r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
             attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
-            retry_at = CASE WHEN ? = 'pending' THEN retry_at ELSE NULL END,
+            retry_at = CASE WHEN ? IN ('pending', 'paused') THEN retry_at ELSE NULL END,
             dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN CURRENT_TIMESTAMP ELSE dispatched_at END,
             started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
             finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END
@@ -136,6 +136,7 @@ impl SqliteDatabase {
             w.id as workflow_id, w.job_name, w.project, w.region
             FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
             WHERE t.status = 'pending'
+            AND r.status = 'running'
             AND (t.retry_at IS NULL OR t.retry_at <= CURRENT_TIMESTAMP)
             AND (t.depends_on = '[]' OR NOT EXISTS (
                 SELECT 1 FROM json_each(t.depends_on) AS dep
@@ -212,7 +213,7 @@ impl SqliteDatabase {
         let placeholders = failed_task_names.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query_str = format!(
             r#"UPDATE tasks SET status = 'failed', error = ?, finished_at = CURRENT_TIMESTAMP
-            WHERE run_id = ? AND status = 'pending' AND EXISTS (
+            WHERE run_id = ? AND status IN ('pending', 'paused') AND EXISTS (
                 SELECT 1 FROM json_each(depends_on) WHERE value IN ({})
             ) RETURNING task_name"#,
             placeholders
