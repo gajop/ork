@@ -94,7 +94,16 @@ impl SqliteDatabase {
             .acquire_timeout(std::time::Duration::from_secs(5))
             .connect(database_url)
             .await?;
+
+        // Enable foreign keys
         sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
+
+        // Enable WAL mode for better concurrency (allows concurrent reads during writes)
+        sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await?;
+
+        // Reduce fsync overhead - NORMAL is safe and much faster than FULL
+        sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await?;
+
         Ok(Self { pool })
     }
 

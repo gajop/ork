@@ -1,0 +1,19 @@
+name: fast_demo
+
+tasks:
+  task_a:
+    executor: python
+    module: fast
+    function: task_a
+
+  task_b:
+    executor: python
+    module: fast
+    function: task_b
+    depends_on: [task_a]
+
+  task_c:
+    executor: python
+    module: fast
+    function: task_c
+    depends_on: [task_b]

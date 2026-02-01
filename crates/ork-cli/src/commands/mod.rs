@@ -3,6 +3,7 @@ use clap::Subcommand;
 pub mod create_workflow;
 pub mod create_workflow_yaml;
 pub mod delete_workflow;
+pub mod execute;
 pub mod init;
 pub mod list_workflows;
 pub mod run;
@@ -14,6 +15,7 @@ pub mod trigger;
 pub use create_workflow::CreateWorkflow;
 pub use create_workflow_yaml::CreateWorkflowYaml;
 pub use delete_workflow::DeleteWorkflow;
+pub use execute::Execute;
 pub use init::Init;
 pub use list_workflows::ListWorkflows;
 pub use run::Run;
@@ -50,6 +52,9 @@ pub enum Commands {
 
     /// Show tasks for a run
     Tasks(Tasks),
+
+    /// Execute a workflow from YAML file locally (create + trigger + run scheduler until complete)
+    Execute(Execute),
 
     /// Create + trigger a workflow from a YAML file via the HTTP API
     RunWorkflow(RunWorkflow),

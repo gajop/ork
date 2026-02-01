@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, interval};
+use tokio::time::Duration;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -63,16 +63,13 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
     pub async fn run(&self) -> Result<()> {
         info!(
-            "Starting scheduler loop (poll_interval={}s, max_batch={}, max_concurrent_dispatch={}, max_concurrent_status={})",
-            self.config.poll_interval_secs,
+            "Starting scheduler loop (max_batch={}, max_concurrent_dispatch={}, max_concurrent_status={})",
             self.config.max_tasks_per_batch,
             self.config.max_concurrent_dispatches,
             self.config.max_concurrent_status_checks
         );
 
         let mut status_rx = self.status_rx.lock().await;
-        let mut poll_interval = interval(Duration::from_secs_f64(self.config.poll_interval_secs));
-        poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             let loop_start = Instant::now();
@@ -94,6 +91,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             while let Ok(update) = status_rx.try_recv() {
                 status_updates.push(update);
             }
+            let updates_processed = status_updates.len();
             if !status_updates.is_empty() {
                 if let Err(e) = self.process_status_updates(status_updates).await {
                     error!("Error processing status updates: {}", e);
@@ -105,18 +103,19 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 error!("Error enforcing timeouts: {}", e);
             }
 
-            // Wait for either a status update or the next poll interval
-            let had_work = runs_processed > 0 || tasks_processed > 0;
+            // Only sleep if there was no work this iteration
+            // When work is processed, immediately loop back to check for more
+            let had_work = runs_processed > 0 || tasks_processed > 0 || updates_processed > 0;
             let start = Instant::now();
 
             if !had_work {
-                // No work to do - wait for status update or timeout
+                // No work - sleep until status update or timeout
                 tokio::select! {
-                    _ = poll_interval.tick() => {
+                    _ = tokio::time::sleep(Duration::from_secs_f64(self.config.poll_interval_secs)) => {
                         // Timeout - continue to next iteration
                     }
                     Some(update) = status_rx.recv() => {
-                        // Got status update - process it immediately
+                        // Got status update - process it and loop back immediately
                         if let Err(e) = self.process_status_updates(vec![update]).await {
                             error!("Error processing status update: {}", e);
                         }

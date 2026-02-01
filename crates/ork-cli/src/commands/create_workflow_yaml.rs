@@ -22,39 +22,8 @@ pub struct CreateWorkflowYaml {
 
 impl CreateWorkflowYaml {
     pub async fn execute(self, db: Arc<dyn Database>) -> Result<()> {
-        let yaml = std::fs::read_to_string(&self.file)?;
-        let definition: YamlWorkflow = serde_yaml::from_str(&yaml)?;
-        definition
-            .validate()
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
-        let root = std::path::Path::new(&self.file)
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| {
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-            });
-        let root = root.canonicalize().unwrap_or(root);
-        let compiled = definition
-            .compile(&root)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
-        let workflow = db
-            .create_workflow(
-                &definition.name,
-                None,
-                "dag",
-                &self.region,
-                &self.project,
-                "dag",
-                None,
-                None,
-            )
-            .await?;
-
-        let workflow_tasks = build_workflow_tasks(&compiled);
-        db.create_workflow_tasks(workflow.id, &workflow_tasks)
-            .await?;
+        let yaml_content = std::fs::read_to_string(&self.file)?;
+        let workflow = create_workflow_from_yaml_str(&*db, &yaml_content, &self.file, &self.project, &self.region).await?;
 
         println!("✓ Created workflow from YAML: {}", workflow.name);
         println!("  ID: {}", workflow.id);
@@ -63,6 +32,49 @@ impl CreateWorkflowYaml {
         println!("  Region: {}", workflow.region);
         Ok(())
     }
+}
+
+pub async fn create_workflow_from_yaml_str(
+    db: &dyn Database,
+    yaml_content: &str,
+    file_path: &str,
+    project: &str,
+    region: &str,
+) -> Result<ork_core::models::Workflow> {
+    let definition: YamlWorkflow = serde_yaml::from_str(yaml_content)?;
+    definition
+        .validate()
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    let root = std::path::Path::new(file_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+    let root = root.canonicalize().unwrap_or(root);
+    let compiled = definition
+        .compile(&root)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    let workflow = db
+        .create_workflow(
+            &definition.name,
+            None,
+            "dag",
+            region,
+            project,
+            "dag",
+            None,
+            None,
+        )
+        .await?;
+
+    let workflow_tasks = build_workflow_tasks(&compiled);
+    db.create_workflow_tasks(workflow.id, &workflow_tasks)
+        .await?;
+
+    Ok(workflow)
 }
 
 fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<NewWorkflowTask> {

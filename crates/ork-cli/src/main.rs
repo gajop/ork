@@ -71,6 +71,7 @@ async fn main() -> Result<()> {
         Commands::Trigger(cmd) => cmd.execute(db).await?,
         Commands::Status(cmd) => cmd.execute(db).await?,
         Commands::Tasks(cmd) => cmd.execute(db).await?,
+        Commands::Execute(cmd) => cmd.execute(db).await?,
         Commands::RunWorkflow(_) => unreachable!("run-workflow handled earlier"),
     }
 

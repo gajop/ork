@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use std::collections::HashMap;
 use uuid::Uuid;
-use sqlx::{QueryBuilder, Sqlite, Row};
+use sqlx::Row;
 
 use ork_core::database::NewTask;
 use ork_core::models::{Task, TaskWithWorkflow};
@@ -66,74 +66,25 @@ impl SqliteDatabase {
             return Ok(());
         }
         let mut tx = self.pool.begin().await?;
-        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(
-            r#"UPDATE tasks SET status = CASE id "#
-        );
-        for (id, status, _, _) in updates {
-            query_builder.push("WHEN ");
-            query_builder.push_bind(id);
-            query_builder.push(" THEN ");
-            query_builder.push_bind(status);
-            query_builder.push(" ");
+        for (task_id, status, execution_name, error) in updates {
+            self.update_task_status_impl_tx(&mut tx, *task_id, status, *execution_name, *error).await?;
         }
-        query_builder.push("END, execution_name = CASE id ");
-        for (id, _, execution_name, _) in updates {
-            query_builder.push("WHEN ");
-            query_builder.push_bind(id);
-            query_builder.push(" THEN COALESCE(");
-            query_builder.push_bind(execution_name);
-            query_builder.push(", execution_name) ");
-        }
-        query_builder.push("END, error = CASE id ");
-        for (id, _, _, error) in updates {
-            query_builder.push("WHEN ");
-            query_builder.push_bind(id);
-            query_builder.push(" THEN COALESCE(");
-            query_builder.push_bind(error);
-            query_builder.push(", error) ");
-        }
-        query_builder.push("END, attempts = CASE ");
-        for (id, status, _, _) in updates {
-            if *status == "failed" {
-                query_builder.push("WHEN id = ");
-                query_builder.push_bind(id);
-                query_builder.push(" THEN attempts + 1 ");
-            }
-        }
-        query_builder.push("ELSE attempts END, dispatched_at = CASE ");
-        for (id, status, _, _) in updates {
-            if *status == "dispatched" {
-                query_builder.push("WHEN id = ");
-                query_builder.push_bind(id);
-                query_builder.push(" AND dispatched_at IS NULL THEN CURRENT_TIMESTAMP ");
-            }
-        }
-        query_builder.push("ELSE dispatched_at END, started_at = CASE ");
-        for (id, status, _, _) in updates {
-            if *status == "running" {
-                query_builder.push("WHEN id = ");
-                query_builder.push_bind(id);
-                query_builder.push(" AND started_at IS NULL THEN CURRENT_TIMESTAMP ");
-            }
-        }
-        query_builder.push("ELSE started_at END, finished_at = CASE ");
-        for (id, status, _, _) in updates {
-            if matches!(*status, "success" | "failed") {
-                query_builder.push("WHEN id = ");
-                query_builder.push_bind(id);
-                query_builder.push(" AND finished_at IS NULL THEN CURRENT_TIMESTAMP ");
-            }
-        }
-        query_builder.push("ELSE finished_at END WHERE id IN (");
-        for (i, (id, _, _, _)) in updates.iter().enumerate() {
-            if i > 0 {
-                query_builder.push(", ");
-            }
-            query_builder.push_bind(id);
-        }
-        query_builder.push(")");
-        query_builder.build().execute(&mut *tx).await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    async fn update_task_status_impl_tx(&self, tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, task_id: Uuid, status: &str, execution_name: Option<&str>, error: Option<&str>) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
+            attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
+            retry_at = CASE WHEN ? = 'pending' THEN retry_at ELSE NULL END,
+            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN CURRENT_TIMESTAMP ELSE dispatched_at END,
+            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
+            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END
+            WHERE id = ?"#,
+        )
+        .bind(status).bind(execution_name).bind(error).bind(status).bind(status).bind(status).bind(status).bind(status).bind(task_id)
+        .execute(&mut **tx).await?;
         Ok(())
     }
 
@@ -184,7 +135,17 @@ impl SqliteDatabase {
             t.status as task_status, t.attempts, t.max_retries, t.timeout_seconds, t.retry_at, t.execution_name, t.params,
             w.id as workflow_id, w.job_name, w.project, w.region
             FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
-            WHERE t.status = 'pending' AND (t.retry_at IS NULL OR t.retry_at <= CURRENT_TIMESTAMP)
+            WHERE t.status = 'pending'
+            AND (t.retry_at IS NULL OR t.retry_at <= CURRENT_TIMESTAMP)
+            AND (t.depends_on = '[]' OR NOT EXISTS (
+                SELECT 1 FROM json_each(t.depends_on) AS dep
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM tasks t2
+                    WHERE t2.run_id = t.run_id
+                    AND t2.task_name = dep.value
+                    AND t2.status IN ('success', 'failed')
+                )
+            ))
             ORDER BY t.created_at LIMIT ?"#,
         )
         .bind(limit).fetch_all(&self.pool).await?;
