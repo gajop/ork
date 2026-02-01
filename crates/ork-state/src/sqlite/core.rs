@@ -1,0 +1,169 @@
+use anyhow::Result;
+use chrono::{DateTime, Utc};
+use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::SqlitePool;
+use uuid::Uuid;
+
+use ork_core::models::{Task, TaskWithWorkflow, WorkflowTask};
+
+pub(super) fn parse_depends_on(raw: Option<String>) -> Vec<String> {
+    match raw {
+        Some(value) => serde_json::from_str(&value).unwrap_or_default(),
+        None => Vec::new(),
+    }
+}
+
+pub(super) fn encode_depends_on(deps: &[String]) -> String {
+    serde_json::to_string(deps).unwrap_or_else(|_| "[]".to_string())
+}
+
+pub(super) fn parse_retry_at(raw: Option<String>) -> Option<DateTime<Utc>> {
+    raw.and_then(|value| {
+        DateTime::parse_from_rfc3339(&value)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+    })
+}
+
+#[derive(sqlx::FromRow)]
+pub(super) struct TaskRow {
+    pub id: Uuid,
+    pub run_id: Uuid,
+    pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: String,
+    pub status: String,
+    pub attempts: i32,
+    pub max_retries: i32,
+    pub timeout_seconds: Option<i32>,
+    pub retry_at: Option<String>,
+    pub execution_name: Option<String>,
+    pub params: Option<sqlx::types::Json<serde_json::Value>>,
+    pub output: Option<sqlx::types::Json<serde_json::Value>>,
+    pub logs: Option<String>,
+    pub error: Option<String>,
+    pub dispatched_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+pub(super) struct WorkflowTaskRow {
+    pub id: Uuid,
+    pub workflow_id: Uuid,
+    pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: String,
+    pub params: Option<sqlx::types::Json<serde_json::Value>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+pub(super) struct TaskWithWorkflowRow {
+    pub task_id: Uuid,
+    pub run_id: Uuid,
+    pub task_index: i32,
+    pub task_name: String,
+    pub executor_type: String,
+    pub depends_on: String,
+    pub task_status: String,
+    pub attempts: i32,
+    pub max_retries: i32,
+    pub timeout_seconds: Option<i32>,
+    pub retry_at: Option<String>,
+    pub execution_name: Option<String>,
+    pub params: Option<sqlx::types::Json<serde_json::Value>>,
+    pub workflow_id: Uuid,
+    pub job_name: String,
+    pub project: String,
+    pub region: String,
+}
+
+pub struct SqliteDatabase {
+    pub(super) pool: SqlitePool,
+}
+
+impl SqliteDatabase {
+    pub async fn new(database_url: &str) -> Result<Self> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .min_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect(database_url)
+            .await?;
+        sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
+        Ok(Self { pool })
+    }
+
+    pub async fn run_migrations(&self) -> Result<()> {
+        sqlx::migrate!("./migrations_sqlite").run(&self.pool).await?;
+        Ok(())
+    }
+
+    pub(super) fn map_task(row: TaskRow) -> Task {
+        Task {
+            id: row.id,
+            run_id: row.run_id,
+            task_index: row.task_index,
+            task_name: row.task_name,
+            executor_type: row.executor_type,
+            depends_on: parse_depends_on(Some(row.depends_on)),
+            status: row.status,
+            attempts: row.attempts,
+            max_retries: row.max_retries,
+            timeout_seconds: row.timeout_seconds,
+            retry_at: parse_retry_at(row.retry_at),
+            execution_name: row.execution_name,
+            params: row.params.map(|v| v),
+            output: row.output.map(|v| v),
+            logs: row.logs,
+            error: row.error,
+            dispatched_at: row.dispatched_at,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+            created_at: row.created_at,
+        }
+    }
+
+    pub(super) fn map_workflow_task(row: WorkflowTaskRow) -> WorkflowTask {
+        WorkflowTask {
+            id: row.id,
+            workflow_id: row.workflow_id,
+            task_index: row.task_index,
+            task_name: row.task_name,
+            executor_type: row.executor_type,
+            depends_on: parse_depends_on(Some(row.depends_on)),
+            params: row.params.map(|v| v),
+            created_at: row.created_at,
+        }
+    }
+
+    pub(super) fn map_task_with_workflow(row: TaskWithWorkflowRow) -> TaskWithWorkflow {
+        TaskWithWorkflow {
+            task_id: row.task_id,
+            run_id: row.run_id,
+            task_index: row.task_index,
+            task_name: row.task_name,
+            executor_type: row.executor_type,
+            depends_on: parse_depends_on(Some(row.depends_on)),
+            task_status: row.task_status,
+            attempts: row.attempts,
+            max_retries: row.max_retries,
+            timeout_seconds: row.timeout_seconds,
+            retry_at: parse_retry_at(row.retry_at),
+            execution_name: row.execution_name,
+            params: row.params.map(|v| v),
+            workflow_id: row.workflow_id,
+            job_name: row.job_name,
+            project: row.project,
+            region: row.region,
+        }
+    }
+
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+}
