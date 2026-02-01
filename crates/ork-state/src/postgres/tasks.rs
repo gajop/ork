@@ -28,15 +28,30 @@ impl PostgresDatabase {
         Ok(())
     }
     pub(super) async fn update_task_status_impl(&self, task_id: Uuid, status: &str, execution_name: Option<&str>, error: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = COALESCE($3, error), attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END, retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END, dispatched_at = CASE WHEN $1 = 'dispatched' AND dispatched_at IS NULL THEN NOW() ELSE dispatched_at END, started_at = CASE WHEN $1 = 'running' AND started_at IS NULL THEN NOW() ELSE started_at END, finished_at = CASE WHEN $1 IN ('success', 'failed') AND finished_at IS NULL THEN NOW() ELSE finished_at END WHERE id = $4")
-            .bind(status).bind(execution_name).bind(error).bind(task_id).execute(&self.pool).await?;
+        sqlx::query(
+            r#"UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = $3,
+            attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
+            retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END,
+            dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
+            started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
+            finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
+            WHERE id = $4"#
+        ).bind(status).bind(execution_name).bind(error).bind(task_id).execute(&self.pool).await?;
         Ok(())
     }
     pub(super) async fn batch_update_task_status_impl(&self, updates: &[(Uuid, &str, Option<&str>, Option<&str>)]) -> Result<()> {
         if updates.is_empty() { return Ok(()); }
         let mut tx = self.pool.begin().await?;
         for (task_id, status, execution_name, error) in updates {
-            self.update_task_status_impl(*task_id, status, *execution_name, *error).await?;
+            sqlx::query(
+                r#"UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = $3,
+                attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
+                retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END,
+                dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
+                started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
+                finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
+                WHERE id = $4 AND (status NOT IN ('success', 'failed') OR $1 IN ('success', 'failed'))"#
+            ).bind(status).bind(execution_name).bind(error).bind(task_id).execute(&mut *tx).await?;
         }
         tx.commit().await?;
         Ok(())

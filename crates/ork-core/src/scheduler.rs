@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::config::OrchestratorConfig;
 
-use crate::database::{Database, NewTask};
+use crate::database::Database;
 
 use crate::executor::StatusUpdate;
 
