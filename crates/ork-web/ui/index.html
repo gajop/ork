@@ -450,9 +450,64 @@
       fetchRuns();
     };
 
+    // WebSocket connection for real-time updates
+    let ws = null;
+    let wsReconnectTimeout = null;
+
+    function connectWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          console.log('WebSocket connected');
+          if (wsReconnectTimeout) {
+            clearTimeout(wsReconnectTimeout);
+            wsReconnectTimeout = null;
+          }
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const update = JSON.parse(event.data);
+            if (update.type === 'run_updated') {
+              // Refresh runs list when a run is updated
+              fetchRuns();
+              if (selectedRunId === update.run_id) {
+                fetchRunDetail(selectedRunId);
+              }
+            } else if (update.type === 'task_updated') {
+              // Refresh run detail if we're viewing this run
+              if (selectedRunId === update.run_id) {
+                fetchRunDetail(selectedRunId);
+              }
+            }
+          } catch (e) {
+            console.error('Failed to parse WebSocket message:', e);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+        };
+
+        ws.onclose = () => {
+          console.log('WebSocket disconnected, reconnecting in 5s...');
+          ws = null;
+          wsReconnectTimeout = setTimeout(connectWebSocket, 5000);
+        };
+      } catch (e) {
+        console.error('Failed to create WebSocket:', e);
+        wsReconnectTimeout = setTimeout(connectWebSocket, 5000);
+      }
+    }
+
+    connectWebSocket();
     fetchWorkflows();
     fetchRuns();
-    setInterval(fetchRuns, 1200);
+    setInterval(fetchRuns, 5000); // Reduced polling frequency since we have WebSocket
 
     function fetchWorkflows() {
       const params = new URLSearchParams({
@@ -526,7 +581,7 @@
       renderRuns();
       fetchRunDetail(id);
       if (detailInterval) clearInterval(detailInterval);
-      detailInterval = setInterval(() => fetchRunDetail(id), 1200);
+      detailInterval = setInterval(() => fetchRunDetail(id), 5000); // Reduced since WebSocket handles updates
       setActiveTab('run');
     }
 
