@@ -17,14 +17,15 @@ impl SqliteDatabase {
         project: &str,
         executor_type: &str,
         task_params: Option<serde_json::Value>,
+        schedule: Option<&str>,
     ) -> Result<Workflow> {
         let workflow_id = Uuid::new_v4();
         let params_json = task_params.map(|v| sqlx::types::Json(v));
         let workflow = sqlx::query_as::<_, Workflow>(
-            r#"INSERT INTO workflows (id, name, description, job_name, region, project, executor_type, task_params)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"#,
+            r#"INSERT INTO workflows (id, name, description, job_name, region, project, executor_type, task_params, schedule)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"#,
         )
-        .bind(workflow_id).bind(name).bind(description).bind(job_name).bind(region).bind(project).bind(executor_type).bind(params_json)
+        .bind(workflow_id).bind(name).bind(description).bind(job_name).bind(region).bind(project).bind(executor_type).bind(params_json).bind(schedule)
         .fetch_one(&self.pool).await?;
         Ok(workflow)
     }
@@ -96,5 +97,40 @@ impl SqliteDatabase {
         )
         .bind(workflow_id).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(Self::map_workflow_task).collect())
+    }
+
+    pub(super) async fn get_due_scheduled_workflows_impl(&self) -> Result<Vec<Workflow>> {
+        let workflows = sqlx::query_as::<_, Workflow>(
+            r#"SELECT * FROM workflows
+               WHERE schedule_enabled = 1
+               AND schedule IS NOT NULL
+               AND (next_scheduled_at IS NULL OR next_scheduled_at <= datetime('now'))
+               ORDER BY next_scheduled_at"#
+        ).fetch_all(&self.pool).await?;
+        Ok(workflows)
+    }
+
+    pub(super) async fn update_workflow_schedule_times_impl(
+        &self,
+        workflow_id: Uuid,
+        last_scheduled_at: chrono::DateTime<chrono::Utc>,
+        next_scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE workflows SET last_scheduled_at = ?, next_scheduled_at = ? WHERE id = ?"
+        ).bind(last_scheduled_at).bind(next_scheduled_at).bind(workflow_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub(super) async fn update_workflow_schedule_impl(
+        &self,
+        workflow_id: Uuid,
+        schedule: Option<&str>,
+        schedule_enabled: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE workflows SET schedule = ?, schedule_enabled = ? WHERE id = ?"
+        ).bind(schedule).bind(schedule_enabled).bind(workflow_id).execute(&self.pool).await?;
+        Ok(())
     }
 }

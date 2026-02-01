@@ -48,6 +48,7 @@ impl CreateWorkflowYaml {
                 &self.project,
                 "dag",
                 None,
+                None,
             )
             .await?;
 
