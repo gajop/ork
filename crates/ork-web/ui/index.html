@@ -320,14 +320,32 @@
           <h2>Workflows</h2>
           <span id="workflow-count" class="pill">0</span>
         </div>
+        <div style="padding: 8px 12px; border-bottom: 1px solid var(--border);">
+          <input type="text" id="workflow-search" placeholder="Search workflows..." style="width: 100%; padding: 6px 8px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: inherit;" />
+        </div>
         <div id="workflow-list" class="list"></div>
+        <div id="workflow-pagination" style="padding: 8px 12px; border-top: 1px solid var(--border); text-align: center; font-size: 14px;"></div>
       </div>
       <div class="panel">
         <div class="panel-header">
           <h2>Run History</h2>
           <span id="run-count" class="pill">0</span>
         </div>
+        <div style="padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px;">
+          <select id="run-status-filter" style="flex: 1; padding: 6px 8px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: inherit;">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="running">Running</option>
+            <option value="success">Success</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="run-workflow-filter" style="flex: 1; padding: 6px 8px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: inherit;">
+            <option value="">All workflows</option>
+          </select>
+        </div>
         <div id="runs-list" class="list large"></div>
+        <div id="runs-pagination" style="padding: 8px 12px; border-top: 1px solid var(--border); text-align: center; font-size: 14px;"></div>
       </div>
     </aside>
 
@@ -375,6 +393,19 @@
     let lastRunsHash = '';
     let lastWorkflowsHash = '';
 
+    // Pagination and filter state
+    let workflowsPage = 0;
+    let workflowsTotalPages = 0;
+    let workflowsTotal = 0;
+    let workflowSearch = '';
+    let runsPage = 0;
+    let runsTotalPages = 0;
+    let runsTotal = 0;
+    let runsStatusFilter = '';
+    let runsWorkflowFilter = '';
+    const WORKFLOWS_PER_PAGE = 50;
+    const RUNS_PER_PAGE = 50;
+
     const workflowListEl = document.getElementById('workflow-list');
     const runsListEl = document.getElementById('runs-list');
     const workflowCountEl = document.getElementById('workflow-count');
@@ -396,15 +427,46 @@
     tabRunBtn.onclick = () => setActiveTab('run');
     tabGraphBtn.onclick = () => setActiveTab('graph');
 
+    // Filter event listeners
+    let searchTimeout;
+    document.getElementById('workflow-search').oninput = (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        workflowSearch = e.target.value;
+        workflowsPage = 0;
+        fetchWorkflows();
+      }, 300);
+    };
+
+    document.getElementById('run-status-filter').onchange = (e) => {
+      runsStatusFilter = e.target.value;
+      runsPage = 0;
+      fetchRuns();
+    };
+
+    document.getElementById('run-workflow-filter').onchange = (e) => {
+      runsWorkflowFilter = e.target.value;
+      runsPage = 0;
+      fetchRuns();
+    };
+
     fetchWorkflows();
     fetchRuns();
     setInterval(fetchRuns, 1200);
 
     function fetchWorkflows() {
-      fetch('/api/workflows')
+      const params = new URLSearchParams({
+        limit: WORKFLOWS_PER_PAGE,
+        offset: workflowsPage * WORKFLOWS_PER_PAGE,
+      });
+      if (workflowSearch) params.set('search', workflowSearch);
+
+      fetch('/api/workflows?' + params)
         .then(r => r.json())
-        .then(items => {
-          workflows = Array.isArray(items) ? items : [];
+        .then(data => {
+          workflows = data.items || [];
+          workflowsTotal = data.total || 0;
+          workflowsTotalPages = Math.ceil(workflowsTotal / WORKFLOWS_PER_PAGE);
           if (!selectedWorkflow && workflows.length) {
             selectedWorkflow = workflows[0].name;
             fetchWorkflowGraph(selectedWorkflow);
@@ -416,10 +478,19 @@
     }
 
     function fetchRuns() {
-      fetch('/api/runs')
+      const params = new URLSearchParams({
+        limit: RUNS_PER_PAGE,
+        offset: runsPage * RUNS_PER_PAGE,
+      });
+      if (runsStatusFilter) params.set('status', runsStatusFilter);
+      if (runsWorkflowFilter) params.set('workflow', runsWorkflowFilter);
+
+      fetch('/api/runs?' + params)
         .then(r => r.json())
-        .then(items => {
-          runs = Array.isArray(items) ? items : [];
+        .then(data => {
+          runs = data.items || [];
+          runsTotal = data.total || 0;
+          runsTotalPages = Math.ceil(runsTotal / RUNS_PER_PAGE);
           renderRuns();
           renderWorkflows();
         })
@@ -460,10 +531,11 @@
     }
 
     function renderWorkflows() {
-      workflowCountEl.textContent = workflows.length;
+      workflowCountEl.textContent = workflowsTotal;
       activeWorkflowEl.textContent = `Workflow: ${selectedWorkflow || '—'}`;
       if (!workflows.length) {
         workflowListEl.innerHTML = '<p style="color: var(--muted);">No workflows found.</p>';
+        document.getElementById('workflow-pagination').innerHTML = '';
         return;
       }
 
@@ -496,13 +568,19 @@
       workflowListEl.querySelectorAll('.item').forEach(el => {
         el.onclick = () => selectWorkflow(el.dataset.workflow);
       });
+
+      // Render pagination
+      renderPagination('workflow', workflowsPage, workflowsTotalPages, (page) => {
+        workflowsPage = page;
+        fetchWorkflows();
+      });
     }
 
     function renderRuns() {
       const filtered = selectedWorkflow
         ? runs.filter(r => r.workflow === selectedWorkflow)
         : runs;
-      runCountEl.textContent = filtered.length;
+      runCountEl.textContent = runsTotal;
 
       if (selectedRunId && !filtered.some(r => r.id === selectedRunId)) {
         selectedRunId = null;
@@ -510,6 +588,7 @@
 
       if (!filtered.length) {
         runsListEl.innerHTML = '<p style="color: var(--muted);">No runs yet.</p>';
+        document.getElementById('runs-pagination').innerHTML = '';
         return;
       }
 
@@ -538,6 +617,15 @@
       runsListEl.querySelectorAll('.item').forEach(el => {
         el.onclick = () => selectRun(el.dataset.id);
       });
+
+      // Render pagination
+      renderPagination('runs', runsPage, runsTotalPages, (page) => {
+        runsPage = page;
+        fetchRuns();
+      });
+
+      // Update workflow filter dropdown options
+      updateWorkflowFilterOptions();
 
       if (!selectedRunId && filtered.length) {
         selectRun(filtered[0].id);
@@ -807,6 +895,43 @@
       });
       svg += `</svg>`;
       return svg;
+    }
+    function renderPagination(prefix, currentPage, totalPages, onChange) {
+      if (totalPages <= 1) {
+        document.getElementById(`${prefix}-pagination`).innerHTML = '';
+        return;
+      }
+
+      const prevDisabled = currentPage === 0;
+      const nextDisabled = currentPage >= totalPages - 1;
+
+      const buttons = [];
+      if (!prevDisabled) {
+        buttons.push(`<button onclick="this.blur()" style="padding: 4px 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--text);" data-page="${currentPage - 1}">Prev</button>`);
+      }
+      buttons.push(`<span style="padding: 0 8px; color: var(--muted);">Page ${currentPage + 1} of ${totalPages}</span>`);
+      if (!nextDisabled) {
+        buttons.push(`<button onclick="this.blur()" style="padding: 4px 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--text);" data-page="${currentPage + 1}">Next</button>`);
+      }
+
+      const container = document.getElementById(`${prefix}-pagination`);
+      container.innerHTML = buttons.join(' ');
+      container.querySelectorAll('button').forEach(btn => {
+        btn.onclick = () => onChange(parseInt(btn.dataset.page));
+      });
+    }
+
+    function updateWorkflowFilterOptions() {
+      const select = document.getElementById('run-workflow-filter');
+      const currentValue = select.value;
+      const uniqueWorkflows = [...new Set(workflows.map(w => w.name))].sort();
+
+      select.innerHTML = '<option value="">All workflows</option>' +
+        uniqueWorkflows.map(name => `<option value="${name}">${name}</option>`).join('');
+
+      if (currentValue && uniqueWorkflows.includes(currentValue)) {
+        select.value = currentValue;
+      }
     }
   </script>
 </body>
