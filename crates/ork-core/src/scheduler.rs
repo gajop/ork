@@ -78,25 +78,14 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             let loop_start = Instant::now();
             let mut metrics = SchedulerMetrics::default();
 
+            // Process scheduled triggers first
+            if let Err(e) = self.process_scheduled_triggers().await { error!("Error processing scheduled triggers: {}", e); }
             // Process pending runs and tasks
             let start = Instant::now();
-            let runs_processed = match self.process_pending_runs().await {
-                Ok(count) => count,
-                Err(e) => {
-                    error!("Error processing pending runs: {}", e);
-                    0
-                }
-            };
+            let runs_processed = self.process_pending_runs().await.unwrap_or_else(|e| { error!("Error processing pending runs: {}", e); 0 });
             metrics.process_pending_runs_ms = start.elapsed().as_millis();
-
             let start = Instant::now();
-            let tasks_processed = match self.process_pending_tasks().await {
-                Ok(count) => count,
-                Err(e) => {
-                    error!("Error processing pending tasks: {}", e);
-                    0
-                }
-            };
+            let tasks_processed = self.process_pending_tasks().await.unwrap_or_else(|e| { error!("Error processing pending tasks: {}", e); 0 });
             metrics.process_pending_tasks_ms = start.elapsed().as_millis();
 
             // Process any immediately available status updates
@@ -496,5 +485,9 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         }
 
         Ok(())
+    }
+
+    async fn process_scheduled_triggers(&self) -> Result<usize> {
+        crate::schedule_processor::process_scheduled_triggers(self.db.as_ref()).await
     }
 }
