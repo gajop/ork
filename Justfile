@@ -32,3 +32,8 @@ run-web:
 # Show persisted runs/status (DB-backed).
 status:
     cargo run -p ork-cli --bin ork -- status
+
+# Run all linting checks.
+lint:
+    ./scripts/check-loc.py
+    ./scripts/check-docs.py --check
