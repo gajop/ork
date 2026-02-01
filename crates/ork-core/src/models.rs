@@ -39,6 +39,10 @@ pub struct Workflow {
     pub project: String,
     pub executor_type: String,
     pub task_params: Option<JsonValue>,
+    pub schedule: Option<String>,
+    pub schedule_enabled: bool,
+    pub last_scheduled_at: Option<DateTime<Utc>>,
+    pub next_scheduled_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

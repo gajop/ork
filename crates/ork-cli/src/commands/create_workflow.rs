@@ -50,6 +50,7 @@ impl CreateWorkflow {
                 &self.project,
                 &self.executor,
                 Some(task_params),
+                None,
             )
             .await?;
 

@@ -36,8 +36,9 @@ impl Database for FileDatabase {
         project: &str,
         executor_type: &str,
         task_params: Option<serde_json::Value>,
+        schedule: Option<&str>,
     ) -> Result<Workflow> {
-        self.create_workflow_impl(name, description, job_name, region, project, executor_type, task_params).await
+        self.create_workflow_impl(name, description, job_name, region, project, executor_type, task_params, schedule).await
     }
 
     async fn get_workflow(&self, name: &str) -> Result<Workflow> {
@@ -154,5 +155,27 @@ impl Database for FileDatabase {
 
     async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
         self.list_workflow_tasks_impl(workflow_id).await
+    }
+
+    async fn get_due_scheduled_workflows(&self) -> Result<Vec<Workflow>> {
+        self.get_due_scheduled_workflows_impl().await
+    }
+
+    async fn update_workflow_schedule_times(
+        &self,
+        workflow_id: Uuid,
+        last_scheduled_at: chrono::DateTime<chrono::Utc>,
+        next_scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        self.update_workflow_schedule_times_impl(workflow_id, last_scheduled_at, next_scheduled_at).await
+    }
+
+    async fn update_workflow_schedule(
+        &self,
+        workflow_id: Uuid,
+        schedule: Option<&str>,
+        schedule_enabled: bool,
+    ) -> Result<()> {
+        self.update_workflow_schedule_impl(workflow_id, schedule, schedule_enabled).await
     }
 }

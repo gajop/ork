@@ -18,6 +18,7 @@ impl FileDatabase {
         project: &str,
         executor_type: &str,
         task_params: Option<serde_json::Value>,
+        schedule: Option<&str>,
     ) -> Result<Workflow> {
         self.ensure_dirs().await?;
 
@@ -30,6 +31,10 @@ impl FileDatabase {
             project: project.to_string(),
             executor_type: executor_type.to_string(),
             task_params,
+            schedule: schedule.map(|s| s.to_string()),
+            schedule_enabled: false,
+            last_scheduled_at: None,
+            next_scheduled_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -125,5 +130,30 @@ impl FileDatabase {
         let mut tasks: Vec<WorkflowTask> = self.read_json(&path).await?;
         tasks.sort_by_key(|task| task.task_index);
         Ok(tasks)
+    }
+
+    pub(super) async fn get_due_scheduled_workflows_impl(&self) -> Result<Vec<Workflow>> {
+        // File database doesn't support live scheduling
+        Ok(Vec::new())
+    }
+
+    pub(super) async fn update_workflow_schedule_times_impl(
+        &self,
+        _workflow_id: Uuid,
+        _last_scheduled_at: chrono::DateTime<chrono::Utc>,
+        _next_scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        // File database doesn't support live scheduling
+        Ok(())
+    }
+
+    pub(super) async fn update_workflow_schedule_impl(
+        &self,
+        _workflow_id: Uuid,
+        _schedule: Option<&str>,
+        _schedule_enabled: bool,
+    ) -> Result<()> {
+        // File database doesn't support live scheduling
+        Ok(())
     }
 }
