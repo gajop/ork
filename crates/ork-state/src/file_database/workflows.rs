@@ -1,0 +1,129 @@
+use anyhow::Result;
+use chrono::Utc;
+use tokio::fs;
+use uuid::Uuid;
+
+use ork_core::database::NewWorkflowTask;
+use ork_core::models::{Workflow, WorkflowTask};
+
+use super::core::FileDatabase;
+
+impl FileDatabase {
+    pub(super) async fn create_workflow_impl(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        job_name: &str,
+        region: &str,
+        project: &str,
+        executor_type: &str,
+        task_params: Option<serde_json::Value>,
+    ) -> Result<Workflow> {
+        self.ensure_dirs().await?;
+
+        let workflow = Workflow {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            description: description.map(|s| s.to_string()),
+            job_name: job_name.to_string(),
+            region: region.to_string(),
+            project: project.to_string(),
+            executor_type: executor_type.to_string(),
+            task_params,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        self.write_json(&self.workflow_path(workflow.id), &workflow).await?;
+        Ok(workflow)
+    }
+
+    pub(super) async fn get_workflow_impl(&self, name: &str) -> Result<Workflow> {
+        let mut entries = fs::read_dir(self.workflows_dir()).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if let Ok(workflow) = self.read_json::<Workflow>(&entry.path()).await {
+                if workflow.name == name {
+                    return Ok(workflow);
+                }
+            }
+        }
+        anyhow::bail!("Workflow not found: {}", name)
+    }
+
+    pub(super) async fn list_workflows_impl(&self) -> Result<Vec<Workflow>> {
+        self.ensure_dirs().await?;
+        let mut workflows = Vec::new();
+        let mut entries = fs::read_dir(self.workflows_dir()).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if let Ok(workflow) = self.read_json::<Workflow>(&entry.path()).await {
+                workflows.push(workflow);
+            }
+        }
+        workflows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(workflows)
+    }
+
+    pub(super) async fn delete_workflow_impl(&self, name: &str) -> Result<()> {
+        self.ensure_dirs().await?;
+        let workflow = self.get_workflow_impl(name).await?;
+        let runs = self.list_runs_impl(Some(workflow.id)).await?;
+        for run in runs {
+            let tasks = self.list_tasks_impl(run.id).await?;
+            for task in tasks {
+                let _ = fs::remove_file(self.task_path(task.id)).await;
+            }
+            let _ = fs::remove_file(self.run_path(run.id)).await;
+        }
+        let _ = fs::remove_file(self.workflow_tasks_path(workflow.id)).await;
+        let _ = fs::remove_file(self.workflow_path(workflow.id)).await;
+        Ok(())
+    }
+
+    pub(super) async fn get_workflows_by_ids_impl(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+        let mut workflows = Vec::new();
+        for id in workflow_ids {
+            if let Ok(workflow) = self.read_json::<Workflow>(&self.workflow_path(*id)).await {
+                workflows.push(workflow);
+            }
+        }
+        Ok(workflows)
+    }
+
+    pub(super) async fn get_workflow_by_id_impl(&self, workflow_id: Uuid) -> Result<Workflow> {
+        self.read_json(&self.workflow_path(workflow_id)).await
+    }
+
+    pub(super) async fn create_workflow_tasks_impl(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> Result<()> {
+        self.ensure_dirs().await?;
+        let now = Utc::now();
+        let mut workflow_tasks = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            workflow_tasks.push(WorkflowTask {
+                id: Uuid::new_v4(),
+                workflow_id,
+                task_index: task.task_index,
+                task_name: task.task_name.clone(),
+                executor_type: task.executor_type.clone(),
+                depends_on: task.depends_on.clone(),
+                params: Some(task.params.clone()),
+                created_at: now,
+            });
+        }
+        self.write_json(&self.workflow_tasks_path(workflow_id), &workflow_tasks).await?;
+        Ok(())
+    }
+
+    pub(super) async fn list_workflow_tasks_impl(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+        let path = self.workflow_tasks_path(workflow_id);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let mut tasks: Vec<WorkflowTask> = self.read_json(&path).await?;
+        tasks.sort_by_key(|task| task.task_index);
+        Ok(tasks)
+    }
+}
