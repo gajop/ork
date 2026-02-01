@@ -102,6 +102,9 @@ struct WorkflowListItem {
     executor: String,
     project: String,
     region: String,
+    schedule: Option<String>,
+    schedule_enabled: bool,
+    next_scheduled_at: Option<String>,
 }
 
 async fn list_workflows(State(api): State<ApiServer>) -> impl IntoResponse {
@@ -119,6 +122,9 @@ async fn list_workflows(State(api): State<ApiServer>) -> impl IntoResponse {
             executor: wf.executor_type,
             project: wf.project,
             region: wf.region,
+            schedule: wf.schedule,
+            schedule_enabled: wf.schedule_enabled,
+            next_scheduled_at: wf.next_scheduled_at.map(fmt_time),
         })
         .collect();
     Json(items).into_response()
@@ -290,6 +296,9 @@ async fn start_run(State(api): State<ApiServer>, Json(payload): Json<StartRunReq
 struct WorkflowInfo {
     name: String,
     tasks: Vec<WorkflowTaskInfo>,
+    schedule: Option<String>,
+    schedule_enabled: bool,
+    next_scheduled_at: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -328,6 +337,9 @@ async fn workflow_detail(
     Json(WorkflowInfo {
         name: workflow.name,
         tasks,
+        schedule: workflow.schedule,
+        schedule_enabled: workflow.schedule_enabled,
+        next_scheduled_at: workflow.next_scheduled_at.map(fmt_time),
     })
     .into_response()
 }
@@ -397,6 +409,9 @@ async fn run_detail(State(api): State<ApiServer>, Path(id): Path<String>) -> imp
                     executor: task.executor_type,
                 })
                 .collect(),
+            schedule: workflow.schedule.clone(),
+            schedule_enabled: workflow.schedule_enabled,
+            next_scheduled_at: workflow.next_scheduled_at.map(fmt_time),
         })
     } else {
         None
