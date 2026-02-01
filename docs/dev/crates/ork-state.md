@@ -29,9 +29,9 @@ Storage backends for Ork. Implements the [`ork-core::Database`](../../../crates/
 | [migrations_sqlite/001_init.sql](../../../crates/ork-state/migrations_sqlite/001_init.sql) | Standalone SQLite schema for local runs. | 2026-01-31 | 5ed599a |
 | [migrations_sqlite/002_add_task_logs.sql](../../../crates/ork-state/migrations_sqlite/002_add_task_logs.sql) | Adds task log storage to the SQLite schema. | 2026-01-31 | 336fde8 |
 | [src/file.rs](../../../crates/ork-state/src/file.rs) | File-backed `StateStore` implementation for legacy flows. | 2026-01-30 | 789fd47 |
-| [src/file_database.rs](../../../crates/ork-state/src/file_database.rs) | `FileDatabase` backed by JSON files for local/dev use. | 2026-01-31 | 1380e84 |
+| [src/file_database.rs](../../../crates/ork-state/src/file_database.rs) | `FileDatabase` backed by JSON files for local/dev use. | 2026-02-01 | 859eca3 |
 | [src/lib.rs](../../../crates/ork-state/src/lib.rs) | Feature flags and re-exports for storage backends. | 2026-01-31 | a670611 |
 | [src/memory.rs](../../../crates/ork-state/src/memory.rs) | In-memory `StateStore` implementation for legacy flows. | 2026-01-30 | e4a278b |
 | [src/object_store.rs](../../../crates/ork-state/src/object_store.rs) | Object store trait and local implementation for specs/status/output. | 2026-01-30 | 4a1f6c3 |
-| [src/postgres.rs](../../../crates/ork-state/src/postgres.rs) | `PostgresDatabase` implementation with SQLx queries and batch operations. | 2026-01-31 | bce0766 |
-| [src/sqlite.rs](../../../crates/ork-state/src/sqlite.rs) | `SqliteDatabase` implementation for standalone local runs. | 2026-01-31 | ce92ad1 |
+| [src/postgres.rs](../../../crates/ork-state/src/postgres.rs) | `PostgresDatabase` implementation with SQLx queries and batch operations. | 2026-02-01 | 630d0af |
+| [src/sqlite.rs](../../../crates/ork-state/src/sqlite.rs) | `SqliteDatabase` implementation for standalone local runs. | 2026-02-01 | 3faa2bf |

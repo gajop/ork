@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use uuid::Uuid;
+use std::collections::HashMap;
 
 use ork_core::database::Database as DatabaseTrait;
 use ork_core::database::{NewTask, NewWorkflowTask};
@@ -526,6 +527,21 @@ impl DatabaseTrait for SqliteDatabase {
         Ok(())
     }
 
+    async fn update_task_output(&self, task_id: Uuid, output: serde_json::Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET output = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(sqlx::types::Json(output))
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn get_pending_tasks_with_workflow(
         &self,
         limit: i64,
@@ -622,6 +638,38 @@ impl DatabaseTrait for SqliteDatabase {
             .fetch_one(&self.pool)
             .await?;
         Ok(workflow)
+    }
+
+    async fn get_task_outputs(
+        &self,
+        run_id: Uuid,
+        task_names: &[String],
+    ) -> Result<HashMap<String, serde_json::Value>> {
+        if task_names.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut qb = QueryBuilder::<Sqlite>::new(
+            "SELECT task_name, output FROM tasks WHERE run_id = ",
+        );
+        qb.push_bind(run_id);
+        qb.push(" AND task_name IN (");
+        let mut separated = qb.separated(", ");
+        for name in task_names {
+            separated.push_bind(name);
+        }
+        qb.push(")");
+
+        let rows = qb.build().fetch_all(&self.pool).await?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let name: String = row.try_get(0)?;
+            let output: Option<sqlx::types::Json<serde_json::Value>> = row.try_get(1)?;
+            if let Some(value) = output {
+                map.insert(name, value.0);
+            }
+        }
+        Ok(map)
     }
 
     async fn get_task_run_id(&self, task_id: Uuid) -> Result<Uuid> {

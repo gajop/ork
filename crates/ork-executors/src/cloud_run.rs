@@ -271,6 +271,7 @@ impl CloudRunClient {
                                 task_id: exec_state.task_id,
                                 status: normalized_status.to_string(),
                                 log: None,
+                                output: None,
                             });
                         }
 

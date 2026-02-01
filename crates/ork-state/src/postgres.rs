@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
+use std::collections::HashMap;
 
 use ork_core::database::Database as DatabaseTrait;
 use ork_core::models::{Run, Task, TaskWithWorkflow, Workflow};
@@ -715,6 +716,21 @@ impl DatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
+    async fn update_task_output(&self, task_id: Uuid, output: serde_json::Value) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET output = $2
+            WHERE id = $1
+            "#,
+        )
+        .bind(task_id)
+        .bind(output)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
         PostgresDatabase::get_pending_tasks_with_workflow(self, limit).await
     }
@@ -725,6 +741,37 @@ impl DatabaseTrait for PostgresDatabase {
 
     async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
         PostgresDatabase::get_workflow_by_id(self, workflow_id).await
+    }
+
+    async fn get_task_outputs(
+        &self,
+        run_id: Uuid,
+        task_names: &[String],
+    ) -> Result<HashMap<String, serde_json::Value>> {
+        if task_names.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows = sqlx::query_as::<_, (String, Option<serde_json::Value>)>(
+            r#"
+            SELECT task_name, output
+            FROM tasks
+            WHERE run_id = $1
+              AND task_name = ANY($2)
+            "#,
+        )
+        .bind(run_id)
+        .bind(task_names)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map = HashMap::new();
+        for (name, output) in rows {
+            if let Some(value) = output {
+                map.insert(name, value);
+            }
+        }
+        Ok(map)
     }
 
     async fn get_task_run_id(&self, task_id: Uuid) -> Result<Uuid> {

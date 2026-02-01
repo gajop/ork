@@ -4,6 +4,7 @@
 use uuid::Uuid;
 
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
 
@@ -107,6 +108,11 @@ pub trait Database: Send + Sync {
     async fn get_pending_tasks(&self) -> anyhow::Result<Vec<Task>>;
     async fn get_running_tasks(&self) -> anyhow::Result<Vec<Task>>;
     async fn append_task_log(&self, task_id: Uuid, chunk: &str) -> anyhow::Result<()>;
+    async fn update_task_output(
+        &self,
+        task_id: Uuid,
+        output: serde_json::Value,
+    ) -> anyhow::Result<()>;
 
     /// Get pending tasks with workflow info in a single query (avoids N+1)
     /// Used by scheduler for efficient task dispatching
@@ -120,6 +126,13 @@ pub trait Database: Send + Sync {
 
     /// Get workflow by ID (used by scheduler)
     async fn get_workflow_by_id(&self, workflow_id: Uuid) -> anyhow::Result<Workflow>;
+
+    /// Fetch outputs for a set of task names in a run.
+    async fn get_task_outputs(
+        &self,
+        run_id: Uuid,
+        task_names: &[String],
+    ) -> anyhow::Result<HashMap<String, serde_json::Value>>;
 
     /// Get run ID for a task (used by scheduler to check run completion)
     async fn get_task_run_id(&self, task_id: Uuid) -> anyhow::Result<Uuid>;

@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, Mutex};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -71,6 +71,7 @@ impl ProcessExecutor {
         let exec_id_clone = execution_id.clone();
         let states_clone = self.process_states.clone();
         let status_tx_clone = self.status_tx.clone();
+        let last_output: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let working_dir = self.working_dir.clone();
         let command = command.clone();
 
@@ -167,6 +168,7 @@ impl ProcessExecutor {
                     task_id,
                     status: "running".to_string(),
                     log: None,
+                    output: None,
                 });
             }
 
@@ -181,14 +183,19 @@ impl ProcessExecutor {
 
             let status_tx_logs = status_tx_clone.clone();
             let log_task_id = task_id;
+            let output_store = last_output.clone();
             let stdout_handle = tokio::spawn(async move {
                 if let Some(reader) = stdout_reader.as_mut() {
                     while let Ok(Some(line)) = reader.next_line().await {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                            *output_store.lock().await = Some(value);
+                        }
                         if let Some(tx) = status_tx_logs.read().await.as_ref() {
                             let _ = tx.send(StatusUpdate {
                                 task_id: log_task_id,
                                 status: "log".to_string(),
                                 log: Some(format!("stdout: {}\n", line)),
+                                output: None,
                             });
                         }
                     }
@@ -205,6 +212,7 @@ impl ProcessExecutor {
                                 task_id: log_task_id,
                                 status: "log".to_string(),
                                 log: Some(format!("stderr: {}\n", line)),
+                                output: None,
                             });
                         }
                     }
@@ -245,10 +253,17 @@ impl ProcessExecutor {
                 }
                 .to_string();
 
+                let output = if matches!(status, ProcessStatus::Success) {
+                    last_output.lock().await.clone()
+                } else {
+                    None
+                };
+
                 let _ = tx.send(StatusUpdate {
                     task_id,
                     status: status_str,
                     log: None,
+                    output,
                 });
             }
         });
@@ -319,6 +334,9 @@ fn build_env_vars(
                                 }
                             }
                         }
+                    }
+                    "upstream" => {
+                        env_vars.insert("ORK_UPSTREAM_JSON".to_string(), v.to_string());
                     }
                     _ => {
                         if let Some(val) = v.as_str() {
