@@ -7,8 +7,9 @@ Scope: current repo state as of 2026-02-01. This is a focused outline of known p
 - Retries/timeouts are now enforced with a basic exponential backoff, but there is no jitter or per-task backoff policy configuration.
 - No heartbeats or stuck-task detection; tasks can remain `dispatched`/`running` forever if an executor dies.
 - Output passing is minimal: only JSON stdout is captured as task output, and upstream outputs are exposed via `ORK_UPSTREAM_JSON` (auto-injected only when task input is empty).
-- No cancellation/resume/pausing for runs or tasks (cancel exists in schema but not wired).
-- No scheduling/cron triggers; all runs are manual.
+- ~~No cancellation for runs or tasks~~ ✓ IMPLEMENTED: Run cancellation is now supported via API and UI. Cancelled runs mark all pending/dispatched/running tasks as cancelled.
+- No resume/pausing for runs or tasks.
+- ~~No scheduling/cron triggers; all runs are manual.~~ ✓ IMPLEMENTED: Cron-based scheduling is now supported with UI controls for schedule management.
 - No multi-tenant controls, auth, or RBAC. API/UI are open.
 
 ## Workflow & DAG model limitations
