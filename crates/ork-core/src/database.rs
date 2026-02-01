@@ -49,6 +49,7 @@ pub trait Database: Send + Sync {
         project: &str,
         executor_type: &str,
         task_params: Option<serde_json::Value>,
+        schedule: Option<&str>,
     ) -> anyhow::Result<Workflow>;
 
     async fn get_workflow(&self, name: &str) -> anyhow::Result<Workflow>;
@@ -167,4 +168,24 @@ pub trait Database: Send + Sync {
     /// Get run completion stats (total, completed, failed counts)
     /// Used by scheduler to check if a run is complete
     async fn get_run_task_stats(&self, run_id: Uuid) -> anyhow::Result<(i64, i64, i64)>;
+
+    // Schedule operations
+    /// Get workflows that have schedules enabled and are due for triggering
+    async fn get_due_scheduled_workflows(&self) -> anyhow::Result<Vec<Workflow>>;
+
+    /// Update schedule trigger times for a workflow
+    async fn update_workflow_schedule_times(
+        &self,
+        workflow_id: Uuid,
+        last_scheduled_at: chrono::DateTime<chrono::Utc>,
+        next_scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> anyhow::Result<()>;
+
+    /// Update workflow schedule settings
+    async fn update_workflow_schedule(
+        &self,
+        workflow_id: Uuid,
+        schedule: Option<&str>,
+        schedule_enabled: bool,
+    ) -> anyhow::Result<()>;
 }
