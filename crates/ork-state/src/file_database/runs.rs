@@ -40,7 +40,7 @@ impl FileDatabase {
         } else {
             run.started_at
         };
-        let finished_at = if matches!(status, "success" | "failed") && run.finished_at.is_none() {
+        let finished_at = if matches!(status, "success" | "failed" | "cancelled") && run.finished_at.is_none() {
             Some(now)
         } else {
             run.finished_at
@@ -81,5 +81,19 @@ impl FileDatabase {
     pub(super) async fn get_pending_runs_impl(&self) -> Result<Vec<Run>> {
         let all_runs = self.list_runs_impl(None).await?;
         Ok(all_runs.into_iter().filter(|r| r.status_str() == "pending").collect())
+    }
+
+    pub(super) async fn cancel_run_impl(&self, run_id: Uuid) -> Result<()> {
+        let run = self.get_run_impl(run_id).await?;
+        if !matches!(run.status_str(), "success" | "failed" | "cancelled") {
+            self.update_run_status_impl(run_id, "cancelled", None).await?;
+        }
+        let tasks = self.list_tasks_impl(run_id).await?;
+        for task in tasks {
+            if matches!(task.status_str(), "pending" | "dispatched" | "running") {
+                self.update_task_status_impl(task.id, "cancelled", None, None).await?;
+            }
+        }
+        Ok(())
     }
 }

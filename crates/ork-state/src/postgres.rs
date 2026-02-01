@@ -56,6 +56,10 @@ impl DatabaseTrait for PostgresDatabase {
         self.get_pending_runs_impl().await
     }
 
+    async fn cancel_run(&self, run_id: Uuid) -> Result<()> {
+        self.cancel_run_impl(run_id).await
+    }
+
     async fn batch_create_tasks(&self, run_id: Uuid, task_count: i32, workflow_name: &str, executor_type: &str) -> Result<()> {
         self.batch_create_tasks_impl(run_id, task_count, workflow_name, executor_type).await
     }

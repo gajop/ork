@@ -70,6 +70,9 @@ pub trait Database: Send + Sync {
     async fn list_runs(&self, workflow_id: Option<Uuid>) -> anyhow::Result<Vec<Run>>;
     async fn get_pending_runs(&self) -> anyhow::Result<Vec<Run>>;
 
+    /// Cancel a run and all its pending/dispatched/running tasks
+    async fn cancel_run(&self, run_id: Uuid) -> anyhow::Result<()>;
+
     // Task operations
     async fn batch_create_tasks(
         &self,

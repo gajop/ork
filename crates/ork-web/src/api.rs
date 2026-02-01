@@ -39,6 +39,7 @@ impl ApiServer {
                 get(list_runs).post(axum::routing::post(start_run)),
             )
             .route("/api/runs/{id}", get(run_detail))
+            .route("/api/runs/{id}/cancel", axum::routing::post(cancel_run))
             .route("/api/workflows", get(list_workflows).post(create_workflow))
             .route("/api/workflows/{name}", get(workflow_detail))
             .route("/api/workflows/{name}/schedule", axum::routing::patch(update_workflow_schedule))
@@ -431,6 +432,18 @@ async fn run_detail(State(api): State<ApiServer>, Path(id): Path<String>) -> imp
         workflow: workflow_info,
     })
     .into_response()
+}
+
+async fn cancel_run(State(api): State<ApiServer>, Path(id): Path<String>) -> impl IntoResponse {
+    let run_id = match Uuid::parse_str(&id) {
+        Ok(rid) => rid,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    match api.db.cancel_run(run_id).await {
+        Ok(_) => StatusCode::OK.into_response(),
+        Err(err) if is_not_found(&err) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 #[derive(Deserialize)]
