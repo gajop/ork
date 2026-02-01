@@ -18,6 +18,8 @@ use uuid::Uuid;
 use ork_core::database::Database;
 use ork_core::models::json_inner;
 
+use crate::workflow_tasks::build_workflow_tasks;
+
 #[derive(Clone)]
 pub struct ApiServer {
     db: Arc<dyn Database>,
@@ -438,103 +440,4 @@ async fn load_workflow_names(
 fn is_not_found(err: &anyhow::Error) -> bool {
     let msg = err.to_string().to_lowercase();
     msg.contains("row not found") || msg.contains("no rows") || msg.contains("not found")
-}
-
-fn build_workflow_tasks(
-    compiled: &ork_core::compiled::CompiledWorkflow,
-) -> Vec<ork_core::database::NewWorkflowTask> {
-    let mut tasks = Vec::with_capacity(compiled.tasks.len());
-    for (idx, task) in compiled.tasks.iter().enumerate() {
-        let depends_on: Vec<String> = task
-            .depends_on
-            .iter()
-            .filter_map(|dep_idx| compiled.tasks.get(*dep_idx).map(|t| t.name.clone()))
-            .collect();
-
-        let executor_type = match task.executor {
-            ork_core::workflow::ExecutorKind::CloudRun => "cloudrun",
-            ork_core::workflow::ExecutorKind::Process | ork_core::workflow::ExecutorKind::Python => {
-                "process"
-            }
-        };
-
-        let mut params = serde_json::Map::new();
-        if !task.input.is_null() {
-            params.insert("task_input".to_string(), task.input.clone());
-        }
-        params.insert(
-            "max_retries".to_string(),
-            serde_json::Value::Number(task.retries.into()),
-        );
-        params.insert(
-            "timeout_seconds".to_string(),
-            serde_json::Value::Number(task.timeout.into()),
-        );
-        if !task.env.is_empty() {
-            let env_json = task
-                .env
-                .iter()
-                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                .collect::<serde_json::Map<_, _>>();
-            params.insert("env".to_string(), serde_json::Value::Object(env_json));
-        }
-
-        match task.executor {
-            ork_core::workflow::ExecutorKind::CloudRun => {
-                if let Some(job) = task.job.as_deref() {
-                    params.insert(
-                        "job_name".to_string(),
-                        serde_json::Value::String(job.to_string()),
-                    );
-                }
-            }
-            ork_core::workflow::ExecutorKind::Process => {
-                if let Some(command) = task.command.as_deref() {
-                    params.insert(
-                        "command".to_string(),
-                        serde_json::Value::String(command.to_string()),
-                    );
-                } else if let Some(file) = task.file.as_ref() {
-                    params.insert(
-                        "command".to_string(),
-                        serde_json::Value::String(file.to_string_lossy().to_string()),
-                    );
-                }
-            }
-            ork_core::workflow::ExecutorKind::Python => {
-                if let Some(file) = task.file.as_ref() {
-                    params.insert(
-                        "task_file".to_string(),
-                        serde_json::Value::String(file.to_string_lossy().to_string()),
-                    );
-                }
-                if let Some(module) = task.module.as_deref() {
-                    params.insert(
-                        "task_module".to_string(),
-                        serde_json::Value::String(module.to_string()),
-                    );
-                }
-                if let Some(function) = task.function.as_deref() {
-                    params.insert(
-                        "task_function".to_string(),
-                        serde_json::Value::String(function.to_string()),
-                    );
-                }
-                params.insert(
-                    "python_path".to_string(),
-                    serde_json::Value::String(compiled.root.to_string_lossy().to_string()),
-                );
-            }
-        }
-
-        tasks.push(ork_core::database::NewWorkflowTask {
-            task_index: idx as i32,
-            task_name: task.name.clone(),
-            executor_type: executor_type.to_string(),
-            depends_on,
-            params: serde_json::Value::Object(params),
-        });
-    }
-
-    tasks
 }

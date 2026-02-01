@@ -1,4 +1,5 @@
 mod api;
+mod workflow_tasks;
 
 use std::net::SocketAddr;
 

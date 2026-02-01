@@ -10,6 +10,7 @@ pub mod executor;
 pub mod executor_manager;
 pub mod models;
 pub mod scheduler;
+pub mod task_execution;
 
 pub use error::{OrkError, OrkResult};
 pub use types::*;
