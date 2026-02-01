@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, ws::{WebSocket, WebSocketUpgrade}},
     http::StatusCode,
     response::Html,
     response::IntoResponse,
@@ -13,26 +13,37 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use ork_core::database::Database;
 
 use crate::handlers::{self, WorkflowInfo, WorkflowTaskInfo};
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StateUpdate {
+    RunUpdated { run_id: String, status: String },
+    TaskUpdated { run_id: String, task_id: String, status: String },
+}
+
 #[derive(Clone)]
 pub struct ApiServer {
     pub db: Arc<dyn Database>,
+    pub broadcast_tx: broadcast::Sender<StateUpdate>,
 }
 
 impl ApiServer {
     pub fn new(db: Arc<dyn Database>) -> Self {
-        Self { db }
+        let (broadcast_tx, _) = broadcast::channel(1000);
+        Self { db, broadcast_tx }
     }
 
     pub async fn serve(self, addr: SocketAddr) -> JoinHandle<()> {
         let cors = tower_http::cors::CorsLayer::very_permissive();
         let router = Router::new()
             .route("/", get(ui))
+            .route("/ws", get(websocket_handler))
             .route(
                 "/api/runs",
                 get(list_runs).post(axum::routing::post(start_run)),
@@ -236,6 +247,10 @@ async fn start_run(State(api): State<ApiServer>, Json(payload): Json<StartRunReq
 
     match api.db.create_run(workflow.id, "ui").await {
         Ok(run) => {
+            let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
+                run_id: run.id.to_string(),
+                status: run.status_str().to_string(),
+            });
             #[derive(Serialize)]
             struct Resp {
                 run_id: String,
@@ -291,7 +306,13 @@ async fn cancel_run(State(api): State<ApiServer>, Path(id): Path<String>) -> imp
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
     match api.db.cancel_run(run_id).await {
-        Ok(_) => StatusCode::OK.into_response(),
+        Ok(_) => {
+            let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
+                run_id: id.clone(),
+                status: "cancelled".to_string(),
+            });
+            StatusCode::OK.into_response()
+        }
         Err(err) if is_not_found(&err) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -322,6 +343,42 @@ async fn update_workflow_schedule(
     }
 
     StatusCode::OK.into_response()
+}
+
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(api): State<ApiServer>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| websocket_connection(socket, api))
+}
+
+async fn websocket_connection(socket: WebSocket, api: ApiServer) {
+    use axum::extract::ws::Message;
+    use futures::stream::StreamExt;
+    use futures::sink::SinkExt;
+
+    let (mut sender, mut receiver) = socket.split();
+    let mut rx = api.broadcast_tx.subscribe();
+
+    let mut send_task = tokio::spawn(async move {
+        while let Ok(update) = rx.recv().await {
+            let json = serde_json::to_string(&update).unwrap_or_default();
+            if sender.send(Message::Text(json.into())).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(Ok(_msg)) = receiver.next().await {
+            // Client messages ignored for now (could add ping/pong here)
+        }
+    });
+
+    tokio::select! {
+        _ = (&mut send_task) => recv_task.abort(),
+        _ = (&mut recv_task) => send_task.abort(),
+    };
 }
 
 async fn ui() -> Html<&'static str> {
