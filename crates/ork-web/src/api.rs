@@ -41,6 +41,7 @@ impl ApiServer {
             .route("/api/runs/{id}", get(run_detail))
             .route("/api/workflows", get(list_workflows).post(create_workflow))
             .route("/api/workflows/{name}", get(workflow_detail))
+            .route("/api/workflows/{name}/schedule", axum::routing::patch(update_workflow_schedule))
             .with_state(self)
             .layer(cors);
 
@@ -181,7 +182,7 @@ async fn create_workflow(
                         &project,
                         "dag",
                         None,
-                        None,
+                        definition.schedule.as_deref(),
                     )
                     .await
                 {
@@ -415,6 +416,33 @@ async fn run_detail(State(api): State<ApiServer>, Path(id): Path<String>) -> imp
         workflow: workflow_info,
     })
     .into_response()
+}
+
+#[derive(Deserialize)]
+struct UpdateScheduleRequest {
+    schedule: Option<String>,
+    enabled: bool,
+}
+
+async fn update_workflow_schedule(
+    State(api): State<ApiServer>,
+    Path(name): Path<String>,
+    Json(payload): Json<UpdateScheduleRequest>,
+) -> impl IntoResponse {
+    let workflow = match api.db.get_workflow(&name).await {
+        Ok(wf) => wf,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    if let Err(_) = api.db.update_workflow_schedule(
+        workflow.id,
+        payload.schedule.as_deref(),
+        payload.enabled,
+    ).await {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    StatusCode::OK.into_response()
 }
 
 async fn ui() -> Html<&'static str> {
