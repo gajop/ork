@@ -30,6 +30,15 @@ impl PostgresDatabase {
         let runs = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE status = 'pending'").fetch_all(&self.pool).await?;
         Ok(runs)
     }
+    pub(super) async fn cancel_run_impl(&self, run_id: Uuid) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE runs SET status = 'cancelled', finished_at = NOW() WHERE id = $1 AND status NOT IN ('success', 'failed', 'cancelled')")
+            .bind(run_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE tasks SET status = 'cancelled', finished_at = NOW() WHERE run_id = $1 AND status IN ('pending', 'dispatched', 'running')")
+            .bind(run_id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
     pub(super) async fn get_run_task_stats_impl(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
         let row = sqlx::query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status IN ('success', 'failed')) as completed, COUNT(*) FILTER (WHERE status = 'failed') as failed FROM tasks WHERE run_id = $1")
             .bind(run_id).fetch_one(&self.pool).await?;

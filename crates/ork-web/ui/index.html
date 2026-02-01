@@ -569,6 +569,18 @@
       }).catch(() => {});
     }
 
+    function cancelRun(runId) {
+      if (!confirm('Are you sure you want to cancel this run?')) return;
+      fetch('/api/runs/' + runId + '/cancel', {
+        method: 'POST'
+      }).then(r => {
+        if (r.ok) {
+          fetchRunDetail(runId);
+          fetchRuns();
+        }
+      }).catch(() => {});
+    }
+
     function showDetail(data) {
       if (data.workflow && data.workflow.tasks && data.workflow.tasks.length) {
         workflowGraph = data.workflow.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
@@ -584,7 +596,9 @@
       renderWorkflowGraph();
 
       runTitleEl.textContent = `Run ${data.run.id}`;
-      runStatusEl.innerHTML = badge(data.run.status);
+      const showCancelBtn = data.run.status === 'pending' || data.run.status === 'running';
+      const cancelBtn = showCancelBtn ? `<button onclick="cancelRun('${data.run.id}')" style="margin-left: 8px; padding: 4px 12px; background: var(--danger); color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>` : '';
+      runStatusEl.innerHTML = badge(data.run.status) + cancelBtn;
       const meta = [
         `Workflow: ${data.run.workflow}`,
         `Created: ${fmtDateTime(data.run.created_at)}`,

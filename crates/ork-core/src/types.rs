@@ -30,6 +30,7 @@ pub enum TaskStatus {
     Success,
     Failed,
     Skipped,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
