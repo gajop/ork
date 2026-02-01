@@ -226,8 +226,8 @@ impl PostgresDatabase {
 
             sqlx::query(
                 r#"
-                INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params)
-                VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+                INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params, attempts, max_retries, timeout_seconds, retry_at)
+                VALUES ($1, $2, $3, $4, $5, 'pending', $6, 0, 0, NULL, NULL)
                 "#,
             )
             .bind(run_id)
@@ -254,8 +254,8 @@ impl PostgresDatabase {
         for task in tasks {
             sqlx::query(
                 r#"
-                INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params)
-                VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+                INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params, attempts, max_retries, timeout_seconds, retry_at)
+                VALUES ($1, $2, $3, $4, $5, 'pending', $6, 0, $7, $8, NULL)
                 "#,
             )
             .bind(run_id)
@@ -264,6 +264,8 @@ impl PostgresDatabase {
             .bind(&task.executor_type)
             .bind(&task.depends_on)
             .bind(&task.params)
+            .bind(task.max_retries)
+            .bind(task.timeout_seconds)
             .execute(&mut *tx)
             .await?;
         }
@@ -286,6 +288,8 @@ impl PostgresDatabase {
             SET status = $1,
                 execution_name = COALESCE($2, execution_name),
                 error = $3,
+                attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
+                retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END,
                 dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
                 started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
                 finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
@@ -362,6 +366,10 @@ impl PostgresDatabase {
                 t.executor_type,
                 t.depends_on,
                 t.status as task_status,
+                t.attempts,
+                t.max_retries,
+                t.timeout_seconds,
+                t.retry_at,
                 t.execution_name,
                 t.params,
                 w.id as workflow_id,
@@ -372,6 +380,7 @@ impl PostgresDatabase {
             INNER JOIN runs r ON t.run_id = r.id
             INNER JOIN workflows w ON r.workflow_id = w.id
             WHERE t.status = 'pending'
+              AND (t.retry_at IS NULL OR t.retry_at <= NOW())
               AND (
                 array_length(t.depends_on, 1) IS NULL
                 OR NOT EXISTS (
@@ -467,6 +476,8 @@ impl PostgresDatabase {
                 SET status = $1,
                     execution_name = COALESCE($2, execution_name),
                     error = $3,
+                    attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
+                    retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END,
                     dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
                     started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
                     finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
@@ -731,6 +742,35 @@ impl DatabaseTrait for PostgresDatabase {
         Ok(())
     }
 
+    async fn reset_task_for_retry(
+        &self,
+        task_id: Uuid,
+        error: Option<&str>,
+        retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET status = 'pending',
+                execution_name = NULL,
+                error = $2,
+                attempts = attempts + 1,
+                retry_at = $3,
+                dispatched_at = NULL,
+                started_at = NULL,
+                finished_at = NULL,
+                output = NULL
+            WHERE id = $1
+            "#,
+        )
+        .bind(task_id)
+        .bind(error)
+        .bind(retry_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
         PostgresDatabase::get_pending_tasks_with_workflow(self, limit).await
     }
@@ -770,6 +810,32 @@ impl DatabaseTrait for PostgresDatabase {
             if let Some(value) = output {
                 map.insert(name, value);
             }
+        }
+        Ok(map)
+    }
+
+    async fn get_task_retry_meta(
+        &self,
+        task_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, (i32, i32)>> {
+        if task_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows = sqlx::query_as::<_, (Uuid, i32, i32)>(
+            r#"
+            SELECT id, attempts, max_retries
+            FROM tasks
+            WHERE id = ANY($1)
+            "#,
+        )
+        .bind(task_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map = HashMap::new();
+        for (id, attempts, max_retries) in rows {
+            map.insert(id, (attempts, max_retries));
         }
         Ok(map)
     }

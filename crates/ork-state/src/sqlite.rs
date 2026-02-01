@@ -21,6 +21,13 @@ fn encode_depends_on(deps: &[String]) -> String {
     serde_json::to_string(deps).unwrap_or_else(|_| "[]".to_string())
 }
 
+fn parse_retry_at(raw: Option<String>) -> Option<DateTime<Utc>> {
+    raw.and_then(|value| {
+        DateTime::parse_from_rfc3339(&value)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+    })
+}
 #[derive(sqlx::FromRow)]
 struct TaskRow {
     id: Uuid,
@@ -30,6 +37,10 @@ struct TaskRow {
     executor_type: String,
     depends_on: String,
     status: String,
+    attempts: i32,
+    max_retries: i32,
+    timeout_seconds: Option<i32>,
+    retry_at: Option<String>,
     execution_name: Option<String>,
     params: Option<sqlx::types::Json<serde_json::Value>>,
     output: Option<sqlx::types::Json<serde_json::Value>>,
@@ -62,6 +73,10 @@ struct TaskWithWorkflowRow {
     executor_type: String,
     depends_on: String,
     task_status: String,
+    attempts: i32,
+    max_retries: i32,
+    timeout_seconds: Option<i32>,
+    retry_at: Option<String>,
     execution_name: Option<String>,
     params: Option<sqlx::types::Json<serde_json::Value>>,
     workflow_id: Uuid,
@@ -102,6 +117,10 @@ impl SqliteDatabase {
             executor_type: row.executor_type,
             depends_on: parse_depends_on(Some(row.depends_on)),
             status: row.status,
+            attempts: row.attempts,
+            max_retries: row.max_retries,
+            timeout_seconds: row.timeout_seconds,
+            retry_at: parse_retry_at(row.retry_at),
             execution_name: row.execution_name,
             params: row.params.map(|v| v),
             output: row.output.map(|v| v),
@@ -136,6 +155,10 @@ impl SqliteDatabase {
             executor_type: row.executor_type,
             depends_on: parse_depends_on(Some(row.depends_on)),
             task_status: row.task_status,
+            attempts: row.attempts,
+            max_retries: row.max_retries,
+            timeout_seconds: row.timeout_seconds,
+            retry_at: parse_retry_at(row.retry_at),
             execution_name: row.execution_name,
             params: row.params.map(|v| v),
             workflow_id: row.workflow_id,
@@ -320,8 +343,8 @@ impl DatabaseTrait for SqliteDatabase {
 
             sqlx::query(
                 r#"
-                INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, params)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+                INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, params, attempts, max_retries, timeout_seconds, retry_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, 0, NULL, NULL)
                 "#,
             )
             .bind(Uuid::new_v4())
@@ -347,8 +370,8 @@ impl DatabaseTrait for SqliteDatabase {
             let depends_on = encode_depends_on(&task.depends_on);
             sqlx::query(
                 r#"
-                INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, params)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+                INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, params, attempts, max_retries, timeout_seconds, retry_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, NULL)
                 "#,
             )
             .bind(Uuid::new_v4())
@@ -358,6 +381,8 @@ impl DatabaseTrait for SqliteDatabase {
             .bind(&task.executor_type)
             .bind(depends_on)
             .bind(params)
+            .bind(task.max_retries)
+            .bind(task.timeout_seconds)
             .execute(&mut *tx)
             .await?;
         }
@@ -426,6 +451,8 @@ impl DatabaseTrait for SqliteDatabase {
             SET status = ?,
                 execution_name = COALESCE(?, execution_name),
                 error = ?,
+                attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
+                retry_at = CASE WHEN ? = 'pending' THEN retry_at ELSE NULL END,
                 dispatched_at = COALESCE(dispatched_at, CASE WHEN ? = 'dispatched' THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') END),
                 started_at = COALESCE(started_at, CASE WHEN ? = 'running' THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') END),
                 finished_at = CASE WHEN ? IN ('success', 'failed', 'cancelled') THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') END
@@ -435,6 +462,8 @@ impl DatabaseTrait for SqliteDatabase {
         .bind(status)
         .bind(execution_name)
         .bind(error)
+        .bind(status)
+        .bind(status)
         .bind(status)
         .bind(status)
         .bind(status)
@@ -460,6 +489,8 @@ impl DatabaseTrait for SqliteDatabase {
                 SET status = ?,
                     execution_name = COALESCE(?, execution_name),
                     error = ?,
+                    attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
+                    retry_at = CASE WHEN ? = 'pending' THEN retry_at ELSE NULL END,
                     dispatched_at = COALESCE(dispatched_at, CASE WHEN ? = 'dispatched' THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') END),
                     started_at = COALESCE(started_at, CASE WHEN ? = 'running' THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') END),
                     finished_at = CASE WHEN ? IN ('success', 'failed', 'cancelled') THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') END
@@ -470,6 +501,8 @@ impl DatabaseTrait for SqliteDatabase {
             .bind(status)
             .bind(execution_name)
             .bind(error)
+            .bind(status)
+            .bind(status)
             .bind(status)
             .bind(status)
             .bind(status)
@@ -542,6 +575,35 @@ impl DatabaseTrait for SqliteDatabase {
         Ok(())
     }
 
+    async fn reset_task_for_retry(
+        &self,
+        task_id: Uuid,
+        error: Option<&str>,
+        retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET status = 'pending',
+                execution_name = NULL,
+                error = ?,
+                attempts = attempts + 1,
+                retry_at = ?,
+                dispatched_at = NULL,
+                started_at = NULL,
+                finished_at = NULL,
+                output = NULL
+            WHERE id = ?
+            "#,
+        )
+        .bind(error)
+        .bind(retry_at.map(|dt| dt.to_rfc3339()))
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn get_pending_tasks_with_workflow(
         &self,
         limit: i64,
@@ -556,6 +618,10 @@ impl DatabaseTrait for SqliteDatabase {
                 t.executor_type,
                 t.depends_on,
                 t.status as task_status,
+                t.attempts,
+                t.max_retries,
+                t.timeout_seconds,
+                t.retry_at,
                 t.execution_name,
                 t.params,
                 w.id as workflow_id,
@@ -566,6 +632,7 @@ impl DatabaseTrait for SqliteDatabase {
             INNER JOIN runs r ON t.run_id = r.id
             INNER JOIN workflows w ON r.workflow_id = w.id
             WHERE t.status = 'pending'
+              AND (t.retry_at IS NULL OR t.retry_at <= STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))
             ORDER BY t.created_at ASC
             "#,
         )
@@ -668,6 +735,34 @@ impl DatabaseTrait for SqliteDatabase {
             if let Some(value) = output {
                 map.insert(name, value.0);
             }
+        }
+        Ok(map)
+    }
+
+    async fn get_task_retry_meta(
+        &self,
+        task_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, (i32, i32)>> {
+        if task_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut qb = QueryBuilder::<Sqlite>::new(
+            "SELECT id, attempts, max_retries FROM tasks WHERE id IN (",
+        );
+        let mut separated = qb.separated(", ");
+        for id in task_ids {
+            separated.push_bind(*id);
+        }
+        qb.push(")");
+
+        let rows = qb.build().fetch_all(&self.pool).await?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let id: Uuid = row.try_get(0)?;
+            let attempts: i32 = row.try_get(1)?;
+            let max_retries: i32 = row.try_get(2)?;
+            map.insert(id, (attempts, max_retries));
         }
         Ok(map)
     }

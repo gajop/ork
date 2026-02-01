@@ -145,6 +145,14 @@ pub struct Task {
     pub executor_type: String,
     pub depends_on: Vec<String>,
     pub status: String,
+    #[serde(default)]
+    pub attempts: i32,
+    #[serde(default)]
+    pub max_retries: i32,
+    #[serde(default)]
+    pub timeout_seconds: Option<i32>,
+    #[serde(default)]
+    pub retry_at: Option<DateTime<Utc>>,
     pub execution_name: Option<String>,
     pub params: Option<JsonValue>,
     pub output: Option<JsonValue>,
@@ -176,6 +184,10 @@ pub struct TaskWithWorkflow {
     pub depends_on: Vec<String>,
     #[allow(dead_code)]
     pub task_status: String,
+    pub attempts: i32,
+    pub max_retries: i32,
+    pub timeout_seconds: Option<i32>,
+    pub retry_at: Option<DateTime<Utc>>,
     pub execution_name: Option<String>,
     pub params: Option<JsonValue>,
 

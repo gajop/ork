@@ -1,5 +1,6 @@
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
+use chrono::Utc;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -108,6 +109,10 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 }
             }
             metrics.process_status_updates_ms = start.elapsed().as_millis();
+
+            if let Err(e) = self.enforce_timeouts().await {
+                error!("Error enforcing timeouts: {}", e);
+            }
 
             // Wait for either a status update or the next poll interval
             let had_work = runs_processed > 0 || tasks_processed > 0;
@@ -373,31 +378,45 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             .collect::<Vec<_>>()
             .await;
 
-        // Batch update statuses
-        let updates: Vec<(Uuid, &str, Option<&str>, Option<String>)> = results
-            .iter()
-            .map(|(task_id, result)| match result {
-                Ok(execution_name) => (*task_id, "dispatched", Some(execution_name.as_str()), None),
+        let mut dispatch_updates: Vec<(Uuid, String)> = Vec::new();
+        let mut failure_updates: Vec<StatusUpdate> = Vec::new();
+
+        for (task_id, result) in results {
+            match result {
+                Ok(execution_name) => {
+                    dispatch_updates.push((task_id, execution_name));
+                }
                 Err(e) => {
                     error!("Failed to dispatch task {}: {}", task_id, e);
-                    (*task_id, "failed", None, Some(e.to_string()))
+                    failure_updates.push(StatusUpdate {
+                        task_id,
+                        status: "failed".to_string(),
+                        log: None,
+                        output: None,
+                        error: Some(e.to_string()),
+                    });
                 }
-            })
-            .collect();
-
-        let updates_ref: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = updates
-            .iter()
-            .map(|(id, status, exec, err)| (*id, *status, *exec, err.as_deref()))
-            .collect();
+            }
+        }
 
         let db_update_start = Instant::now();
-        self.db.batch_update_task_status(&updates_ref).await?;
+        if !dispatch_updates.is_empty() {
+            let updates_ref: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = dispatch_updates
+                .iter()
+                .map(|(id, execution)| (*id, "dispatched", Some(execution.as_str()), None))
+                .collect();
+            self.db.batch_update_task_status(&updates_ref).await?;
+        }
         let db_update_ms = db_update_start.elapsed().as_millis();
         info!(
             "Batch updated {} tasks in {}ms",
-            updates_ref.len(),
+            dispatch_updates.len(),
             db_update_ms
         );
+
+        if !failure_updates.is_empty() {
+            self.process_status_updates(failure_updates).await?;
+        }
 
         Ok(count)
     }
@@ -406,6 +425,16 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         let mut task_updates: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = Vec::new();
         let mut runs_to_check = std::collections::HashSet::new();
         let mut failed_by_run: HashMap<Uuid, Vec<String>> = HashMap::new();
+        let failed_ids: Vec<Uuid> = updates
+            .iter()
+            .filter(|u| u.status == "failed")
+            .map(|u| u.task_id)
+            .collect();
+        let retry_meta = if failed_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.db.get_task_retry_meta(&failed_ids).await?
+        };
 
         for update in &updates {
             if let Some(log) = update.log.as_ref() {
@@ -426,7 +455,35 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 _ => continue,
             };
 
-            task_updates.push((update.task_id, new_status.as_str(), None, None));
+            if matches!(new_status, TaskStatus::Failed) {
+                let (attempts, max_retries) = retry_meta
+                    .get(&update.task_id)
+                    .cloned()
+                    .unwrap_or((0, 0));
+                if attempts < max_retries {
+                    let error = update.error.as_deref().unwrap_or("retrying");
+                    let backoff = retry_backoff_seconds(attempts + 1);
+                    let retry_at = Utc::now()
+                        + chrono::Duration::seconds(i64::try_from(backoff).unwrap_or(i64::MAX));
+                    if let Err(e) = self
+                        .db
+                        .reset_task_for_retry(update.task_id, Some(error), Some(retry_at))
+                        .await
+                    {
+                        error!("Failed to reset task {} for retry: {}", update.task_id, e);
+                        task_updates.push((update.task_id, new_status.as_str(), None, update.error.as_deref()));
+                    } else {
+                        continue;
+                    }
+                }
+            }
+
+            task_updates.push((
+                update.task_id,
+                new_status.as_str(),
+                None,
+                update.error.as_deref(),
+            ));
 
             if matches!(new_status, TaskStatus::Success | TaskStatus::Failed) {
                 let (run_id, task_name) = self.db.get_task_identity(update.task_id).await?;
@@ -472,6 +529,42 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         Ok(())
     }
 
+    async fn enforce_timeouts(&self) -> Result<()> {
+        let running = self.db.get_running_tasks().await?;
+        if running.is_empty() {
+            return Ok(());
+        }
+
+        let now = Utc::now();
+        let mut updates = Vec::new();
+        for task in running {
+            let timeout = match task.timeout_seconds {
+                Some(value) if value > 0 => value,
+                _ => continue,
+            };
+            let started = task
+                .started_at
+                .or(task.dispatched_at)
+                .unwrap_or(task.created_at);
+            let elapsed = now.signed_duration_since(started).num_seconds();
+            if elapsed > i64::from(timeout) {
+                updates.push(StatusUpdate {
+                    task_id: task.id,
+                    status: "failed".to_string(),
+                    log: None,
+                    output: None,
+                    error: Some(format!("timeout after {}s", timeout)),
+                });
+            }
+        }
+
+        if !updates.is_empty() {
+            self.process_status_updates(updates).await?;
+        }
+
+        Ok(())
+    }
+
     fn build_run_tasks(
         &self,
         run_id: Uuid,
@@ -490,6 +583,15 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     params = serde_json::json!({});
                 }
                 let obj = params.as_object_mut().expect("params object");
+                let max_retries = obj
+                    .get("max_retries")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+                    .clamp(0, i64::from(i32::MAX)) as i32;
+                let timeout_seconds = obj
+                    .get("timeout_seconds")
+                    .and_then(|v| v.as_i64())
+                    .map(|v| v.clamp(0, i64::from(i32::MAX)) as i32);
                 obj.entry("task_index".to_string())
                     .or_insert_with(|| serde_json::json!(task.task_index));
                 obj.entry("task_name".to_string())
@@ -505,6 +607,8 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     executor_type: task.executor_type.clone(),
                     depends_on: task.depends_on.clone(),
                     params,
+                    max_retries,
+                    timeout_seconds,
                 }
             })
             .collect()
@@ -547,4 +651,13 @@ fn resolve_job_name(task: &crate::models::TaskWithWorkflow, workflow: &Workflow)
     override_name
         .map(|s| s.to_string())
         .unwrap_or_else(|| workflow.job_name.clone())
+}
+
+fn retry_backoff_seconds(attempt: i32) -> u64 {
+    if attempt <= 1 {
+        return 1;
+    }
+    let capped = attempt.clamp(1, 10) as u32;
+    let backoff = 2_u64.saturating_pow(capped - 1);
+    backoff.min(60)
 }

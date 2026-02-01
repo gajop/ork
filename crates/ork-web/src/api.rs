@@ -462,6 +462,14 @@ fn build_workflow_tasks(
         if !task.input.is_null() {
             params.insert("task_input".to_string(), task.input.clone());
         }
+        params.insert(
+            "max_retries".to_string(),
+            serde_json::Value::Number(task.retries.into()),
+        );
+        params.insert(
+            "timeout_seconds".to_string(),
+            serde_json::Value::Number(task.timeout.into()),
+        );
         if !task.env.is_empty() {
             let env_json = task
                 .env

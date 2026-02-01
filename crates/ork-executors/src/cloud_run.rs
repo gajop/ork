@@ -272,6 +272,7 @@ impl CloudRunClient {
                                 status: normalized_status.to_string(),
                                 log: None,
                                 output: None,
+                                error: None,
                             });
                         }
 

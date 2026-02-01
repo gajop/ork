@@ -169,6 +169,7 @@ impl ProcessExecutor {
                     status: "running".to_string(),
                     log: None,
                     output: None,
+                    error: None,
                 });
             }
 
@@ -196,6 +197,7 @@ impl ProcessExecutor {
                                 status: "log".to_string(),
                                 log: Some(format!("stdout: {}\n", line)),
                                 output: None,
+                                error: None,
                             });
                         }
                     }
@@ -213,6 +215,7 @@ impl ProcessExecutor {
                                 status: "log".to_string(),
                                 log: Some(format!("stderr: {}\n", line)),
                                 output: None,
+                                error: None,
                             });
                         }
                     }
@@ -258,12 +261,18 @@ impl ProcessExecutor {
                 } else {
                     None
                 };
+                let error = if matches!(status, ProcessStatus::Failed) {
+                    Some(format!("process {} failed", exec_id_clone))
+                } else {
+                    None
+                };
 
                 let _ = tx.send(StatusUpdate {
                     task_id,
                     status: status_str,
                     log: None,
                     output,
+                    error,
                 });
             }
         });

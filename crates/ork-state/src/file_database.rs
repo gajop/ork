@@ -285,6 +285,10 @@ impl Database for FileDatabase {
                 "executor_type": executor_type,
                 "depends_on": [],
                 "status": "pending",
+                "attempts": 0,
+                "max_retries": 0,
+                "timeout_seconds": null,
+                "retry_at": null,
                 "execution_name": null,
                 "params": params,
                 "output": null,
@@ -315,6 +319,10 @@ impl Database for FileDatabase {
                 "executor_type": task.executor_type,
                 "depends_on": task.depends_on,
                 "status": "pending",
+                "attempts": 0,
+                "max_retries": task.max_retries,
+                "timeout_seconds": task.timeout_seconds,
+                "retry_at": null,
                 "execution_name": null,
                 "params": task.params,
                 "output": null,
@@ -361,6 +369,12 @@ impl Database for FileDatabase {
         } else {
             task.finished_at
         };
+        let attempts = if status == "failed" {
+            task.attempts + 1
+        } else {
+            task.attempts
+        };
+        let retry_at = if status == "pending" { task.retry_at } else { None };
 
         // Reconstruct with updated fields using serde
         let updated_task: Task = serde_json::from_value(serde_json::json!({
@@ -371,6 +385,10 @@ impl Database for FileDatabase {
             "executor_type": task.executor_type,
             "depends_on": task.depends_on,
             "status": status,
+            "attempts": attempts,
+            "max_retries": task.max_retries,
+            "timeout_seconds": task.timeout_seconds,
+            "retry_at": retry_at,
             "execution_name": execution_name.or(task.execution_name.as_deref()),
             "params": task.params,
             "output": task.output,
@@ -466,6 +484,10 @@ impl Database for FileDatabase {
             "executor_type": task.executor_type,
             "depends_on": task.depends_on,
             "status": task.status,
+            "attempts": task.attempts,
+            "max_retries": task.max_retries,
+            "timeout_seconds": task.timeout_seconds,
+            "retry_at": task.retry_at,
             "execution_name": task.execution_name,
             "params": task.params,
             "output": task.output,
@@ -491,6 +513,10 @@ impl Database for FileDatabase {
             "executor_type": task.executor_type,
             "depends_on": task.depends_on,
             "status": task.status,
+            "attempts": task.attempts,
+            "max_retries": task.max_retries,
+            "timeout_seconds": task.timeout_seconds,
+            "retry_at": task.retry_at,
             "execution_name": task.execution_name,
             "params": task.params,
             "output": output,
@@ -499,6 +525,40 @@ impl Database for FileDatabase {
             "dispatched_at": task.dispatched_at,
             "started_at": task.started_at,
             "finished_at": task.finished_at,
+            "created_at": task.created_at,
+        }))?;
+        self.write_json(&path, &updated_task).await?;
+        Ok(())
+    }
+
+    async fn reset_task_for_retry(
+        &self,
+        task_id: Uuid,
+        error: Option<&str>,
+        retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        let path = self.task_path(task_id);
+        let task: Task = self.read_json(&path).await?;
+        let updated_task: Task = serde_json::from_value(serde_json::json!({
+            "id": task.id,
+            "run_id": task.run_id,
+            "task_index": task.task_index,
+            "task_name": task.task_name,
+            "executor_type": task.executor_type,
+            "depends_on": task.depends_on,
+            "status": "pending",
+            "attempts": task.attempts + 1,
+            "max_retries": task.max_retries,
+            "timeout_seconds": task.timeout_seconds,
+            "retry_at": retry_at,
+            "execution_name": null,
+            "params": task.params,
+            "output": null,
+            "logs": task.logs,
+            "error": error.or(task.error.as_deref()),
+            "dispatched_at": null,
+            "started_at": null,
+            "finished_at": null,
             "created_at": task.created_at,
         }))?;
         self.write_json(&path, &updated_task).await?;
@@ -548,6 +608,24 @@ impl Database for FileDatabase {
             }
             if let Some(output) = task.output {
                 map.insert(task.task_name, json_inner(&output).clone());
+            }
+        }
+        Ok(map)
+    }
+
+    async fn get_task_retry_meta(
+        &self,
+        task_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, (i32, i32)>> {
+        if task_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let tasks = self.list_tasks_all().await?;
+        let ids: std::collections::HashSet<Uuid> = task_ids.iter().copied().collect();
+        let mut map = HashMap::new();
+        for task in tasks {
+            if ids.contains(&task.id) {
+                map.insert(task.id, (task.attempts, task.max_retries));
             }
         }
         Ok(map)
