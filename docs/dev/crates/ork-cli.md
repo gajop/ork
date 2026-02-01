@@ -28,6 +28,7 @@ The main host process for Ork. It owns the CLI surface and starts the scheduler 
 | [migrations/005_add_dag_support.sql](../../../crates/ork-cli/migrations/005_add_dag_support.sql) | Adds DAG workflow columns and task dependencies. | 2026-01-31 | f24808f |
 | [migrations/006_workflow_tasks.sql](../../../crates/ork-cli/migrations/006_workflow_tasks.sql) | Stores compiled DAGs and per-task executor type. | 2026-01-31 | 1662f24 |
 | [migrations/007_add_task_logs.sql](../../../crates/ork-cli/migrations/007_add_task_logs.sql) | Adds task log storage to the tasks table. | 2026-01-31 | 823943e |
+| [migrations/008_add_task_retries_timeouts.sql](../../../crates/ork-cli/migrations/008_add_task_retries_timeouts.sql) | Adds retry/timeout metadata to tasks. | 2026-02-01 | 6ceaaf9 |
 | [perf-configs/heavy.yaml](../../../crates/ork-cli/perf-configs/heavy.yaml) | Load-test configuration for heavy stress runs. | 2026-01-30 | 0563280 |
 | [perf-configs/latency.yaml](../../../crates/ork-cli/perf-configs/latency.yaml) | Load-test configuration for latency-focused runs. | 2026-01-30 | 7068a4c |
 | [perf-configs/memory.yaml](../../../crates/ork-cli/perf-configs/memory.yaml) | Load-test configuration for memory-focused runs. | 2026-01-30 | 4d94588 |
@@ -39,7 +40,7 @@ The main host process for Ork. It owns the CLI surface and starts the scheduler 
 | [scripts/test-load.sh](../../../crates/ork-cli/scripts/test-load.sh) | Simple load test that triggers many workflows. | 2026-01-30 | 844ff75 |
 | [src/bin/perf-test.rs](../../../crates/ork-cli/src/bin/perf-test.rs) | Performance test binary used by `just perf-*` workflows. | 2026-01-31 | 2adddd0 |
 | [src/commands/create_workflow.rs](../../../crates/ork-cli/src/commands/create_workflow.rs) | Implements `ork create-workflow` for ad-hoc workflows. | 2026-01-31 | 510d959 |
-| [src/commands/create_workflow_yaml.rs](../../../crates/ork-cli/src/commands/create_workflow_yaml.rs) | Implements `ork create-workflow-yaml` for YAML DAGs. | 2026-01-31 | 4172850 |
+| [src/commands/create_workflow_yaml.rs](../../../crates/ork-cli/src/commands/create_workflow_yaml.rs) | Implements `ork create-workflow-yaml` for YAML DAGs. | 2026-02-01 | e164f11 |
 | [src/commands/delete_workflow.rs](../../../crates/ork-cli/src/commands/delete_workflow.rs) | Implements `ork delete-workflow`. | 2026-01-31 | 97bad38 |
 | [src/commands/init.rs](../../../crates/ork-cli/src/commands/init.rs) | Implements `ork init` migrations. | 2026-01-31 | cd4e52a |
 | [src/commands/list_workflows.rs](../../../crates/ork-cli/src/commands/list_workflows.rs) | Implements `ork list-workflows`. | 2026-01-31 | 6c5261b |

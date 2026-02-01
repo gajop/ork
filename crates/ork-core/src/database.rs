@@ -4,6 +4,7 @@
 use uuid::Uuid;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
@@ -15,6 +16,8 @@ pub struct NewTask {
     pub executor_type: String,
     pub depends_on: Vec<String>,
     pub params: serde_json::Value,
+    pub max_retries: i32,
+    pub timeout_seconds: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +116,12 @@ pub trait Database: Send + Sync {
         task_id: Uuid,
         output: serde_json::Value,
     ) -> anyhow::Result<()>;
+    async fn reset_task_for_retry(
+        &self,
+        task_id: Uuid,
+        error: Option<&str>,
+        retry_at: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<()>;
 
     /// Get pending tasks with workflow info in a single query (avoids N+1)
     /// Used by scheduler for efficient task dispatching
@@ -133,6 +142,12 @@ pub trait Database: Send + Sync {
         run_id: Uuid,
         task_names: &[String],
     ) -> anyhow::Result<HashMap<String, serde_json::Value>>;
+
+    /// Fetch retry metadata for tasks.
+    async fn get_task_retry_meta(
+        &self,
+        task_ids: &[Uuid],
+    ) -> anyhow::Result<HashMap<Uuid, (i32, i32)>>;
 
     /// Get run ID for a task (used by scheduler to check run completion)
     async fn get_task_run_id(&self, task_id: Uuid) -> anyhow::Result<Uuid>;

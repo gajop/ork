@@ -4,7 +4,7 @@ Scope: current repo state as of 2026-02-01. This is a focused outline of known p
 
 ## Core product gaps
 
-- No retries, timeouts, or backoff enforcement (fields exist in YAML but are not acted on by the scheduler/executors).
+- Retries/timeouts are now enforced with a basic exponential backoff, but there is no jitter or per-task backoff policy configuration.
 - No heartbeats or stuck-task detection; tasks can remain `dispatched`/`running` forever if an executor dies.
 - Output passing is minimal: only JSON stdout is captured as task output, and upstream outputs are exposed via `ORK_UPSTREAM_JSON` (auto-injected only when task input is empty).
 - No cancellation/resume/pausing for runs or tasks (cancel exists in schema but not wired).

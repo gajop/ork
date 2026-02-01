@@ -12,6 +12,7 @@ pub struct StatusUpdate {
     pub status: String,
     pub log: Option<String>,
     pub output: Option<serde_json::Value>,
+    pub error: Option<String>,
 }
 
 /// Executor trait for running tasks
