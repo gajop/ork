@@ -1,0 +1,100 @@
+use anyhow::Result;
+use uuid::Uuid;
+use sqlx::Row;
+
+use ork_core::database::NewWorkflowTask;
+use ork_core::models::{Workflow, WorkflowTask};
+
+use super::core::{SqliteDatabase, WorkflowTaskRow, encode_depends_on};
+
+impl SqliteDatabase {
+    pub(super) async fn create_workflow_impl(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        job_name: &str,
+        region: &str,
+        project: &str,
+        executor_type: &str,
+        task_params: Option<serde_json::Value>,
+    ) -> Result<Workflow> {
+        let workflow_id = Uuid::new_v4();
+        let params_json = task_params.map(|v| sqlx::types::Json(v));
+        let workflow = sqlx::query_as::<_, Workflow>(
+            r#"INSERT INTO workflows (id, name, description, job_name, region, project, executor_type, task_params)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"#,
+        )
+        .bind(workflow_id).bind(name).bind(description).bind(job_name).bind(region).bind(project).bind(executor_type).bind(params_json)
+        .fetch_one(&self.pool).await?;
+        Ok(workflow)
+    }
+
+    pub(super) async fn get_workflow_impl(&self, name: &str) -> Result<Workflow> {
+        let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE name = ?")
+            .bind(name).fetch_one(&self.pool).await?;
+        Ok(workflow)
+    }
+
+    pub(super) async fn list_workflows_impl(&self) -> Result<Vec<Workflow>> {
+        let workflows = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows ORDER BY created_at DESC")
+            .fetch_all(&self.pool).await?;
+        Ok(workflows)
+    }
+
+    pub(super) async fn delete_workflow_impl(&self, name: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM runs WHERE workflow_id = (SELECT id FROM workflows WHERE name = ?)")
+            .bind(name).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM workflows WHERE name = ?").bind(name).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub(super) async fn get_workflows_by_ids_impl(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+        if workflow_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = workflow_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query_str = format!("SELECT * FROM workflows WHERE id IN ({})", placeholders);
+        let mut query = sqlx::query_as::<_, Workflow>(&query_str);
+        for id in workflow_ids {
+            query = query.bind(id);
+        }
+        let workflows = query.fetch_all(&self.pool).await?;
+        Ok(workflows)
+    }
+
+    pub(super) async fn get_workflow_by_id_impl(&self, workflow_id: Uuid) -> Result<Workflow> {
+        let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = ?")
+            .bind(workflow_id).fetch_one(&self.pool).await?;
+        Ok(workflow)
+    }
+
+    pub(super) async fn create_workflow_tasks_impl(&self, workflow_id: Uuid, tasks: &[NewWorkflowTask]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM workflow_tasks WHERE workflow_id = ?")
+            .bind(workflow_id).execute(&mut *tx).await?;
+        for task in tasks {
+            let task_id = Uuid::new_v4();
+            let depends_on_json = encode_depends_on(&task.depends_on);
+            let params_json = sqlx::types::Json(&task.params);
+            sqlx::query(
+                r#"INSERT INTO workflow_tasks (id, workflow_id, task_index, task_name, executor_type, depends_on, params)
+                VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+            )
+            .bind(task_id).bind(workflow_id).bind(task.task_index).bind(&task.task_name)
+            .bind(&task.executor_type).bind(&depends_on_json).bind(params_json)
+            .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub(super) async fn list_workflow_tasks_impl(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+        let rows = sqlx::query_as::<_, WorkflowTaskRow>(
+            "SELECT * FROM workflow_tasks WHERE workflow_id = ? ORDER BY task_index",
+        )
+        .bind(workflow_id).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(Self::map_workflow_task).collect())
+    }
+}
