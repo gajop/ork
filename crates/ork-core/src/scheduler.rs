@@ -248,12 +248,38 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             workflows.into_iter().map(|w| (w.id, w)).collect();
         let workflow_map = Arc::new(workflow_map);
 
+        let mut deps_by_run: HashMap<Uuid, HashSet<String>> = HashMap::new();
+        for task in &tasks {
+            if task.depends_on.is_empty() {
+                continue;
+            }
+            let deps = deps_by_run.entry(task.run_id).or_default();
+            for name in &task.depends_on {
+                deps.insert(name.clone());
+            }
+        }
+
+        let mut outputs_by_run: HashMap<Uuid, HashMap<String, serde_json::Value>> = HashMap::new();
+        for (run_id, deps) in deps_by_run {
+            let names: Vec<String> = deps.into_iter().collect();
+            match self.db.get_task_outputs(run_id, &names).await {
+                Ok(map) => {
+                    outputs_by_run.insert(run_id, map);
+                }
+                Err(err) => {
+                    error!("Failed to load upstream outputs for run {}: {}", run_id, err);
+                }
+            }
+        }
+        let outputs_by_run = Arc::new(outputs_by_run);
+
         // OPTIMIZATION: Process tasks concurrently with limit to avoid memory explosion
         let results = stream::iter(tasks)
             .map(|task_with_workflow| {
                 let executor_manager = &self.executor_manager;
                 let status_tx = self.status_tx.clone();
                 let workflow_map = workflow_map.clone();
+                let outputs_by_run = outputs_by_run.clone();
 
                 async move {
                     let workflow = match workflow_map.get(&task_with_workflow.workflow_id) {
@@ -268,6 +294,61 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                         }
                     };
                     let job_name = resolve_job_name(&task_with_workflow, workflow);
+                    let mut params = task_with_workflow
+                        .params
+                        .as_ref()
+                        .map(|p| json_inner(p).clone())
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    if !params.is_object() {
+                        params = serde_json::json!({});
+                    }
+
+                    if !task_with_workflow.depends_on.is_empty() {
+                        if let Some(outputs) = outputs_by_run.get(&task_with_workflow.run_id) {
+                            let mut upstream_map = serde_json::Map::new();
+                            for dep in &task_with_workflow.depends_on {
+                                let value = outputs
+                                    .get(dep)
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                                upstream_map.insert(dep.clone(), value);
+                            }
+
+                            if !upstream_map.is_empty() {
+                                let upstream_value = serde_json::Value::Object(upstream_map);
+                                if let Some(obj) = params.as_object_mut() {
+                                    obj.entry("upstream".to_string())
+                                        .or_insert(upstream_value.clone());
+
+                                    match obj.get_mut("task_input") {
+                                        Some(task_input) => {
+                                            if task_input.is_null() {
+                                                *task_input = serde_json::json!({
+                                                    "upstream": upstream_value.clone()
+                                                });
+                                            } else if let Some(input_obj) = task_input.as_object_mut() {
+                                                if input_obj.is_empty() {
+                                                    input_obj.insert(
+                                                        "upstream".to_string(),
+                                                        upstream_value.clone(),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            obj.insert(
+                                                "task_input".to_string(),
+                                                serde_json::json!({
+                                                    "upstream": upstream_value.clone()
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let execution_result = match executor_manager
                         .get_executor(&task_with_workflow.executor_type, &workflow)
                         .await
@@ -278,10 +359,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                                 .execute(
                                     task_with_workflow.task_id,
                                     &job_name,
-                                    task_with_workflow
-                                        .params
-                                        .as_ref()
-                                        .map(|p| json_inner(p).clone()),
+                                    Some(params),
                                 )
                                 .await
                         }
@@ -333,6 +411,11 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             if let Some(log) = update.log.as_ref() {
                 if let Err(e) = self.db.append_task_log(update.task_id, log).await {
                     error!("Failed to append log for task {}: {}", update.task_id, e);
+                }
+            }
+            if let Some(output) = update.output.as_ref() {
+                if let Err(e) = self.db.update_task_output(update.task_id, output.clone()).await {
+                    error!("Failed to store output for task {}: {}", update.task_id, e);
                 }
             }
 

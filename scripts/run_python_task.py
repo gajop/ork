@@ -14,11 +14,20 @@ def main() -> int:
         return 1
 
     input_json = os.environ.get("ORK_INPUT_JSON", "{}")
+    upstream_json = os.environ.get("ORK_UPSTREAM_JSON")
     try:
         input_data = json.loads(input_json) if input_json else {}
     except Exception as err:
         print(f"Failed to parse ORK_INPUT_JSON: {err}", file=sys.stderr)
         return 1
+
+    if upstream_json:
+        try:
+            upstream_data = json.loads(upstream_json)
+            if isinstance(input_data, dict) and not input_data:
+                input_data["upstream"] = upstream_data
+        except Exception as err:
+            print(f"Failed to parse ORK_UPSTREAM_JSON: {err}", file=sys.stderr)
 
     if path:
         spec = importlib.util.spec_from_file_location("ork_task", path)

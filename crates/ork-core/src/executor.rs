@@ -11,6 +11,7 @@ pub struct StatusUpdate {
     pub task_id: Uuid,
     pub status: String,
     pub log: Option<String>,
+    pub output: Option<serde_json::Value>,
 }
 
 /// Executor trait for running tasks
