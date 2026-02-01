@@ -16,6 +16,7 @@ pub type WorkflowName = String;
 pub enum RunStatus {
     Pending,
     Running,
+    Paused,
     Success,
     Failed,
     Cancelled,
@@ -25,6 +26,7 @@ pub enum RunStatus {
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
+    Paused,
     Dispatched,
     Running,
     Success,

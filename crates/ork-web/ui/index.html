@@ -336,6 +336,7 @@
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="running">Running</option>
+            <option value="paused">Paused</option>
             <option value="success">Success</option>
             <option value="failed">Failed</option>
             <option value="cancelled">Cancelled</option>
@@ -724,6 +725,28 @@
       }).catch(() => {});
     }
 
+    function pauseRun(runId) {
+      fetch('/api/runs/' + runId + '/pause', {
+        method: 'POST'
+      }).then(r => {
+        if (r.ok) {
+          fetchRunDetail(runId);
+          fetchRuns();
+        }
+      }).catch(() => {});
+    }
+
+    function resumeRun(runId) {
+      fetch('/api/runs/' + runId + '/resume', {
+        method: 'POST'
+      }).then(r => {
+        if (r.ok) {
+          fetchRunDetail(runId);
+          fetchRuns();
+        }
+      }).catch(() => {});
+    }
+
     function showDetail(data) {
       if (data.workflow && data.workflow.tasks && data.workflow.tasks.length) {
         workflowGraph = data.workflow.tasks.map(t => ({ id: t.name, deps: t.depends_on || [] }));
@@ -739,9 +762,14 @@
       renderWorkflowGraph();
 
       runTitleEl.textContent = `Run ${data.run.id}`;
-      const showCancelBtn = data.run.status === 'pending' || data.run.status === 'running';
+      const status = (data.run.status || '').toLowerCase();
+      const showPauseBtn = status === 'pending' || status === 'running';
+      const showResumeBtn = status === 'paused';
+      const showCancelBtn = status === 'pending' || status === 'running' || status === 'paused';
+      const pauseBtn = showPauseBtn ? `<button onclick="pauseRun('${data.run.id}')" style="margin-left: 8px; padding: 4px 12px; background: #9a6b2f; color: white; border: none; border-radius: 4px; cursor: pointer;">Pause</button>` : '';
+      const resumeBtn = showResumeBtn ? `<button onclick="resumeRun('${data.run.id}')" style="margin-left: 8px; padding: 4px 12px; background: #2f7a5a; color: white; border: none; border-radius: 4px; cursor: pointer;">Resume</button>` : '';
       const cancelBtn = showCancelBtn ? `<button onclick="cancelRun('${data.run.id}')" style="margin-left: 8px; padding: 4px 12px; background: var(--danger); color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>` : '';
-      runStatusEl.innerHTML = badge(data.run.status) + cancelBtn;
+      runStatusEl.innerHTML = badge(data.run.status) + pauseBtn + resumeBtn + cancelBtn;
       const meta = [
         `Workflow: ${data.run.workflow}`,
         `Created: ${fmtDateTime(data.run.created_at)}`,
@@ -828,7 +856,7 @@
       const lower = (status || '').toLowerCase();
       const cls = lower === 'success'
         ? 'ok'
-        : (lower === 'running' || lower === 'pending' || lower === 'dispatched'
+        : (lower === 'running' || lower === 'pending' || lower === 'paused' || lower === 'dispatched'
           ? 'pending'
           : 'fail');
       return `<span class="badge ${cls}">${status}</span>`;
@@ -936,11 +964,11 @@
         if (!pos) return;
         const status = (statusMap[n.id] || '').toLowerCase();
         const fill = status === 'success' ? '#12331b' :
-                     status === 'running' || status === 'dispatched' ? '#2c2c1a' :
+                     status === 'running' || status === 'paused' || status === 'dispatched' ? '#2c2c1a' :
                      status === 'failed' || status === 'skipped' ? '#33181c' :
                      '#1b1f2c';
         const stroke = status === 'success' ? '#a7f3d0' :
-                       status === 'running' || status === 'dispatched' ? '#fbd38d' :
+                       status === 'running' || status === 'paused' || status === 'dispatched' ? '#fbd38d' :
                        status === 'failed' || status === 'skipped' ? '#ff6b6b' :
                        '#6ee7ff';
         svg += `<g>

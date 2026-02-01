@@ -23,3 +23,7 @@ anyhow = { workspace = true }
 uuid = { workspace = true }
 ork-core = { path = "../ork-core", features = ["sqlx"] }
 ork-state = { path = "../ork-state" }
+
+[dev-dependencies]
+ork-state = { path = "../ork-state", features = ["sqlite"] }
+tower = { workspace = true }

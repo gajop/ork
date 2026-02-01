@@ -31,7 +31,7 @@ impl PostgresDatabase {
         sqlx::query(
             r#"UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = $3,
             attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
-            retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END,
+            retry_at = CASE WHEN $1 IN ('pending', 'paused') THEN retry_at ELSE NULL END,
             dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
             started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
             finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
@@ -46,7 +46,7 @@ impl PostgresDatabase {
             sqlx::query(
                 r#"UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = $3,
                 attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
-                retry_at = CASE WHEN $1 = 'pending' THEN retry_at ELSE NULL END,
+                retry_at = CASE WHEN $1 IN ('pending', 'paused') THEN retry_at ELSE NULL END,
                 dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
                 started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
                 finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
@@ -88,6 +88,7 @@ impl PostgresDatabase {
             w.id as workflow_id, w.job_name, w.project, w.region
             FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
             WHERE t.status = 'pending'
+            AND r.status = 'running'
             AND (t.retry_at IS NULL OR t.retry_at <= NOW())
             AND (cardinality(t.depends_on) = 0 OR NOT EXISTS (
                 SELECT 1 FROM unnest(t.depends_on) AS dep_name
@@ -136,7 +137,7 @@ impl PostgresDatabase {
     }
     pub(super) async fn mark_tasks_failed_by_dependency_impl(&self, run_id: Uuid, failed_task_names: &[String], error: &str) -> Result<Vec<String>> {
         if failed_task_names.is_empty() { return Ok(Vec::new()); }
-        let rows = sqlx::query("UPDATE tasks SET status = 'failed', error = $1, finished_at = NOW() WHERE run_id = $2 AND status = 'pending' AND depends_on && $3 RETURNING task_name")
+        let rows = sqlx::query("UPDATE tasks SET status = 'failed', error = $1, finished_at = NOW() WHERE run_id = $2 AND status IN ('pending', 'paused') AND depends_on && $3 RETURNING task_name")
             .bind(error).bind(run_id).bind(failed_task_names).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|row| row.get("task_name")).collect())
     }

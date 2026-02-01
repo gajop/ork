@@ -73,6 +73,7 @@ impl ExecutorType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
     Running,
+    Paused,
     Success,
     Failed,
 }
@@ -81,6 +82,7 @@ impl TaskStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Running => "running",
+            Self::Paused => "paused",
             Self::Success => "success",
             Self::Failed => "failed",
         }
@@ -91,6 +93,7 @@ impl TaskStatus {
 pub enum RunStatus {
     Pending,
     Running,
+    Paused,
     Success,
     Failed,
 }
@@ -100,6 +103,7 @@ impl RunStatus {
         match s.to_lowercase().as_str() {
             "pending" => Some(Self::Pending),
             "running" => Some(Self::Running),
+            "paused" => Some(Self::Paused),
             "success" => Some(Self::Success),
             "failed" => Some(Self::Failed),
             _ => None,
@@ -110,6 +114,7 @@ impl RunStatus {
         match self {
             Self::Pending => "pending",
             Self::Running => "running",
+            Self::Paused => "paused",
             Self::Success => "success",
             Self::Failed => "failed",
         }

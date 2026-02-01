@@ -1,0 +1,151 @@
+use anyhow::Result;
+use std::sync::Arc;
+use tokio::time::{timeout, Duration};
+
+use ork_core::config::OrchestratorConfig;
+use ork_core::database::Database;
+use ork_core::scheduler::Scheduler;
+use ork_executors::manager::ExecutorManager;
+use ork_state::SqliteDatabase;
+
+#[tokio::test]
+async fn test_run_pause_blocks_dispatch_until_resumed() -> Result<()> {
+    let db = Arc::new(SqliteDatabase::new(":memory:").await?);
+    db.run_migrations().await?;
+
+    let executor_manager = Arc::new(ExecutorManager::new());
+
+    let workflow = db
+        .create_workflow("pause_run", None, "test", "local", "local", "process", None, None)
+        .await?;
+    let run = db.create_run(workflow.id, "test").await?;
+
+    let tasks = vec![ork_core::database::NewTask {
+        task_index: 0,
+        task_name: "A".to_string(),
+        executor_type: "process".to_string(),
+        depends_on: vec![],
+        params: serde_json::json!({
+            "command": "echo 'Task A'"
+        }),
+        max_retries: 0,
+        timeout_seconds: Some(1),
+    }];
+    db.batch_create_dag_tasks(run.id, &tasks).await?;
+
+    db.update_run_status(run.id, "paused", None).await?;
+
+    let config = OrchestratorConfig {
+        poll_interval_secs: 0.01,
+        max_tasks_per_batch: 100,
+        max_concurrent_dispatches: 10,
+        max_concurrent_status_checks: 50,
+        db_pool_size: 5,
+    };
+    let scheduler = Scheduler::new_with_config(db.clone(), executor_manager, config);
+    let scheduler_handle = tokio::spawn(async move {
+        let _ = scheduler.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let pending = db.list_tasks(run.id).await?;
+    assert_eq!(pending.len(), 1);
+    assert!(pending.iter().all(|t| t.status_str() == "pending"));
+    assert!(pending.iter().all(|t| t.dispatched_at.is_none()));
+    assert!(pending.iter().all(|t| t.started_at.is_none()));
+    assert!(pending.iter().all(|t| t.finished_at.is_none()));
+
+    db.update_run_status(run.id, "running", None).await?;
+
+    let result = timeout(Duration::from_millis(300), async {
+        loop {
+            let (total, completed, _failed) = db.get_run_task_stats(run.id).await?;
+            if total > 0 && completed == total {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await;
+
+    scheduler_handle.abort();
+
+    assert!(result.is_ok(), "Timed out waiting for task to complete after resume");
+    let all_tasks = db.list_tasks(run.id).await?;
+    assert!(all_tasks.iter().all(|t| t.status_str() == "success"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
+    let db = Arc::new(SqliteDatabase::new(":memory:").await?);
+    db.run_migrations().await?;
+
+    let executor_manager = Arc::new(ExecutorManager::new());
+
+    let workflow = db
+        .create_workflow("pause_task", None, "test", "local", "local", "process", None, None)
+        .await?;
+    let run = db.create_run(workflow.id, "test").await?;
+
+    let tasks = vec![ork_core::database::NewTask {
+        task_index: 0,
+        task_name: "A".to_string(),
+        executor_type: "process".to_string(),
+        depends_on: vec![],
+        params: serde_json::json!({
+            "command": "echo 'Task A'"
+        }),
+        max_retries: 0,
+        timeout_seconds: Some(1),
+    }];
+    db.batch_create_dag_tasks(run.id, &tasks).await?;
+    db.update_run_status(run.id, "running", None).await?;
+
+    let task = db.list_tasks(run.id).await?.into_iter().next().unwrap();
+    db.update_task_status(task.id, "paused", None, None).await?;
+
+    let config = OrchestratorConfig {
+        poll_interval_secs: 0.01,
+        max_tasks_per_batch: 100,
+        max_concurrent_dispatches: 10,
+        max_concurrent_status_checks: 50,
+        db_pool_size: 5,
+    };
+    let scheduler = Scheduler::new_with_config(db.clone(), executor_manager, config);
+    let scheduler_handle = tokio::spawn(async move {
+        let _ = scheduler.run().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let paused = db.list_tasks(run.id).await?;
+    assert_eq!(paused.len(), 1);
+    assert!(paused.iter().all(|t| t.status_str() == "paused"));
+    assert!(paused.iter().all(|t| t.dispatched_at.is_none()));
+    assert!(paused.iter().all(|t| t.started_at.is_none()));
+    assert!(paused.iter().all(|t| t.finished_at.is_none()));
+
+    db.update_task_status(task.id, "pending", None, None).await?;
+
+    let result = timeout(Duration::from_millis(300), async {
+        loop {
+            let (total, completed, _failed) = db.get_run_task_stats(run.id).await?;
+            if total > 0 && completed == total {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await;
+
+    scheduler_handle.abort();
+
+    assert!(result.is_ok(), "Timed out waiting for task to complete after resume");
+    let all_tasks = db.list_tasks(run.id).await?;
+    assert!(all_tasks.iter().all(|t| t.status_str() == "success"));
+
+    Ok(())
+}

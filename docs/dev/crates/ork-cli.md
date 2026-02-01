@@ -39,18 +39,19 @@ The main host process for Ork. It owns the CLI surface and starts the scheduler 
 | [scripts/test-e2e.sh](../../../crates/ork-cli/scripts/test-e2e.sh) | End-to-end CLI test that triggers and inspects a run. | 2026-01-30 | bd553d1 |
 | [scripts/test-load.sh](../../../crates/ork-cli/scripts/test-load.sh) | Simple load test that triggers many workflows. | 2026-01-30 | 844ff75 |
 | [src/bin/perf-test.rs](../../../crates/ork-cli/src/bin/perf-test.rs) | Performance test binary used by `just perf-*` workflows. | 2026-01-31 | 2adddd0 |
-| [src/commands/create_workflow.rs](../../../crates/ork-cli/src/commands/create_workflow.rs) | Implements `ork create-workflow` for ad-hoc workflows. | 2026-01-31 | 510d959 |
-| [src/commands/create_workflow_yaml.rs](../../../crates/ork-cli/src/commands/create_workflow_yaml.rs) | Implements `ork create-workflow-yaml` for YAML DAGs. | 2026-02-01 | e164f11 |
+| [src/commands/create_workflow.rs](../../../crates/ork-cli/src/commands/create_workflow.rs) | Implements `ork create-workflow` for ad-hoc workflows. | 2026-02-01 | f58af8c |
+| [src/commands/create_workflow_yaml.rs](../../../crates/ork-cli/src/commands/create_workflow_yaml.rs) | Implements `ork create-workflow-yaml` for YAML DAGs. | 2026-02-01 | dd45e76 |
 | [src/commands/delete_workflow.rs](../../../crates/ork-cli/src/commands/delete_workflow.rs) | Implements `ork delete-workflow`. | 2026-01-31 | 97bad38 |
+| [src/commands/execute.rs](../../../crates/ork-cli/src/commands/execute.rs) | Create, run, and wait for a workflow from YAML locally. | 2026-02-01 | e84ee26 |
 | [src/commands/init.rs](../../../crates/ork-cli/src/commands/init.rs) | Implements `ork init` migrations. | 2026-01-31 | cd4e52a |
 | [src/commands/list_workflows.rs](../../../crates/ork-cli/src/commands/list_workflows.rs) | Implements `ork list-workflows`. | 2026-01-31 | 6c5261b |
-| [src/commands/mod.rs](../../../crates/ork-cli/src/commands/mod.rs) | Command registry + dispatch helpers for CLI subcommands. | 2026-01-31 | 2c4f96e |
+| [src/commands/mod.rs](../../../crates/ork-cli/src/commands/mod.rs) | Command registry + dispatch helpers for CLI subcommands. | 2026-02-01 | c01c9e7 |
 | [src/commands/run.rs](../../../crates/ork-cli/src/commands/run.rs) | Implements `ork run` scheduler startup. | 2026-01-31 | 6cda9fd |
 | [src/commands/run_workflow.rs](../../../crates/ork-cli/src/commands/run_workflow.rs) | Implements `ork run-workflow` via the HTTP API. | 2026-01-31 | 9847b53 |
 | [src/commands/status.rs](../../../crates/ork-cli/src/commands/status.rs) | Implements `ork status`. | 2026-01-31 | 58f326e |
 | [src/commands/tasks.rs](../../../crates/ork-cli/src/commands/tasks.rs) | Implements `ork tasks`. | 2026-01-31 | f5bf9c3 |
 | [src/commands/trigger.rs](../../../crates/ork-cli/src/commands/trigger.rs) | Implements `ork trigger`. | 2026-01-31 | fd656f4 |
-| [src/main.rs](../../../crates/ork-cli/src/main.rs) | CLI entry point that parses commands, initializes storage, and starts the scheduler. | 2026-01-31 | 6528957 |
+| [src/main.rs](../../../crates/ork-cli/src/main.rs) | CLI entry point that parses commands, initializes storage, and starts the scheduler. | 2026-02-01 | d1f8260 |
 | [test-local.sh](../../../crates/ork-cli/test-local.sh) | Local walkthrough script for exercising the process executor. | 2026-01-30 | fd8204e |
 | [test-scripts/example-task.sh](../../../crates/ork-cli/test-scripts/example-task.sh) | Example process-executor task script used in tests. | 2026-01-30 | 0f38387 |
 | [test-scripts/perf-task.sh](../../../crates/ork-cli/test-scripts/perf-task.sh) | Lightweight task script used in perf runs. | 2026-01-30 | 487b94d |
