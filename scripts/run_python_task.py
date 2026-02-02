@@ -50,22 +50,54 @@ def main() -> int:
 
     sig = inspect.signature(fn)
     args = []
-    if len(sig.parameters) > 0:
+    kwargs = {}
+
+    # improved argument injection
+    if isinstance(input_data, dict):
+        # Check if we should unpack kwargs directly
+        # Criterion: Function has > 1 params, OR the single param's name exists in input data
+        params = list(sig.parameters.values())
+        should_unpack = False
+
+        if len(params) > 1:
+            should_unpack = True
+        elif len(params) == 1:
+            param_name = params[0].name
+            if param_name in input_data:
+                should_unpack = True
+
+        if should_unpack:
+            for name in sig.parameters.keys():
+                if name in input_data:
+                    kwargs[name] = input_data[name]
+        else:
+            # Fallback to single-argument model injection (legacy support)
+            if len(params) > 0:
+                param = params[0]
+                ann = param.annotation
+                if ann is not inspect._empty:
+                    try:
+                        input_obj = ann(**input_data)
+                    except Exception:
+                        input_obj = input_data
+                else:
+                    input_obj = input_data
+                args.append(input_obj)
+
+    # Handle non-dict input (must be legacy single arg)
+    elif len(sig.parameters) > 0:
         param = next(iter(sig.parameters.values()))
         ann = param.annotation
         if ann is not inspect._empty:
-            try:
-                if isinstance(input_data, dict):
-                    input_obj = ann(**input_data)
-                else:
-                    input_obj = ann(input_data)
-            except Exception:
-                input_obj = input_data
+             try:
+                 input_obj = ann(input_data)
+             except Exception:
+                 input_obj = input_data
         else:
-            input_obj = input_data
+             input_obj = input_data
         args.append(input_obj)
 
-    result = fn(*args)
+    result = fn(*args, **kwargs)
 
     if result is None:
         return 0

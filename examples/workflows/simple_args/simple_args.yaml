@@ -1,0 +1,20 @@
+name: simple_args
+
+tasks:
+  add_math:
+    executor: python
+    file: tasks/demo.py
+    function: add
+    input:
+      a: 5
+      b: 10
+    timeout: 10
+
+  greet_user:
+    executor: python
+    file: tasks/demo.py
+    function: greet
+    input:
+      name: "Ork User"
+      shout: true
+    depends_on: [add_math]
