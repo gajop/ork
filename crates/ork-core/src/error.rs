@@ -65,4 +65,6 @@ pub enum WorkflowValidationError {
     TaskFileNotFound { task: String, path: PathBuf },
     #[error("workflow contains a cycle involving task {task}")]
     Cycle { task: String },
+    #[error("{0}")]
+    Custom(String),
 }

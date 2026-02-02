@@ -14,7 +14,9 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
 
         let executor_type = match task.executor {
             ExecutorKind::CloudRun => "cloudrun",
-            ExecutorKind::Process | ExecutorKind::Python => "process",
+            ExecutorKind::Process => "process",
+            ExecutorKind::Python => "python",
+            ExecutorKind::Library => "library",
         };
 
         let mut params = serde_json::Map::new();
@@ -84,6 +86,14 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
                     serde_json::Value::String(compiled.root.to_string_lossy().to_string()),
                 );
             }
+            ExecutorKind::Library => {
+                if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "library_path".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+            }
         }
 
         tasks.push(NewWorkflowTask {
@@ -92,6 +102,7 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
             executor_type: executor_type.to_string(),
             depends_on,
             params: serde_json::Value::Object(params),
+            signature: task.signature.clone(),
         });
     }
 

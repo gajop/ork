@@ -4,7 +4,7 @@ members = [
     "crates/ork-web",
     "crates/ork-core",
     "crates/ork-state",
-    "crates/ork-executors",
+    "crates/ork-executors", "crates/ork-sdk-rust",
 ]
 resolver = "2"
 

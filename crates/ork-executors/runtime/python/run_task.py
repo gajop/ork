@@ -107,7 +107,8 @@ def main() -> int:
     elif hasattr(result, "dict"):
         result = result.dict()
 
-    print(json.dumps(result))
+    # Prefix output with magic string to distinguish from debug prints
+    print(f"ORK_OUTPUT:{json.dumps(result)}")
     return 0
 
 

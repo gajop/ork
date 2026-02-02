@@ -38,8 +38,16 @@ impl PostgresDatabase {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM workflow_tasks WHERE workflow_id = $1").bind(workflow_id).execute(&mut *tx).await?;
         for task in tasks {
-            sqlx::query("INSERT INTO workflow_tasks (workflow_id, task_index, task_name, executor_type, depends_on, params) VALUES ($1, $2, $3, $4, $5, $6)")
-                .bind(workflow_id).bind(task.task_index).bind(&task.task_name).bind(&task.executor_type).bind(&task.depends_on).bind(&task.params).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO workflow_tasks (workflow_id, task_index, task_name, executor_type, depends_on, params, signature) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+                .bind(workflow_id)
+                .bind(task.task_index)
+                .bind(&task.task_name)
+                .bind(&task.executor_type)
+                .bind(&task.depends_on)
+                .bind(&task.params)
+                .bind(&task.signature)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())

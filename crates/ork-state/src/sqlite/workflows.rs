@@ -78,13 +78,21 @@ impl SqliteDatabase {
             let task_id = Uuid::new_v4();
             let depends_on_json = encode_depends_on(&task.depends_on);
             let params_json = sqlx::types::Json(&task.params);
+            let signature_json = task.signature.as_ref().map(|s| sqlx::types::Json(s));
             sqlx::query(
-                r#"INSERT INTO workflow_tasks (id, workflow_id, task_index, task_name, executor_type, depends_on, params)
-                VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+                r#"INSERT INTO workflow_tasks (id, workflow_id, task_index, task_name, executor_type, depends_on, params, signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
             )
-            .bind(task_id).bind(workflow_id).bind(task.task_index).bind(&task.task_name)
-            .bind(&task.executor_type).bind(&depends_on_json).bind(params_json)
-            .execute(&mut *tx).await?;
+            .bind(task_id)
+            .bind(workflow_id)
+            .bind(task.task_index)
+            .bind(&task.task_name)
+            .bind(&task.executor_type)
+            .bind(&depends_on_json)
+            .bind(params_json)
+            .bind(signature_json)
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         Ok(())

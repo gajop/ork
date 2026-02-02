@@ -14,10 +14,14 @@ use ork_core::models::{ExecutorType, Workflow};
 use crate::cloud_run::CloudRunClient;
 #[cfg(feature = "process")]
 use crate::process::ProcessExecutor;
+#[cfg(feature = "library")]
+use crate::library::LibraryExecutor;
 
 pub struct ExecutorManager {
     #[cfg(feature = "process")]
     process_executor: Arc<ProcessExecutor>,
+    #[cfg(feature = "library")]
+    library_executor: Arc<LibraryExecutor>,
     #[cfg(feature = "cloudrun")]
     cloudrun_clients: Arc<RwLock<HashMap<(String, String), Arc<CloudRunClient>>>>,
 }
@@ -27,6 +31,8 @@ impl ExecutorManager {
         Self {
             #[cfg(feature = "process")]
             process_executor: Arc::new(ProcessExecutor::new(None)), // Use current directory
+            #[cfg(feature = "library")]
+            library_executor: Arc::new(LibraryExecutor::new()),
             #[cfg(feature = "cloudrun")]
             cloudrun_clients: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -51,6 +57,18 @@ impl ExecutorManagerTrait for ExecutorManager {
             #[cfg(not(feature = "process"))]
             ExecutorType::Process => {
                 anyhow::bail!("Process executor not enabled. Enable the 'process' feature flag.");
+            }
+            #[cfg(feature = "process")]
+            ExecutorType::Python => self.process_executor.clone(),
+            #[cfg(not(feature = "process"))]
+            ExecutorType::Python => {
+                anyhow::bail!("Python executor not enabled. Enable the 'process' feature flag.");
+            }
+            #[cfg(feature = "library")]
+            ExecutorType::Library => self.library_executor.clone(),
+            #[cfg(not(feature = "library"))]
+            ExecutorType::Library => {
+                anyhow::bail!("Library executor not enabled. Enable the 'library' feature flag.");
             }
             #[cfg(feature = "cloudrun")]
             ExecutorType::CloudRun => {

@@ -12,13 +12,14 @@ name = "perf-test"
 path = "src/bin/perf-test.rs"
 
 [features]
-default = ["postgres", "process"]
+default = ["postgres", "process", "library"]
 # Database backends
 postgres = ["ork-state/postgres"]
 sqlite = ["ork-state/sqlite"]
 # Executors
 process = ["ork-executors/process"]
 cloudrun = ["ork-executors/cloudrun"]
+library = ["ork-executors/library"]
 
 [dependencies]
 # Core orchestration

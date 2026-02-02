@@ -84,26 +84,18 @@ impl ProcessExecutor {
             let (mut cmd, uses_uv) = if let Some(task_file) = task_file.as_ref() {
                 let (mut python_cmd, uses_uv) =
                     build_python_command(task_file, python_path.as_ref());
-                if let Some(runner_path) = runner_path.or_else(find_python_runner) {
-                    python_cmd.arg(runner_path);
-                } else {
-                    warn!(
-                        "Python runner not found. Set runner_path in params or run from repo root."
-                    );
-                    python_cmd.arg("scripts/run_python_task.py");
-                }
+                let runner = runner_path.or_else(|| {
+                    crate::python_runtime::get_run_task_script().ok()
+                }).unwrap_or_else(|| PathBuf::from("run_python_task.py"));
+                python_cmd.arg(runner);
                 (python_cmd, uses_uv)
             } else if task_module.is_some() {
                 let (mut python_cmd, uses_uv) =
                     build_python_command(Path::new("."), python_path.as_ref());
-                if let Some(runner_path) = runner_path.or_else(find_python_runner) {
-                    python_cmd.arg(runner_path);
-                } else {
-                    warn!(
-                        "Python runner not found. Set runner_path in params or run from repo root."
-                    );
-                    python_cmd.arg("scripts/run_python_task.py");
-                }
+                let runner = runner_path.or_else(|| {
+                    crate::python_runtime::get_run_task_script().ok()
+                }).unwrap_or_else(|| PathBuf::from("run_python_task.py"));
+                python_cmd.arg(runner);
                 (python_cmd, uses_uv)
             } else {
                 let command_path = resolve_command_path(&working_dir, &command);
@@ -198,32 +190,45 @@ impl ProcessExecutor {
                 });
             }
 
-            let mut stdout_reader = child
+            let stdout_reader = child
                 .stdout
                 .take()
-                .map(|out| BufReader::new(out).lines());
-            let mut stderr_reader = child
+                .map(|out| BufReader::new(out));
+            let stderr_reader = child
                 .stderr
                 .take()
-                .map(|err| BufReader::new(err).lines());
+                .map(|err| BufReader::new(err));
 
             let status_tx_logs = status_tx_clone.clone();
             let log_task_id = task_id;
             let output_store = last_output.clone();
             let stdout_handle = tokio::spawn(async move {
-                if let Some(reader) = stdout_reader.as_mut() {
-                    while let Ok(Some(line)) = reader.next_line().await {
-                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                            *output_store.lock().await = Some(value);
-                        }
-                        if let Some(tx) = status_tx_logs.read().await.as_ref() {
-                            let _ = tx.send(StatusUpdate {
-                                task_id: log_task_id,
-                                status: "log".to_string(),
-                                log: Some(format!("stdout: {}\n", line)),
-                                output: None,
-                                error: None,
-                            });
+                if let Some(mut reader) = stdout_reader {
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        match reader.read_line(&mut line).await {
+                            Ok(0) => break, // EOF
+                            Ok(_) => {
+                                let trimmed = line.trim_end();
+                                // Check for output prefix to distinguish from debug prints
+                                if let Some(json_str) = trimmed.strip_prefix("ORK_OUTPUT:") {
+                                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str.trim()) {
+                                        *output_store.lock().await = Some(value);
+                                    }
+                                }
+                                // Send all stdout lines as logs
+                                if let Some(tx) = status_tx_logs.read().await.as_ref() {
+                                    let _ = tx.send(StatusUpdate {
+                                        task_id: log_task_id,
+                                        status: "log".to_string(),
+                                        log: Some(format!("stdout: {}\n", trimmed)),
+                                        output: None,
+                                        error: None,
+                                    });
+                                }
+                            }
+                            Err(_) => break,
                         }
                     }
                 }
@@ -232,16 +237,25 @@ impl ProcessExecutor {
             let status_tx_logs = status_tx_clone.clone();
             let log_task_id = task_id;
             let stderr_handle = tokio::spawn(async move {
-                if let Some(reader) = stderr_reader.as_mut() {
-                    while let Ok(Some(line)) = reader.next_line().await {
-                        if let Some(tx) = status_tx_logs.read().await.as_ref() {
-                            let _ = tx.send(StatusUpdate {
-                                task_id: log_task_id,
-                                status: "log".to_string(),
-                                log: Some(format!("stderr: {}\n", line)),
-                                output: None,
-                                error: None,
-                            });
+                if let Some(mut reader) = stderr_reader {
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        match reader.read_line(&mut line).await {
+                            Ok(0) => break, // EOF
+                            Ok(_) => {
+                                let trimmed = line.trim_end();
+                                if let Some(tx) = status_tx_logs.read().await.as_ref() {
+                                    let _ = tx.send(StatusUpdate {
+                                        task_id: log_task_id,
+                                        status: "log".to_string(),
+                                        log: Some(format!("stderr: {}\n", trimmed)),
+                                        output: None,
+                                        error: None,
+                                    });
+                                }
+                            }
+                            Err(_) => break,
                         }
                     }
                 }
@@ -442,16 +456,7 @@ fn find_project_root(task_path: &Path) -> Option<PathBuf> {
     Some(start.to_path_buf())
 }
 
-fn find_python_runner() -> Option<PathBuf> {
-    let start = std::env::current_dir().ok()?;
-    for ancestor in start.ancestors() {
-        let candidate = ancestor.join("scripts").join("run_python_task.py");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
-}
+// Python runner is now provided by crate::python_runtime::get_run_task_script()
 
 #[async_trait]
 impl Executor for ProcessExecutor {
