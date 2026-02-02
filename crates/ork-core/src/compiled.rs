@@ -28,6 +28,7 @@ pub struct CompiledTask {
     pub timeout: u64,
     pub retries: u32,
     pub env: std::collections::HashMap<String, String>,
+    pub signature: Option<serde_json::Value>,
 }
 
 impl Workflow {
@@ -42,15 +43,29 @@ impl Workflow {
 
         let mut tasks = Vec::with_capacity(self.tasks.len());
         for (name, task) in &self.tasks {
+            let mut signature = None;
             let file = match task.executor {
                 ExecutorKind::Python => {
+                    let task_file = if let Some(file) = task.file.as_ref() {
+                         Some(resolve_file(root, name, file)?)
+                    } else {
+                        None
+                    };
+
+                    if let Some(path) = task_file.as_ref() {
+                        let func_name = task.function.as_deref().unwrap_or("main");
+                        signature = Some(introspect_python_signature(path, func_name).map_err(|e| OrkError::InvalidWorkflow(WorkflowValidationError::Custom(e)))?);
+                    }
+                    task_file
+                }
+                ExecutorKind::Process => {
                     if let Some(file) = task.file.as_ref() {
                         Some(resolve_file(root, name, file)?)
                     } else {
                         None
                     }
                 }
-                ExecutorKind::Process => {
+                ExecutorKind::Library => {
                     if let Some(file) = task.file.as_ref() {
                         Some(resolve_file(root, name, file)?)
                     } else {
@@ -77,6 +92,7 @@ impl Workflow {
                 timeout: task.timeout,
                 retries: task.retries,
                 env: task.env.clone(),
+                signature,
             });
         }
 
@@ -143,4 +159,56 @@ fn topo_sort(tasks: &[CompiledTask]) -> OrkResult<Vec<usize>> {
     }
 
     Ok(topo)
+}
+
+/// Embedded Python introspection script
+const INSPECT_TASK_PY: &str = include_str!("../../ork-executors/runtime/python/inspect_task.py");
+
+fn get_inspect_script() -> std::result::Result<PathBuf, String> {
+    use std::fs;
+
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("ork")
+        .join("runtime");
+
+    fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create runtime cache dir: {}", e))?;
+
+    let script_path = cache_dir.join("inspect_task.py");
+
+    if !script_path.exists() {
+        fs::write(&script_path, INSPECT_TASK_PY)
+            .map_err(|e| format!("Failed to write introspection script: {}", e))?;
+    }
+
+    Ok(script_path)
+}
+
+fn introspect_python_signature(path: &Path, func_name: &str) -> std::result::Result<serde_json::Value, String> {
+    use std::process::Command;
+
+    let script_path = get_inspect_script()?;
+
+    let output = Command::new("python3")
+        .arg(&script_path)
+        .arg(path)
+        .arg(func_name)
+        .output()
+        .map_err(|e| format!("Failed to execute introspection script: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Introspection failed ({}): {}", func_name, stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse introspection output: {}", e))?;
+
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(format!("Task analysis error: {}", err));
+    }
+
+    Ok(result)
 }

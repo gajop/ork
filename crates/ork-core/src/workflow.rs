@@ -44,6 +44,7 @@ pub enum ExecutorKind {
     #[serde(alias = "cloud_run")]
     CloudRun,
     Python,
+    Library,
 }
 
 fn default_timeout_secs() -> u64 {
@@ -119,6 +120,13 @@ impl Workflow {
                 ExecutorKind::CloudRun => {
                     if task.job.as_deref().unwrap_or_default().is_empty() {
                         return Err(WorkflowValidationError::MissingTaskJob { task: name.clone() });
+                    }
+                }
+                ExecutorKind::Library => {
+                    if task.file.is_none() {
+                        return Err(WorkflowValidationError::MissingTaskFile {
+                            task: name.clone(),
+                        });
                     }
                 }
             }

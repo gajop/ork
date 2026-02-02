@@ -1,0 +1,49 @@
+name: polyglot
+description: Multi-language workflow demonstrating ALL 4 Ork execution methods
+
+tasks:
+  # METHOD 1: Python (Dynamic Module Loading)
+  # - Python gets special treatment: file + function, dynamic loading
+  # - Zero boilerplate, just regular Python functions
+  py_generate:
+    executor: python
+    file: python_tasks/tasks.py
+    function: generate_numbers
+    input:
+      count: 5
+
+  # METHOD 2: Rust Library Executor (High Performance, Zero Overhead)
+  # - Uses cdylib and C ABI
+  # - Direct FFI calls, no subprocess
+  # - Fastest method, ideal for CPU-intensive tasks
+  rust_library:
+    executor: library
+    file: rust_tasks/target/debug/libpolyglot_rust_lib.so
+    depends_on: [py_generate]
+
+  # METHOD 3: Rust Process with SDK (Clean, Minimal Boilerplate)
+  # - Uses ork-sdk-rust helpers
+  # - Automatic input/output handling via stdin
+  # - Pre-compiled binary for distribution
+  rust_process_sdk:
+    executor: process
+    command: rust_tasks/target/debug/process_sdk
+    depends_on: [rust_library]
+
+  # METHOD 4: Rust Process Raw (Maximum Control)
+  # - Manual env var parsing and JSON handling
+  # - Shows what happens under the hood
+  # - Pre-compiled binary
+  rust_process_raw:
+    executor: process
+    command: rust_tasks/target/debug/process_raw
+    depends_on: [py_generate]
+
+  # Back to Python for final formatting
+  py_format:
+    executor: python
+    file: python_tasks/tasks.py
+    function: format_result
+    depends_on: [rust_process_sdk]
+    input:
+      multiplier: 10

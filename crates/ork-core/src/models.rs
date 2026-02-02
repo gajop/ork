@@ -51,6 +51,8 @@ pub struct Workflow {
 pub enum ExecutorType {
     CloudRun,
     Process,
+    Python,
+    Library,
 }
 
 impl ExecutorType {
@@ -58,6 +60,8 @@ impl ExecutorType {
         match s.to_lowercase().as_str() {
             "cloudrun" => Some(Self::CloudRun),
             "process" => Some(Self::Process),
+            "python" => Some(Self::Python),
+            "library" => Some(Self::Library),
             _ => None,
         }
     }
@@ -66,6 +70,8 @@ impl ExecutorType {
         match self {
             Self::CloudRun => "cloudrun",
             Self::Process => "process",
+            Self::Python => "python",
+            Self::Library => "library",
         }
     }
 }

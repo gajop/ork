@@ -27,6 +27,7 @@ pub struct NewWorkflowTask {
     pub executor_type: String,
     pub depends_on: Vec<String>,
     pub params: serde_json::Value,
+    pub signature: Option<serde_json::Value>,
 }
 
 /// Database interface for orchestration state management
