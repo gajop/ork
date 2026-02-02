@@ -28,7 +28,7 @@ Workers run as subprocesses in local mode, not as separate containers.
 
 ## Setup
 
-See [`/examples/deployment/local/`](/examples/deployment/local/) for complete docker-compose setup.
+See [`/examples/deployments/local/`](/examples/deployments/local/) for complete docker-compose setup.
 
 The setup includes:
 - Firestore emulator (replaces cloud Firestore)
@@ -38,7 +38,7 @@ The setup includes:
 ## Usage
 
 ```bash
-cd examples/deployment/local
+cd examples/deployments/local
 docker compose up -d
 ork workflow deploy workflows/etl.yaml
 ork run start my_etl

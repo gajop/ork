@@ -1,5 +1,5 @@
 # Proposed Ork Implementation - Enhanced YAML
-# Same as examples/demo - greeting followed by compliment
+# Same as examples/workflows/demo - greeting followed by compliment
 #
 # This shows a PROPOSED approach with built-in task types
 # to reduce the need for custom Python tasks.

@@ -98,12 +98,12 @@ fn main(input: Input) -> ork::Result<Output> {
 just up
 
 # Terminal 2: create + trigger the example workflow
-just example-run simple
+just example simple
 ```
 
 Open the web UI at `http://127.0.0.1:4000` to see runs and task status.
 
-Prefer SQLite? Use `just up-sqlite` and `just example-run-sqlite simple` instead of Docker.
+Examples run via SQLite by default: `just example simple`.
 
 ### 4. Deploy
 

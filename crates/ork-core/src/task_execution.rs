@@ -36,6 +36,21 @@ pub async fn execute_task<E: ExecutorManager>(
     if !params.is_object() {
         params = serde_json::json!({});
     }
+    if let Some(obj) = params.as_object_mut() {
+        let attempt_number = task_with_workflow.attempts.saturating_add(1).max(1);
+        let env_value = obj
+            .entry("env".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if !env_value.is_object() {
+            *env_value = serde_json::json!({});
+        }
+        if let Some(env_obj) = env_value.as_object_mut() {
+            env_obj.insert(
+                "ORK_ATTEMPT".to_string(),
+                serde_json::json!(attempt_number),
+            );
+        }
+    }
 
     if !task_with_workflow.depends_on.is_empty() {
         if let Some(outputs) = outputs_by_run.get(&task_with_workflow.run_id) {

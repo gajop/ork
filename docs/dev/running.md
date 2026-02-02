@@ -30,16 +30,16 @@ Set `DATABASE_URL` to use a different SQLite file (e.g. `sqlite://./tmp/ork.db?m
 In a second terminal:
 
 ```bash
-just example-run simple
+just example simple
 ```
 
 This uses `ork run-workflow` to post YAML to the running API, trigger a run, and poll status.
 Set `ORK_API_URL` (or pass `--api-url`) if the web UI is running on a different host/port.
 
-### SQLite example run
+### Example run
 
 ```bash
-just example-run-sqlite simple
+just example simple
 ```
 
 ## Optional

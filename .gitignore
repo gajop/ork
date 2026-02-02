@@ -25,6 +25,7 @@ target
 
 /target
 .ork
+.ork.db
 .claude/settings.local.json
 
 # Python
@@ -33,3 +34,4 @@ __pycache__/
 *.pyo
 *.egg-info/
 .venv/
+examples/**/warehouse.db

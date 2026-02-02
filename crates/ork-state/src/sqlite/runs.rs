@@ -19,8 +19,8 @@ impl SqliteDatabase {
     pub(super) async fn update_run_status_impl(&self, run_id: Uuid, status: &str, error: Option<&str>) -> Result<()> {
         sqlx::query(
             r#"UPDATE runs SET status = ?, error = ?,
-            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('success', 'failed', 'cancelled') AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END
+            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
+            finished_at = CASE WHEN ? IN ('success', 'failed', 'cancelled') AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
             WHERE id = ?"#,
         )
         .bind(status).bind(error).bind(status).bind(status).bind(run_id).execute(&self.pool).await?;
@@ -55,9 +55,9 @@ impl SqliteDatabase {
 
     pub(super) async fn cancel_run_impl(&self, run_id: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("UPDATE runs SET status = 'cancelled', finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('success', 'failed', 'cancelled')")
+        sqlx::query("UPDATE runs SET status = 'cancelled', finished_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status NOT IN ('success', 'failed', 'cancelled')")
             .bind(run_id).execute(&mut *tx).await?;
-        sqlx::query("UPDATE tasks SET status = 'cancelled', finished_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('pending', 'dispatched', 'running')")
+        sqlx::query("UPDATE tasks SET status = 'cancelled', finished_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') WHERE run_id = ? AND status IN ('pending', 'dispatched', 'running')")
             .bind(run_id).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())
