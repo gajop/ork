@@ -121,6 +121,9 @@ impl ProcessExecutor {
                 if let Some(input) = task_input {
                     env_vars.insert("ORK_INPUT_JSON".to_string(), input.to_string());
                 }
+                if let Some(function) = task_function.as_ref() {
+                    env_vars.insert("ORK_TASK_FUNCTION".to_string(), function.to_string());
+                }
                 if let Some(name) = env_vars.get("task_name").cloned() {
                     env_vars.insert("ORK_TASK_NAME".to_string(), name);
                 }
