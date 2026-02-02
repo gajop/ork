@@ -3,8 +3,7 @@ mod commands;
 use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
-use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use commands::Commands;
 
@@ -41,8 +40,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_env_filter(filter)
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 

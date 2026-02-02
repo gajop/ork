@@ -1,6 +1,6 @@
 """
 Proposed Ork Implementation - Pure Python
-Same as examples/demo - greeting followed by compliment
+Same as examples/workflows/demo - greeting followed by compliment
 
 This shows a PROPOSED approach using functional @task decorator.
 

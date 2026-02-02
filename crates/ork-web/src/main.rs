@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()))
         .init();
 
     let database_url = std::env::var("DATABASE_URL").unwrap_or(args.database_url);

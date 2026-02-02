@@ -24,7 +24,7 @@ def main() -> int:
     if upstream_json:
         try:
             upstream_data = json.loads(upstream_json)
-            if isinstance(input_data, dict) and not input_data:
+            if isinstance(input_data, dict) and "upstream" not in input_data:
                 input_data["upstream"] = upstream_data
         except Exception as err:
             print(f"Failed to parse ORK_UPSTREAM_JSON: {err}", file=sys.stderr)

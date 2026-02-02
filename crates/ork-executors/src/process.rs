@@ -57,6 +57,10 @@ impl ProcessExecutor {
             runner_path,
             python_path,
         ) = build_env_vars(params);
+        let task_label = env_vars
+            .get("task_name")
+            .cloned()
+            .unwrap_or_else(|| task_id.to_string());
 
         // Add execution ID to env
         env_vars.insert("EXECUTION_ID".to_string(), execution_id.clone());
@@ -69,6 +73,7 @@ impl ProcessExecutor {
 
         // Clone for the async task
         let exec_id_clone = execution_id.clone();
+        let task_label_clone = task_label.clone();
         let states_clone = self.process_states.clone();
         let status_tx_clone = self.status_tx.clone();
         let last_output: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
@@ -76,8 +81,9 @@ impl ProcessExecutor {
         let command = command.clone();
 
         tokio::spawn(async move {
-            let mut cmd = if let Some(task_file) = task_file.as_ref() {
-                let mut python_cmd = build_python_command(task_file, python_path.as_ref());
+            let (mut cmd, uses_uv) = if let Some(task_file) = task_file.as_ref() {
+                let (mut python_cmd, uses_uv) =
+                    build_python_command(task_file, python_path.as_ref());
                 if let Some(runner_path) = runner_path.or_else(find_python_runner) {
                     python_cmd.arg(runner_path);
                 } else {
@@ -86,9 +92,10 @@ impl ProcessExecutor {
                     );
                     python_cmd.arg("scripts/run_python_task.py");
                 }
-                python_cmd
+                (python_cmd, uses_uv)
             } else if task_module.is_some() {
-                let mut python_cmd = build_python_command(Path::new("."), python_path.as_ref());
+                let (mut python_cmd, uses_uv) =
+                    build_python_command(Path::new("."), python_path.as_ref());
                 if let Some(runner_path) = runner_path.or_else(find_python_runner) {
                     python_cmd.arg(runner_path);
                 } else {
@@ -97,13 +104,13 @@ impl ProcessExecutor {
                     );
                     python_cmd.arg("scripts/run_python_task.py");
                 }
-                python_cmd
+                (python_cmd, uses_uv)
             } else {
                 let command_path = resolve_command_path(&working_dir, &command);
                 let mut shell_cmd = Command::new("sh");
                 shell_cmd.arg("-c").arg(&command_path);
                 shell_cmd.current_dir(&working_dir);
-                shell_cmd
+                (shell_cmd, false)
             };
 
             if let Some(task_file) = task_file.as_ref() {
@@ -150,15 +157,30 @@ impl ProcessExecutor {
                 }
             }
 
+            if uses_uv && !env_vars.contains_key("UV_CACHE_DIR") {
+                let cache_dir = std::env::var("XDG_CACHE_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| std::env::temp_dir())
+                    .join("ork-uv-cache");
+                let _ = std::fs::create_dir_all(&cache_dir);
+                env_vars.insert(
+                    "UV_CACHE_DIR".to_string(),
+                    cache_dir.to_string_lossy().to_string(),
+                );
+            }
+
             for (key, value) in env_vars.iter() {
                 cmd.env(key, value);
             }
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-            let mut child = match cmd.spawn() {
+                let mut child = match cmd.spawn() {
                 Ok(child) => child,
                 Err(e) => {
-                    warn!("Failed to execute process {}: {}", exec_id_clone, e);
+                    warn!(
+                        "Failed to execute task {} (execution {}): {}",
+                        task_label_clone, exec_id_clone, e
+                    );
                     return;
                 }
             };
@@ -228,12 +250,18 @@ impl ProcessExecutor {
                         info!("Process completed successfully: {}", exec_id_clone);
                         ProcessStatus::Success
                     } else {
-                        warn!("Process failed: {}", exec_id_clone);
+                        warn!(
+                            "Process failed for task {}: {}",
+                            task_label_clone, exec_id_clone
+                        );
                         ProcessStatus::Failed
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to execute process {}: {}", exec_id_clone, e);
+                    warn!(
+                        "Failed to execute task {} (execution {}): {}",
+                        task_label_clone, exec_id_clone, e
+                    );
                     ProcessStatus::Failed
                 }
             };
@@ -262,7 +290,10 @@ impl ProcessExecutor {
                     None
                 };
                 let error = if matches!(status, ProcessStatus::Failed) {
-                    Some(format!("process {} failed", exec_id_clone))
+                    Some(format!(
+                        "process failed for task {} (execution {})",
+                        task_label_clone, exec_id_clone
+                    ))
                 } else {
                     None
                 };
@@ -383,7 +414,7 @@ fn resolve_command_path(_working_dir: &str, command: &str) -> String {
     format!("./{}", command)
 }
 
-fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> Command {
+fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> (Command, bool) {
     let root = python_path
         .cloned()
         .or_else(|| find_project_root(task_file))
@@ -392,9 +423,9 @@ fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> Comm
     {
         let mut cmd = Command::new("uv");
         cmd.args(["run", "python3"]);
-        cmd
+        (cmd, true)
     } else {
-        Command::new("python3")
+        (Command::new("python3"), false)
     }
 }
 

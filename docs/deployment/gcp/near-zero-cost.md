@@ -70,7 +70,7 @@ Single worker service account with broad permissions across GCS and BigQuery. Al
 - Ork Worker: `storage.objectAdmin`, `bigquery.dataEditor`, `bigquery.jobUser`
 - Ork Scheduler: `datastore.user`, `run.developer`, `storage.objectAdmin` (ork bucket)
 
-See [`/examples/deployment/gcp-shared-permissions/`](/examples/deployment/gcp-shared-permissions/) for complete Terraform setup.
+See [`/examples/deployments/gcp-shared-permissions/`](/examples/deployments/gcp-shared-permissions/) for complete Terraform setup.
 
 ### ELT Isolated Permissions
 
@@ -87,7 +87,7 @@ Three worker service accounts with minimal permissions each. Extract has interne
 - External VPC connector (with internet) for extract workers
 - Internal VPC connector (egress blocked) for transform workers
 
-See [`/examples/deployment/gcp-elt-isolated/`](/examples/deployment/gcp-elt-isolated/) for complete Terraform setup.
+See [`/examples/deployments/gcp-elt-isolated/`](/examples/deployments/gcp-elt-isolated/) for complete Terraform setup.
 
 ## Worker Configuration
 

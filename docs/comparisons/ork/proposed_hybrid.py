@@ -1,6 +1,6 @@
 """
 Proposed Ork Implementation - Hybrid Approach
-Same as examples/demo - greeting followed by compliment
+Same as examples/workflows/demo - greeting followed by compliment
 
 This shows a PROPOSED hybrid: Python tasks with optional Pydantic.
 

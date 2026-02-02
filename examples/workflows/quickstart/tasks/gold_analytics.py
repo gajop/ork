@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 from src.pipeline import create_gold_analytics
@@ -10,10 +12,11 @@ class SilverOutput(BaseModel):
 
 
 class GoldAnalyticsInput(BaseModel):
-    silver_posts: SilverOutput
-    silver_comments: SilverOutput
-    silver_users: SilverOutput
     db_path: str
+    silver_posts: Optional[SilverOutput] = None
+    silver_comments: Optional[SilverOutput] = None
+    silver_users: Optional[SilverOutput] = None
+    upstream: Optional[dict[str, SilverOutput]] = None
 
 
 class GoldAnalyticsOutput(BaseModel):

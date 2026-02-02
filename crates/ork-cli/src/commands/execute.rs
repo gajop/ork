@@ -113,13 +113,18 @@ impl Execute {
         match result {
             Ok(Ok(())) => {
                 let elapsed = start_time.elapsed();
-                let run_info = db.get_run(run.id).await?;
                 let tasks = db.list_tasks(run.id).await?;
 
                 let success_count = tasks.iter().filter(|t| t.status_str() == "success").count();
                 let failed_count = tasks.iter().filter(|t| t.status_str() == "failed").count();
+                let run_status = if failed_count > 0 { "failed" } else { "success" };
 
-                if run_info.status_str() == "success" {
+                let run_info = db.get_run(run.id).await?;
+                if run_info.status_str() != "success" && run_info.status_str() != "failed" {
+                    let _ = db.update_run_status(run.id, run_status, None).await;
+                }
+
+                if run_status == "success" {
                     println!("✓ Run completed successfully in {:.2}s", elapsed.as_secs_f64());
                 } else {
                     println!("✗ Run failed in {:.2}s", elapsed.as_secs_f64());
@@ -129,22 +134,60 @@ impl Execute {
                 println!();
 
                 // Show task details
+                let format_dt = |dt: chrono::DateTime<chrono::Utc>| {
+                    let base = dt.format("%Y-%m-%dT%H:%M:%S").to_string();
+                    let centis = dt.timestamp_subsec_millis() / 10;
+                    format!("{base}.{:02}Z", centis)
+                };
+
                 println!("Tasks:");
-                println!("{:<20} {:<15} {:<10}", "Name", "Status", "Duration");
-                println!("{}", "-".repeat(50));
+                println!(
+                    "{:<20} {:<15} {:<10} {:<8} {:<24} {:<24}",
+                    "Name", "Status", "Duration", "Attempts", "Started", "Finished"
+                );
+                println!("{}", "-".repeat(105));
 
                 for task in &tasks {
-                    let duration = if let (Some(started), Some(finished)) = (task.started_at, task.finished_at) {
+                    let duration = if let (Some(started), Some(finished)) =
+                        (task.started_at, task.finished_at)
+                    {
                         let duration = finished.signed_duration_since(started);
-                        format!("{:.3}s", duration.num_milliseconds() as f64 / 1000.0)
+                        format!("{:.2}s", duration.num_milliseconds() as f64 / 1000.0)
                     } else {
                         "-".to_string()
                     };
+                    let status_str = task.status_str();
+                    let attempt_count = match status_str {
+                        "success" | "running" | "dispatched" => task.attempts + 1,
+                        "failed" => task.attempts,
+                        _ => task.attempts,
+                    };
+                    let attempts_display = if attempt_count > 0 {
+                        attempt_count.to_string()
+                    } else {
+                        "-".to_string()
+                    };
+                    let started = task
+                        .started_at
+                        .map(format_dt)
+                        .unwrap_or_else(|| "-".to_string());
+                    let finished = task
+                        .finished_at
+                        .map(format_dt)
+                        .unwrap_or_else(|| "-".to_string());
 
-                    println!("{:<20} {:<15} {:<10}", task.task_name, task.status_str(), duration);
+                    println!(
+                        "{:<20} {:<15} {:<10} {:<8} {:<24} {:<24}",
+                        task.task_name,
+                        status_str,
+                        duration,
+                        attempts_display,
+                        started,
+                        finished
+                    );
                 }
 
-                if run_info.status_str() != "success" {
+                if run_status != "success" {
                     std::process::exit(1);
                 }
 

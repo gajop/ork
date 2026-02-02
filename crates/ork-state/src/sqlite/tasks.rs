@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{SecondsFormat, Utc};
 use std::collections::HashMap;
 use uuid::Uuid;
 use sqlx::Row;
@@ -51,9 +51,9 @@ impl SqliteDatabase {
             r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
             attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
             retry_at = CASE WHEN ? IN ('pending', 'paused') THEN retry_at ELSE NULL END,
-            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN CURRENT_TIMESTAMP ELSE dispatched_at END,
-            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END
+            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE dispatched_at END,
+            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
+            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
             WHERE id = ?"#,
         )
         .bind(status).bind(execution_name).bind(error).bind(status).bind(status).bind(status).bind(status).bind(status).bind(task_id)
@@ -78,9 +78,9 @@ impl SqliteDatabase {
             r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
             attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
             retry_at = CASE WHEN ? IN ('pending', 'paused') THEN retry_at ELSE NULL END,
-            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN CURRENT_TIMESTAMP ELSE dispatched_at END,
-            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END
+            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE dispatched_at END,
+            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
+            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
             WHERE id = ?"#,
         )
         .bind(status).bind(execution_name).bind(error).bind(status).bind(status).bind(status).bind(status).bind(status).bind(task_id)
@@ -119,7 +119,7 @@ impl SqliteDatabase {
     }
 
     pub(super) async fn reset_task_for_retry_impl(&self, task_id: Uuid, error: Option<&str>, retry_at: Option<chrono::DateTime<Utc>>) -> Result<()> {
-        let retry_str = retry_at.map(|dt| dt.to_rfc3339());
+        let retry_str = retry_at.map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true));
         sqlx::query(
             r#"UPDATE tasks SET status = 'pending', attempts = attempts + 1, retry_at = ?,
             error = COALESCE(?, error), execution_name = NULL, output = NULL, dispatched_at = NULL, started_at = NULL, finished_at = NULL
@@ -137,7 +137,7 @@ impl SqliteDatabase {
             FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
             WHERE t.status = 'pending'
             AND r.status = 'running'
-            AND (t.retry_at IS NULL OR t.retry_at <= CURRENT_TIMESTAMP)
+            AND (t.retry_at IS NULL OR datetime(t.retry_at) <= datetime('now'))
             AND (t.depends_on = '[]' OR NOT EXISTS (
                 SELECT 1 FROM json_each(t.depends_on) AS dep
                 WHERE NOT EXISTS (

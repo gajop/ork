@@ -14,17 +14,37 @@ example-up: up
 up-sqlite:
     ./scripts/dev-up-sqlite.sh
 
-# Create + trigger an example workflow by folder name (expects examples/<name>/<name>.yaml).
-example-run name:
-    cargo run -p ork-cli --bin ork -- run-workflow --file "examples/{{name}}/{{name}}.yaml"
-
-example-run-sqlite name:
+# Create + trigger an example workflow by folder name (expects examples/workflows/<name>/<name>.yaml).
+example name:
     #!/usr/bin/env bash
     set -euo pipefail
     export DATABASE_URL=${DATABASE_URL:-sqlite://./.ork/ork.db?mode=rwc}
     mkdir -p .ork
     cargo run -q -p ork-cli --no-default-features --features sqlite,process --bin ork -- init >/dev/null 2>&1 || true
-    cargo run -p ork-cli --no-default-features --features sqlite,process --bin ork -- execute --file "examples/{{name}}/{{name}}.yaml"
+    file="examples/workflows/{{name}}/{{name}}.yaml"
+    if [ ! -f "$file" ]; then
+        set -- examples/workflows/{{name}}/*.yaml
+        if [ "$1" = "examples/workflows/{{name}}/*.yaml" ]; then
+            echo "No workflow yaml found for examples/workflows/{{name}}" >&2
+            exit 1
+        fi
+        if [ -n "${2-}" ]; then
+            echo "Multiple workflow yamls found for examples/workflows/{{name}}; specify one explicitly." >&2
+            exit 1
+        fi
+        file="$1"
+    fi
+    cargo run -p ork-cli --no-default-features --features sqlite,process --bin ork -- execute --file "$file"
+
+example-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in examples/workflows/*; do
+        [ -d "$dir" ] || continue
+        name="$(basename "$dir")"
+        echo "==> $name"
+        just example "$name"
+    done
 
 # Start only the scheduler (DB-backed).
 run-scheduler:
