@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Example workflow demonstrating deferrables with Ork.
 
@@ -6,10 +5,7 @@ This example shows how to use deferrables to track long-running external jobs
 without keeping the worker container running.
 """
 
-import json
 import os
-import sys
-
 from ork_sdk import BigQueryJob, CustomHttp
 
 
@@ -24,7 +20,6 @@ def simulate_bigquery_job():
 
     The worker then scales to 0, and the scheduler tracks the job.
     """
-    # Simulate BigQuery job details
     project = os.getenv("GCP_PROJECT", "my-project")
     job_id = f"simulated_job_{os.getpid()}"
     location = "US"
@@ -33,19 +28,15 @@ def simulate_bigquery_job():
     print(f"Project: {project}, Location: {location}")
 
     # Return deferrable - tells Ork to track this job
-    deferrable = BigQueryJob(
-        project=project,
-        job_id=job_id,
-        location=location
-    )
-
-    # Return as JSON with special structure
-    result = {
-        "deferred": [deferrable.to_dict()]
+    return {
+        "deferred": [
+            BigQueryJob(
+                project=project,
+                job_id=job_id,
+                location=location
+            ).to_dict()
+        ]
     }
-
-    print(f"ORK_OUTPUT:{json.dumps(result)}")
-    return result
 
 
 def simulate_custom_http_job():
@@ -62,21 +53,18 @@ def simulate_custom_http_job():
     print(f"Status URL: {status_url}")
 
     # Return CustomHttp deferrable
-    deferrable = CustomHttp(
-        url=status_url,
-        method="GET",
-        headers={"Authorization": "Bearer fake-token"},
-        completion_field="status",
-        completion_value="completed",
-        failure_value="failed"
-    )
-
-    result = {
-        "deferred": [deferrable.to_dict()]
+    return {
+        "deferred": [
+            CustomHttp(
+                url=status_url,
+                method="GET",
+                headers={"Authorization": "Bearer fake-token"},
+                completion_field="status",
+                completion_value="completed",
+                failure_value="failed"
+            ).to_dict()
+        ]
     }
-
-    print(f"ORK_OUTPUT:{json.dumps(result)}")
-    return result
 
 
 def multiple_jobs():
@@ -87,70 +75,34 @@ def multiple_jobs():
     """
     project = os.getenv("GCP_PROJECT", "my-project")
 
-    # Start multiple jobs
-    bq_job = BigQueryJob(
-        project=project,
-        job_id=f"analytics_job_{os.getpid()}",
-        location="US"
-    )
-
-    ml_job = BigQueryJob(
-        project=project,
-        job_id=f"ml_training_{os.getpid()}",
-        location="EU"
-    )
-
     print("Starting multiple BigQuery jobs")
 
-    result = {
+    return {
         "deferred": [
-            bq_job.to_dict(),
-            ml_job.to_dict()
+            BigQueryJob(
+                project=project,
+                job_id=f"analytics_job_{os.getpid()}",
+                location="US"
+            ).to_dict(),
+            BigQueryJob(
+                project=project,
+                job_id=f"ml_training_{os.getpid()}",
+                location="EU"
+            ).to_dict()
         ]
     }
 
-    print(f"ORK_OUTPUT:{json.dumps(result)}")
-    return result
 
-
-def process_results(input_data):
+def process_results(upstream):
     """
     Example of a downstream task that runs after deferred jobs complete.
 
     This task would fetch and process the results from the BigQuery tables
     that were populated by the previous task's deferred job.
     """
-    upstream = input_data.get("upstream", {})
+    print(f"Processing results from {len(upstream)} upstream tasks")
 
-    print("Processing results from upstream deferred jobs")
-    print(f"Upstream data: {json.dumps(upstream, indent=2)}")
-
-    result = {
+    return {
         "message": "Results processed successfully",
         "upstream_tasks": list(upstream.keys())
     }
-
-    print(f"ORK_OUTPUT:{json.dumps(result)}")
-    return result
-
-
-if __name__ == "__main__":
-    # Read input from environment variable
-    input_json = os.getenv("ORK_INPUT_JSON", "{}")
-    task_input = json.loads(input_json) if input_json else {}
-
-    # Get task name from params
-    task_name = task_input.get("task_name", "simulate_bigquery_job")
-
-    # Execute the appropriate task
-    if task_name == "simulate_bigquery_job":
-        simulate_bigquery_job()
-    elif task_name == "simulate_custom_http_job":
-        simulate_custom_http_job()
-    elif task_name == "multiple_jobs":
-        multiple_jobs()
-    elif task_name == "process_results":
-        process_results(task_input)
-    else:
-        print(f"Unknown task: {task_name}")
-        sys.exit(1)

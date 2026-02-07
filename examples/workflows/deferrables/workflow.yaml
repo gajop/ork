@@ -6,28 +6,24 @@ tasks:
   bigquery_job:
     executor: python
     file: tasks.py
-    params:
-      task_name: simulate_bigquery_job
+    function: simulate_bigquery_job
 
   # Task 2: Simulate a custom HTTP job
   custom_http_job:
     executor: python
     file: tasks.py
-    params:
-      task_name: simulate_custom_http_job
+    function: simulate_custom_http_job
 
   # Task 3: Multiple deferred jobs in parallel
   multiple_jobs:
     executor: python
     file: tasks.py
-    params:
-      task_name: multiple_jobs
+    function: multiple_jobs
 
   # Task 4: Process results after deferred job completes
   process_results:
     executor: python
     file: tasks.py
+    function: process_results
     depends_on:
       - bigquery_job
-    params:
-      task_name: process_results
