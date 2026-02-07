@@ -60,3 +60,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tower = "0.5"
 uuid = { version = "1.20.0", features = ["v4"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
+
+[workspace.lints.clippy]
+too_many_arguments = "allow"

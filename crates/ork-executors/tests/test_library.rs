@@ -9,7 +9,7 @@
 
 #[cfg(feature = "library")]
 mod library_tests {
-    use ork_core::executor::{Executor, StatusUpdate};
+    use ork_core::executor::Executor;
     use ork_executors::LibraryExecutor;
     use std::path::PathBuf;
     use tokio::sync::mpsc;
@@ -76,8 +76,14 @@ mod library_tests {
 
         let output = completed.output.as_ref().unwrap();
         assert!(output.get("sum").is_some(), "Output missing 'sum' field");
-        assert!(output.get("doubled").is_some(), "Output missing 'doubled' field");
-        assert!(output.get("method").is_some(), "Output missing 'method' field");
+        assert!(
+            output.get("doubled").is_some(),
+            "Output missing 'doubled' field"
+        );
+        assert!(
+            output.get("method").is_some(),
+            "Output missing 'method' field"
+        );
 
         // Verify values
         assert_eq!(output["sum"], 15); // 1+2+3+4+5 = 15
@@ -129,7 +135,10 @@ mod library_tests {
 
         let failed = updates.iter().find(|u| u.status == "failed");
         assert!(failed.is_some(), "Should have failed status update");
-        assert!(failed.unwrap().error.is_some(), "Failed update should have error message");
+        assert!(
+            failed.unwrap().error.is_some(),
+            "Failed update should have error message"
+        );
     }
 
     #[tokio::test]

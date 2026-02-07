@@ -41,9 +41,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
-    let subscriber = FmtSubscriber::builder()
-        .with_env_filter(filter)
-        .finish();
+    let subscriber = FmtSubscriber::builder().with_env_filter(filter).finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
     let Cli {
@@ -51,11 +49,10 @@ async fn main() -> Result<()> {
         database_url,
     } = Cli::parse();
 
-    if command.uses_api() {
-        if let Commands::RunWorkflow(cmd) = command {
+    if command.uses_api()
+        && let Commands::RunWorkflow(cmd) = command {
             return cmd.execute().await;
         }
-    }
 
     let database_url = std::env::var("DATABASE_URL").unwrap_or(database_url);
 

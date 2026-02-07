@@ -88,10 +88,10 @@ impl JobTracker for BigQueryTracker {
         // Call BigQuery API to get job status
         let get_request = google_cloud_bigquery::http::job::get::GetJobRequest {
             location: Some(location.to_string()),
-            ..Default::default()
         };
 
-        let job = self.client
+        let job = self
+            .client
             .job()
             .get(project, bq_job_id, &get_request)
             .await
@@ -103,8 +103,13 @@ impl JobTracker for BigQueryTracker {
             JobState::Done => {
                 // Check for errors
                 if let Some(error_result) = job.status.error_result {
-                    let error_msg = error_result.message.unwrap_or_else(|| "Unknown error".to_string());
-                    return Ok(JobStatus::Failed(format!("BigQuery job failed: {}", error_msg)));
+                    let error_msg = error_result
+                        .message
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    return Ok(JobStatus::Failed(format!(
+                        "BigQuery job failed: {}",
+                        error_msg
+                    )));
                 }
                 Ok(JobStatus::Completed)
             }
@@ -169,7 +174,8 @@ impl JobTracker for CloudRunTracker {
         );
 
         // Call Cloud Run API to get execution status
-        let execution = self.client
+        let execution = self
+            .client
             .get_execution()
             .set_name(execution_name)
             .send()
@@ -191,7 +197,10 @@ impl JobTracker for CloudRunTracker {
                         } else {
                             condition.message.clone()
                         };
-                        return Ok(JobStatus::Failed(format!("Cloud Run execution failed: {}", error_msg)));
+                        return Ok(JobStatus::Failed(format!(
+                            "Cloud Run execution failed: {}",
+                            error_msg
+                        )));
                     }
                     State::ConditionPending | State::ConditionReconciling => {
                         // Still in progress
@@ -257,7 +266,8 @@ impl JobTracker for DataprocTracker {
         );
 
         // Call Dataproc API to get job status
-        let job = self.client
+        let job = self
+            .client
             .get_job()
             .set_project_id(project)
             .set_region(region)
@@ -272,8 +282,12 @@ impl JobTracker for DataprocTracker {
             match status.state {
                 State::Done => {
                     // Job completed - check for errors in details
-                    if !status.details.is_empty() && status.details.to_lowercase().contains("error") {
-                        return Ok(JobStatus::Failed(format!("Dataproc job completed with errors: {}", status.details)));
+                    if !status.details.is_empty() && status.details.to_lowercase().contains("error")
+                    {
+                        return Ok(JobStatus::Failed(format!(
+                            "Dataproc job completed with errors: {}",
+                            status.details
+                        )));
                     }
                     Ok(JobStatus::Completed)
                 }
@@ -283,15 +297,17 @@ impl JobTracker for DataprocTracker {
                     } else {
                         status.details
                     };
-                    Ok(JobStatus::Failed(format!("Dataproc job error: {}", error_msg)))
+                    Ok(JobStatus::Failed(format!(
+                        "Dataproc job error: {}",
+                        error_msg
+                    )))
                 }
-                State::Cancelled => {
-                    Ok(JobStatus::Failed("Job was cancelled".to_string()))
-                }
-                State::Pending | State::SetupDone | State::Running |
-                State::CancelPending | State::CancelStarted => {
-                    Ok(JobStatus::Running)
-                }
+                State::Cancelled => Ok(JobStatus::Failed("Job was cancelled".to_string())),
+                State::Pending
+                | State::SetupDone
+                | State::Running
+                | State::CancelPending
+                | State::CancelStarted => Ok(JobStatus::Running),
                 _ => {
                     // Unknown state, assume running
                     Ok(JobStatus::Running)
@@ -372,9 +388,7 @@ impl JobTracker for CustomHttpTracker {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing completion_value in job_data"))?;
 
-        let failure_value = job_data
-            .get("failure_value")
-            .and_then(|v| v.as_str());
+        let failure_value = job_data.get("failure_value").and_then(|v| v.as_str());
 
         // Build HTTP request
         let mut request = match method.to_uppercase().as_str() {
@@ -422,13 +436,13 @@ impl JobTracker for CustomHttpTracker {
         }
 
         // Check if job failed
-        if let Some(fail_val) = failure_value {
-            if field_value == fail_val {
-                return Ok(JobStatus::Failed(format!(
-                    "Job failed with status: {}",
-                    field_value
-                )));
-            }
+        if let Some(fail_val) = failure_value
+            && field_value == fail_val
+        {
+            return Ok(JobStatus::Failed(format!(
+                "Job failed with status: {}",
+                field_value
+            )));
         }
 
         // Job is still running
@@ -437,45 +451,4 @@ impl JobTracker for CustomHttpTracker {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_custom_http_tracker_service_type() {
-        let tracker = CustomHttpTracker::new();
-        assert_eq!(tracker.service_type(), "custom_http");
-    }
-
-    #[tokio::test]
-    async fn test_custom_http_validates_url() {
-        let tracker = CustomHttpTracker::new();
-        let invalid_data = json!({});
-        let result = tracker.poll_job("test-job", &invalid_data).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing url"));
-    }
-
-    #[tokio::test]
-    async fn test_custom_http_validates_completion_field() {
-        let tracker = CustomHttpTracker::new();
-        let invalid_data = json!({
-            "url": "http://example.com/status"
-        });
-        let result = tracker.poll_job("test-job", &invalid_data).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing completion_field"));
-    }
-
-    #[tokio::test]
-    async fn test_custom_http_validates_completion_value() {
-        let tracker = CustomHttpTracker::new();
-        let invalid_data = json!({
-            "url": "http://example.com/status",
-            "completion_field": "status"
-        });
-        let result = tracker.poll_job("test-job", &invalid_data).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing completion_value"));
-    }
-}
+mod tests;

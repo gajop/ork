@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use std::path::PathBuf;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[derive(Args)]
 pub struct RunWorkflow {

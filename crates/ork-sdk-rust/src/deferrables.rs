@@ -289,19 +289,13 @@ impl<T> TaskResult<T> {
 
     /// Create a result with only deferrables
     pub fn deferred(deferrables: Vec<Box<dyn Deferrable>>) -> Self {
-        let deferred = deferrables
-            .iter()
-            .map(|d| d.to_json())
-            .collect();
+        let deferred = deferrables.iter().map(|d| d.to_json()).collect();
         TaskResult::Deferred { deferred }
     }
 
     /// Create a result with both data and deferrables
     pub fn mixed(data: T, deferrables: Vec<Box<dyn Deferrable>>) -> Self {
-        let deferred = deferrables
-            .iter()
-            .map(|d| d.to_json())
-            .collect();
+        let deferred = deferrables.iter().map(|d| d.to_json()).collect();
         TaskResult::Mixed { data, deferred }
     }
 }

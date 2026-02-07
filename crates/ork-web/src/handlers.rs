@@ -7,7 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::{ApiServer, is_not_found, fmt_time};
+use crate::api::{ApiServer, fmt_time, is_not_found};
 use crate::workflow_tasks::build_workflow_tasks;
 use ork_core::models::json_inner;
 
@@ -75,11 +75,7 @@ pub async fn create_workflow(
                 {
                     Ok(wf) => wf,
                     Err(err) => {
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            err.to_string(),
-                        )
-                            .into_response()
+                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
                     }
                 }
             } else {

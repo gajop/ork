@@ -58,7 +58,8 @@ impl FileDatabase {
             if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
                 if let Ok(job) = serde_json::from_str::<DeferredJob>(&content) {
                     let status = job.status();
-                    if status == DeferredJobStatus::Pending || status == DeferredJobStatus::Polling {
+                    if status == DeferredJobStatus::Pending || status == DeferredJobStatus::Polling
+                    {
                         jobs.push(job);
                     }
                 }
@@ -200,7 +201,9 @@ impl FileDatabase {
                 if let Ok(mut job) = serde_json::from_str::<DeferredJob>(&content) {
                     if job.task_id == task_id {
                         let status = job.status();
-                        if status == DeferredJobStatus::Pending || status == DeferredJobStatus::Polling {
+                        if status == DeferredJobStatus::Pending
+                            || status == DeferredJobStatus::Polling
+                        {
                             job.status = "cancelled".to_string();
                             job.finished_at = Some(now);
 

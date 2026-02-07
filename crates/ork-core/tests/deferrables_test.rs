@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use ork_core::job_tracker::{JobStatus, JobTracker};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -48,11 +48,20 @@ async fn test_mock_tracker_completes_after_n_polls() -> Result<()> {
     let job_data = json!({"test": "data"});
 
     // First two polls should return Running
-    assert!(matches!(tracker.poll_job("job_1", &job_data).await?, JobStatus::Running));
-    assert!(matches!(tracker.poll_job("job_1", &job_data).await?, JobStatus::Running));
+    assert!(matches!(
+        tracker.poll_job("job_1", &job_data).await?,
+        JobStatus::Running
+    ));
+    assert!(matches!(
+        tracker.poll_job("job_1", &job_data).await?,
+        JobStatus::Running
+    ));
 
     // Third poll should return Completed
-    assert!(matches!(tracker.poll_job("job_1", &job_data).await?, JobStatus::Completed));
+    assert!(matches!(
+        tracker.poll_job("job_1", &job_data).await?,
+        JobStatus::Completed
+    ));
 
     Ok(())
 }
@@ -64,16 +73,28 @@ async fn test_mock_tracker_tracks_separate_jobs() -> Result<()> {
     let job_data = json!({});
 
     // Poll job_1 once
-    assert!(matches!(tracker.poll_job("job_1", &job_data).await?, JobStatus::Running));
+    assert!(matches!(
+        tracker.poll_job("job_1", &job_data).await?,
+        JobStatus::Running
+    ));
 
     // Poll job_2 once
-    assert!(matches!(tracker.poll_job("job_2", &job_data).await?, JobStatus::Running));
+    assert!(matches!(
+        tracker.poll_job("job_2", &job_data).await?,
+        JobStatus::Running
+    ));
 
     // Poll job_1 again - should complete
-    assert!(matches!(tracker.poll_job("job_1", &job_data).await?, JobStatus::Completed));
+    assert!(matches!(
+        tracker.poll_job("job_1", &job_data).await?,
+        JobStatus::Completed
+    ));
 
     // Poll job_2 again - should complete
-    assert!(matches!(tracker.poll_job("job_2", &job_data).await?, JobStatus::Completed));
+    assert!(matches!(
+        tracker.poll_job("job_2", &job_data).await?,
+        JobStatus::Completed
+    ));
 
     Ok(())
 }

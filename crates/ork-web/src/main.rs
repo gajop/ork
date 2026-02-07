@@ -6,12 +6,12 @@ use tracing_subscriber::EnvFilter;
 use ork_web::api::ApiServer;
 use std::sync::Arc;
 
+#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+use ork_core::database::Database;
 #[cfg(feature = "postgres")]
 use ork_state::PostgresDatabase;
 #[cfg(feature = "sqlite")]
 use ork_state::SqliteDatabase;
-#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
-use ork_core::database::Database;
 
 #[derive(Parser, Debug)]
 #[command(name = "ork-web", about = "Serve the Ork web UI and API")]

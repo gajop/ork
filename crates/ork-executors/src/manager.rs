@@ -12,10 +12,10 @@ use ork_core::models::{ExecutorType, Workflow};
 
 #[cfg(feature = "cloudrun")]
 use crate::cloud_run::CloudRunClient;
-#[cfg(feature = "process")]
-use crate::process::ProcessExecutor;
 #[cfg(feature = "library")]
 use crate::library::LibraryExecutor;
+#[cfg(feature = "process")]
+use crate::process::ProcessExecutor;
 
 pub struct ExecutorManager {
     #[cfg(feature = "process")]
@@ -24,6 +24,12 @@ pub struct ExecutorManager {
     library_executor: Arc<LibraryExecutor>,
     #[cfg(feature = "cloudrun")]
     cloudrun_clients: Arc<RwLock<HashMap<(String, String), Arc<CloudRunClient>>>>,
+}
+
+impl Default for ExecutorManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ExecutorManager {
@@ -48,7 +54,7 @@ impl ExecutorManagerTrait for ExecutorManager {
     ) -> Result<Arc<dyn Executor>> {
         #[cfg(not(feature = "cloudrun"))]
         let _ = workflow;
-        let executor_type = ExecutorType::from_str(executor_type)
+        let executor_type = ExecutorType::parse(executor_type)
             .ok_or_else(|| anyhow::anyhow!("Unknown executor type: {}", executor_type))?;
 
         let executor: Arc<dyn Executor> = match executor_type {

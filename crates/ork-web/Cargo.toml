@@ -27,3 +27,6 @@ ork-state = { path = "../ork-state" }
 [dev-dependencies]
 ork-state = { path = "../ork-state", features = ["sqlite"] }
 tower = { workspace = true }
+
+[lints]
+workspace = true

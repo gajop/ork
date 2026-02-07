@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 use ork_core::config::OrchestratorConfig;
 use ork_core::database::Database;
@@ -20,7 +20,9 @@ async fn test_dag_execution_order_and_performance() -> Result<()> {
 
     // Create workflow with A -> B -> C dependency chain
     let workflow = db
-        .create_workflow("test_dag", None, "test", "local", "local", "process", None, None)
+        .create_workflow(
+            "test_dag", None, "test", "local", "local", "process", None, None,
+        )
         .await?;
 
     let run = db.create_run(workflow.id, "test").await?;
@@ -72,6 +74,7 @@ async fn test_dag_execution_order_and_performance() -> Result<()> {
         max_concurrent_dispatches: 10,
         max_concurrent_status_checks: 50,
         db_pool_size: 5,
+        enable_triggerer: false,
     };
 
     let scheduler = Scheduler::new_with_config(db.clone(), executor_manager, config);
@@ -95,7 +98,10 @@ async fn test_dag_execution_order_and_performance() -> Result<()> {
 
     scheduler_handle.abort();
 
-    assert!(result.is_ok(), "Test timed out waiting for tasks to complete");
+    assert!(
+        result.is_ok(),
+        "Test timed out waiting for tasks to complete"
+    );
     let total_duration = start_time.elapsed();
 
     // Verify results
@@ -112,8 +118,16 @@ async fn test_dag_execution_order_and_performance() -> Result<()> {
             task.task_name,
             task.status_str()
         );
-        assert!(task.started_at.is_some(), "Task {} should have started", task.task_name);
-        assert!(task.finished_at.is_some(), "Task {} should have finished", task.task_name);
+        assert!(
+            task.started_at.is_some(),
+            "Task {} should have started",
+            task.task_name
+        );
+        assert!(
+            task.finished_at.is_some(),
+            "Task {} should have finished",
+            task.task_name
+        );
         assert!(
             task.finished_at.unwrap() >= task.started_at.unwrap(),
             "Task {} finished before starting",

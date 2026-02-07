@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 use ork_core::config::OrchestratorConfig;
 use ork_core::database::Database;
@@ -16,7 +16,16 @@ async fn test_run_pause_blocks_dispatch_until_resumed() -> Result<()> {
     let executor_manager = Arc::new(ExecutorManager::new());
 
     let workflow = db
-        .create_workflow("pause_run", None, "test", "local", "local", "process", None, None)
+        .create_workflow(
+            "pause_run",
+            None,
+            "test",
+            "local",
+            "local",
+            "process",
+            None,
+            None,
+        )
         .await?;
     let run = db.create_run(workflow.id, "test").await?;
 
@@ -41,6 +50,7 @@ async fn test_run_pause_blocks_dispatch_until_resumed() -> Result<()> {
         max_concurrent_dispatches: 10,
         max_concurrent_status_checks: 50,
         db_pool_size: 5,
+        enable_triggerer: false,
     };
     let scheduler = Scheduler::new_with_config(db.clone(), executor_manager, config);
     let scheduler_handle = tokio::spawn(async move {
@@ -71,7 +81,10 @@ async fn test_run_pause_blocks_dispatch_until_resumed() -> Result<()> {
 
     scheduler_handle.abort();
 
-    assert!(result.is_ok(), "Timed out waiting for task to complete after resume");
+    assert!(
+        result.is_ok(),
+        "Timed out waiting for task to complete after resume"
+    );
     let all_tasks = db.list_tasks(run.id).await?;
     assert!(all_tasks.iter().all(|t| t.status_str() == "success"));
 
@@ -86,7 +99,16 @@ async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
     let executor_manager = Arc::new(ExecutorManager::new());
 
     let workflow = db
-        .create_workflow("pause_task", None, "test", "local", "local", "process", None, None)
+        .create_workflow(
+            "pause_task",
+            None,
+            "test",
+            "local",
+            "local",
+            "process",
+            None,
+            None,
+        )
         .await?;
     let run = db.create_run(workflow.id, "test").await?;
 
@@ -113,6 +135,7 @@ async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
         max_concurrent_dispatches: 10,
         max_concurrent_status_checks: 50,
         db_pool_size: 5,
+        enable_triggerer: false,
     };
     let scheduler = Scheduler::new_with_config(db.clone(), executor_manager, config);
     let scheduler_handle = tokio::spawn(async move {
@@ -127,7 +150,8 @@ async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
     assert!(paused.iter().all(|t| t.started_at.is_none()));
     assert!(paused.iter().all(|t| t.finished_at.is_none()));
 
-    db.update_task_status(task.id, "pending", None, None).await?;
+    db.update_task_status(task.id, "pending", None, None)
+        .await?;
 
     let result = timeout(Duration::from_millis(300), async {
         loop {
@@ -143,7 +167,10 @@ async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
 
     scheduler_handle.abort();
 
-    assert!(result.is_ok(), "Timed out waiting for task to complete after resume");
+    assert!(
+        result.is_ok(),
+        "Timed out waiting for task to complete after resume"
+    );
     let all_tasks = db.list_tasks(run.id).await?;
     assert!(all_tasks.iter().all(|t| t.status_str() == "success"));
 

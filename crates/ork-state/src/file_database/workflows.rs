@@ -39,7 +39,8 @@ impl FileDatabase {
             updated_at: Utc::now(),
         };
 
-        self.write_json(&self.workflow_path(workflow.id), &workflow).await?;
+        self.write_json(&self.workflow_path(workflow.id), &workflow)
+            .await?;
         Ok(workflow)
     }
 
@@ -84,7 +85,10 @@ impl FileDatabase {
         Ok(())
     }
 
-    pub(super) async fn get_workflows_by_ids_impl(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+    pub(super) async fn get_workflows_by_ids_impl(
+        &self,
+        workflow_ids: &[Uuid],
+    ) -> Result<Vec<Workflow>> {
         let mut workflows = Vec::new();
         for id in workflow_ids {
             if let Ok(workflow) = self.read_json::<Workflow>(&self.workflow_path(*id)).await {
@@ -118,11 +122,15 @@ impl FileDatabase {
                 created_at: now,
             });
         }
-        self.write_json(&self.workflow_tasks_path(workflow_id), &workflow_tasks).await?;
+        self.write_json(&self.workflow_tasks_path(workflow_id), &workflow_tasks)
+            .await?;
         Ok(())
     }
 
-    pub(super) async fn list_workflow_tasks_impl(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+    pub(super) async fn list_workflow_tasks_impl(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Vec<WorkflowTask>> {
         let path = self.workflow_tasks_path(workflow_id);
         if !path.exists() {
             return Ok(Vec::new());

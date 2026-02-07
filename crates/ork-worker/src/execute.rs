@@ -4,7 +4,7 @@
 //! - Executes a specific task from the workflow
 //! - Returns output or deferred job information
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use ork_core::executor::Executor;
 use ork_executors::process::ProcessExecutor;
 use serde::{Deserialize, Serialize};
@@ -59,8 +59,7 @@ pub async fn execute_handler(
             // Check if output contains deferrables
             let deferred = output
                 .get("deferred")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.clone());
+                .and_then(|v| v.as_array()).cloned();
 
             if deferred.is_some() {
                 info!("Task {} returned deferrables", req.task_name);

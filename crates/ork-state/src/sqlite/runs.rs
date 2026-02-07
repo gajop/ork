@@ -7,7 +7,11 @@ use ork_core::models::Run;
 use super::core::SqliteDatabase;
 
 impl SqliteDatabase {
-    pub(super) async fn create_run_impl(&self, workflow_id: Uuid, triggered_by: &str) -> Result<Run> {
+    pub(super) async fn create_run_impl(
+        &self,
+        workflow_id: Uuid,
+        triggered_by: &str,
+    ) -> Result<Run> {
         let run_id = Uuid::new_v4();
         let run = sqlx::query_as::<_, Run>(
             r#"INSERT INTO runs (id, workflow_id, status, triggered_by) VALUES (?, ?, 'pending', ?) RETURNING *"#,
@@ -16,7 +20,12 @@ impl SqliteDatabase {
         Ok(run)
     }
 
-    pub(super) async fn update_run_status_impl(&self, run_id: Uuid, status: &str, error: Option<&str>) -> Result<()> {
+    pub(super) async fn update_run_status_impl(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
         sqlx::query(
             r#"UPDATE runs SET status = ?, error = ?,
             started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
@@ -29,19 +38,26 @@ impl SqliteDatabase {
 
     pub(super) async fn get_run_impl(&self, run_id: Uuid) -> Result<Run> {
         let run = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE id = ?")
-            .bind(run_id).fetch_one(&self.pool).await?;
+            .bind(run_id)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(run)
     }
 
     pub(super) async fn list_runs_impl(&self, workflow_id: Option<Uuid>) -> Result<Vec<Run>> {
         let runs = match workflow_id {
             Some(wf_id) => {
-                sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE workflow_id = ? ORDER BY created_at DESC")
-                    .bind(wf_id).fetch_all(&self.pool).await?
+                sqlx::query_as::<_, Run>(
+                    "SELECT * FROM runs WHERE workflow_id = ? ORDER BY created_at DESC",
+                )
+                .bind(wf_id)
+                .fetch_all(&self.pool)
+                .await?
             }
             None => {
                 sqlx::query_as::<_, Run>("SELECT * FROM runs ORDER BY created_at DESC")
-                    .fetch_all(&self.pool).await?
+                    .fetch_all(&self.pool)
+                    .await?
             }
         };
         Ok(runs)
@@ -49,7 +65,8 @@ impl SqliteDatabase {
 
     pub(super) async fn get_pending_runs_impl(&self) -> Result<Vec<Run>> {
         let runs = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE status = 'pending'")
-            .fetch_all(&self.pool).await?;
+            .fetch_all(&self.pool)
+            .await?;
         Ok(runs)
     }
 
@@ -70,7 +87,9 @@ impl SqliteDatabase {
             COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
             FROM tasks WHERE run_id = ?"#,
         )
-        .bind(run_id).fetch_one(&self.pool).await?;
+        .bind(run_id)
+        .fetch_one(&self.pool)
+        .await?;
         let total: i64 = row.get("total");
         let completed: i64 = row.get("completed");
         let failed: i64 = row.get("failed");

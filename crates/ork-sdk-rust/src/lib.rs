@@ -229,8 +229,10 @@ mod tests {
 
     #[test]
     fn test_task_output_trait() {
-        let output = TestOutput { result: 42 };
-        let _: &dyn TaskOutput = &output;
+        fn accepts_output<T: TaskOutput>(_: &T) {}
+        let output = test_task(TestInput { value: 21 });
+        assert_eq!(output.result, 42);
+        accepts_output(&output);
     }
 
     #[test]

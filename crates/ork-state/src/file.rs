@@ -41,6 +41,7 @@ impl FileStateStore {
         std::fs::create_dir_all(&self.base).ok();
         let file = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&self.lock_path)
@@ -90,12 +91,10 @@ impl StateStore for FileStateStore {
                     .await
                     .map(|ft| ft.is_file())
                     .unwrap_or(false)
+                    && let Ok(bytes) = fs::read(entry.path()).await
+                    && let Ok(run) = serde_json::from_slice::<Run>(&bytes)
                 {
-                    if let Ok(bytes) = fs::read(entry.path()).await {
-                        if let Ok(run) = serde_json::from_slice::<Run>(&bytes) {
-                            runs.push(run);
-                        }
-                    }
+                    runs.push(run);
                 }
             }
         }
@@ -114,12 +113,10 @@ impl StateStore for FileStateStore {
                     .await
                     .map(|ft| ft.is_file())
                     .unwrap_or(false)
+                    && let Ok(bytes) = fs::read(entry.path()).await
+                    && let Ok(task) = serde_json::from_slice::<TaskRun>(&bytes)
                 {
-                    if let Ok(bytes) = fs::read(entry.path()).await {
-                        if let Ok(task) = serde_json::from_slice::<TaskRun>(&bytes) {
-                            tasks.push(task);
-                        }
-                    }
+                    tasks.push(task);
                 }
             }
         }
@@ -140,21 +137,21 @@ impl StateStore for FileStateStore {
     async fn update_run_status(&self, run_id: &RunId, status: RunStatus) -> OrkResult<()> {
         let _guard = self.lock()?;
         let path = self.run_path(run_id);
-        if let Ok(bytes) = fs::read(&path).await {
-            if let Ok(mut run) = serde_json::from_slice::<Run>(&bytes) {
-                if run.started_at.is_none() && status == RunStatus::Running {
-                    run.started_at = Some(Utc::now());
-                }
-                if matches!(
-                    status,
-                    RunStatus::Success | RunStatus::Failed | RunStatus::Cancelled
-                ) {
-                    run.finished_at = Some(Utc::now());
-                }
-                run.status = status;
-                let bytes = serde_json::to_vec_pretty(&run).unwrap_or_default();
-                let _ = fs::write(path, bytes).await;
+        if let Ok(bytes) = fs::read(&path).await
+            && let Ok(mut run) = serde_json::from_slice::<Run>(&bytes)
+        {
+            if run.started_at.is_none() && status == RunStatus::Running {
+                run.started_at = Some(Utc::now());
             }
+            if matches!(
+                status,
+                RunStatus::Success | RunStatus::Failed | RunStatus::Cancelled
+            ) {
+                run.finished_at = Some(Utc::now());
+            }
+            run.status = status;
+            let bytes = serde_json::to_vec_pretty(&run).unwrap_or_default();
+            let _ = fs::write(path, bytes).await;
         }
         Ok(())
     }

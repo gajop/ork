@@ -1,8 +1,8 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
-use tower::ServiceExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tower::ServiceExt;
 use uuid::Uuid;
 
 use ork_core::database::{Database, NewTask, NewWorkflowTask};
@@ -58,6 +58,7 @@ async fn create_workflow_with_tasks(db: &SqliteDatabase, name: &str) -> ork_core
             executor_type: "process".to_string(),
             depends_on: vec![],
             params: json!({"command": "echo first"}),
+            signature: None,
         },
         NewWorkflowTask {
             task_index: 1,
@@ -65,6 +66,7 @@ async fn create_workflow_with_tasks(db: &SqliteDatabase, name: &str) -> ork_core
             executor_type: "process".to_string(),
             depends_on: vec!["first".to_string()],
             params: json!({"command": "echo second"}),
+            signature: None,
         },
     ];
     db.create_workflow_tasks(workflow.id, &tasks)
@@ -78,10 +80,7 @@ async fn create_run_with_tasks(
     workflow: &ork_core::models::Workflow,
     task_count: i32,
 ) -> Uuid {
-    let run = db
-        .create_run(workflow.id, "test")
-        .await
-        .expect("run");
+    let run = db.create_run(workflow.id, "test").await.expect("run");
     let tasks = (0..task_count)
         .map(|idx| NewTask {
             task_index: idx,
@@ -125,23 +124,12 @@ tasks:
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["name"], "api_workflow");
 
-    let (status, body) = request_json(
-        &app,
-        Method::GET,
-        "/api/workflows?limit=10&offset=0",
-        None,
-    )
-    .await;
+    let (status, body) =
+        request_json(&app, Method::GET, "/api/workflows?limit=10&offset=0", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["total"].as_u64().unwrap_or(0) >= 1);
 
-    let (status, body) = request_json(
-        &app,
-        Method::GET,
-        "/api/workflows/api_workflow",
-        None,
-    )
-    .await;
+    let (status, body) = request_json(&app, Method::GET, "/api/workflows/api_workflow", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["name"], "api_workflow");
     assert_eq!(body["tasks"].as_array().unwrap().len(), 2);
@@ -181,13 +169,7 @@ async fn test_run_list_and_detail_endpoints() {
         .await
         .expect("run status");
 
-    let (status, body) = request_json(
-        &app,
-        Method::GET,
-        "/api/runs?limit=10&offset=0",
-        None,
-    )
-    .await;
+    let (status, body) = request_json(&app, Method::GET, "/api/runs?limit=10&offset=0", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["total"].as_u64().unwrap_or(0) >= 2);
 
@@ -215,13 +197,8 @@ async fn test_run_list_and_detail_endpoints() {
         assert_eq!(item["workflow"], "runs_workflow");
     }
 
-    let (status, body) = request_json(
-        &app,
-        Method::GET,
-        &format!("/api/runs/{}", run_id),
-        None,
-    )
-    .await;
+    let (status, body) =
+        request_json(&app, Method::GET, &format!("/api/runs/{}", run_id), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["run"]["status"], "running");
 }
@@ -284,7 +261,13 @@ async fn test_task_pause_resume_endpoints() {
     let workflow = create_workflow_with_tasks(&db, "task_control").await;
     let run_id = create_run_with_tasks(&db, &workflow, 1).await;
 
-    let task = db.list_tasks(run_id).await.expect("tasks").into_iter().next().unwrap();
+    let task = db
+        .list_tasks(run_id)
+        .await
+        .expect("tasks")
+        .into_iter()
+        .next()
+        .unwrap();
 
     let (status, _) = request_json(
         &app,
@@ -294,7 +277,13 @@ async fn test_task_pause_resume_endpoints() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let task = db.list_tasks(run_id).await.expect("tasks").into_iter().next().unwrap();
+    let task = db
+        .list_tasks(run_id)
+        .await
+        .expect("tasks")
+        .into_iter()
+        .next()
+        .unwrap();
     assert_eq!(task.status_str(), "paused");
 
     let (status, _) = request_json(
@@ -305,6 +294,12 @@ async fn test_task_pause_resume_endpoints() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let task = db.list_tasks(run_id).await.expect("tasks").into_iter().next().unwrap();
+    let task = db
+        .list_tasks(run_id)
+        .await
+        .expect("tasks")
+        .into_iter()
+        .next()
+        .unwrap();
     assert_eq!(task.status_str(), "pending");
 }

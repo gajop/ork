@@ -110,7 +110,10 @@ def partial_add(a: int, b) -> int:
     // This should fail because 'b' is not typed
     let result = workflow.compile(temp_dir.path());
 
-    assert!(result.is_err(), "Compilation should fail for partially typed tasks");
+    assert!(
+        result.is_err(),
+        "Compilation should fail for partially typed tasks"
+    );
 
     let err_msg = result.unwrap_err().to_string();
     assert!(

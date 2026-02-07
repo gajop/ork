@@ -8,11 +8,11 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use libloading::{Library, Symbol};
 use ork_core::executor::{Executor, StatusUpdate};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -56,9 +56,8 @@ impl LibraryExecutor {
 
         // Load the dynamic library
         let lib = unsafe {
-            Library::new(library_path).map_err(|e| {
-                anyhow!("Failed to load library {}: {}", library_path.display(), e)
-            })?
+            Library::new(library_path)
+                .map_err(|e| anyhow!("Failed to load library {}: {}", library_path.display(), e))?
         };
 
         // Load the task run function
@@ -88,7 +87,10 @@ impl LibraryExecutor {
         let input_cstring =
             CString::new(input_json).map_err(|e| anyhow!("Invalid input JSON: {}", e))?;
 
-        debug!("Calling ork_task_run with input: {}", input_cstring.to_string_lossy());
+        debug!(
+            "Calling ork_task_run with input: {}",
+            input_cstring.to_string_lossy()
+        );
 
         // Call the task function
         let output_ptr = unsafe { task_run(input_cstring.as_ptr()) };

@@ -244,10 +244,10 @@ async fn main() -> Result<()> {
         let elapsed = start_time.elapsed().as_secs_f64();
 
         // Read new lines from log file since last position
-        if let Ok(mut file) = std::fs::File::open(&scheduler_log_path) {
-            if file.seek(SeekFrom::Start(log_position)).is_ok() {
+        if let Ok(mut file) = std::fs::File::open(&scheduler_log_path)
+            && file.seek(SeekFrom::Start(log_position)).is_ok() {
                 let reader = BufReader::new(&file);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     if let Some(json_start) = line.find("SCHEDULER_METRICS: ") {
                         let json_str = &line[json_start + "SCHEDULER_METRICS: ".len()..];
                         if let Ok(metrics) = serde_json::from_str::<SchedulerMetrics>(json_str) {
@@ -260,7 +260,6 @@ async fn main() -> Result<()> {
                     log_position = metadata.len();
                 }
             }
-        }
 
         // Show cumulative metrics with both absolute values and percentages
         let metrics_display = if !all_metrics.is_empty() {

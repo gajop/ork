@@ -1,14 +1,13 @@
-use std::collections::{HashMap, HashSet};
 use axum::{
     Json,
-    extract::{Path, Query, State, ws::{WebSocket, WebSocketUpgrade}},
+    extract::{
+        Path, Query, State,
+    },
     http::StatusCode,
-    response::Html,
     response::IntoResponse,
 };
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use ork_core::database::Database;
@@ -261,7 +260,10 @@ pub(crate) async fn workflow_detail(
     .into_response()
 }
 
-pub(crate) async fn cancel_run(State(api): State<ApiServer>, Path(id): Path<String>) -> impl IntoResponse {
+pub(crate) async fn cancel_run(
+    State(api): State<ApiServer>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let run_id = match Uuid::parse_str(&id) {
         Ok(rid) => rid,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -279,7 +281,10 @@ pub(crate) async fn cancel_run(State(api): State<ApiServer>, Path(id): Path<Stri
     }
 }
 
-pub(crate) async fn pause_run(State(api): State<ApiServer>, Path(id): Path<String>) -> impl IntoResponse {
+pub(crate) async fn pause_run(
+    State(api): State<ApiServer>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let run_id = match Uuid::parse_str(&id) {
         Ok(rid) => rid,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -307,7 +312,10 @@ pub(crate) async fn pause_run(State(api): State<ApiServer>, Path(id): Path<Strin
     }
 }
 
-pub(crate) async fn resume_run(State(api): State<ApiServer>, Path(id): Path<String>) -> impl IntoResponse {
+pub(crate) async fn resume_run(
+    State(api): State<ApiServer>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let run_id = match Uuid::parse_str(&id) {
         Ok(rid) => rid,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -326,7 +334,11 @@ pub(crate) async fn resume_run(State(api): State<ApiServer>, Path(id): Path<Stri
         Ok(tasks) => tasks,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let new_status = if tasks.is_empty() { "pending" } else { "running" };
+    let new_status = if tasks.is_empty() {
+        "pending"
+    } else {
+        "running"
+    };
     match api.db.update_run_status(run_id, new_status, None).await {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
@@ -340,7 +352,10 @@ pub(crate) async fn resume_run(State(api): State<ApiServer>, Path(id): Path<Stri
     }
 }
 
-pub(crate) async fn pause_task(State(api): State<ApiServer>, Path(id): Path<String>) -> impl IntoResponse {
+pub(crate) async fn pause_task(
+    State(api): State<ApiServer>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let task_id = match Uuid::parse_str(&id) {
         Ok(tid) => tid,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -364,7 +379,11 @@ pub(crate) async fn pause_task(State(api): State<ApiServer>, Path(id): Path<Stri
         "dispatched" | "running" => return StatusCode::CONFLICT.into_response(),
         _ => return StatusCode::CONFLICT.into_response(),
     }
-    match api.db.update_task_status(task_id, "paused", None, None).await {
+    match api
+        .db
+        .update_task_status(task_id, "paused", None, None)
+        .await
+    {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::TaskUpdated {
                 run_id: run_id.to_string(),
@@ -378,7 +397,10 @@ pub(crate) async fn pause_task(State(api): State<ApiServer>, Path(id): Path<Stri
     }
 }
 
-pub(crate) async fn resume_task(State(api): State<ApiServer>, Path(id): Path<String>) -> impl IntoResponse {
+pub(crate) async fn resume_task(
+    State(api): State<ApiServer>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let task_id = match Uuid::parse_str(&id) {
         Ok(tid) => tid,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -400,7 +422,11 @@ pub(crate) async fn resume_task(State(api): State<ApiServer>, Path(id): Path<Str
         "paused" => {}
         _ => return StatusCode::CONFLICT.into_response(),
     }
-    match api.db.update_task_status(task_id, "pending", None, None).await {
+    match api
+        .db
+        .update_task_status(task_id, "pending", None, None)
+        .await
+    {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::TaskUpdated {
                 run_id: run_id.to_string(),
@@ -430,53 +456,16 @@ pub(crate) async fn update_workflow_schedule(
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    if let Err(_) = api.db.update_workflow_schedule(
-        workflow.id,
-        payload.schedule.as_deref(),
-        payload.enabled,
-    ).await {
+    if api
+        .db
+        .update_workflow_schedule(workflow.id, payload.schedule.as_deref(), payload.enabled)
+        .await
+        .is_err()
+    {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     StatusCode::OK.into_response()
-}
-
-pub(crate) async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(api): State<ApiServer>,
-) -> impl IntoResponse {
-    ws.on_upgrade(|socket| websocket_connection(socket, api))
-}
-
-async fn websocket_connection(socket: WebSocket, api: ApiServer) {
-    use axum::extract::ws::Message;
-
-    let (mut sender, mut receiver) = socket.split();
-    let mut rx = api.broadcast_tx.subscribe();
-
-    let mut send_task = tokio::spawn(async move {
-        while let Ok(update) = rx.recv().await {
-            let json = serde_json::to_string(&update).unwrap_or_default();
-            if sender.send(Message::Text(json.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let mut recv_task = tokio::spawn(async move {
-        while let Some(Ok(_msg)) = receiver.next().await {
-            // Client messages ignored for now (could add ping/pong here)
-        }
-    });
-
-    tokio::select! {
-        _ = (&mut send_task) => recv_task.abort(),
-        _ = (&mut recv_task) => send_task.abort(),
-    };
-}
-
-pub(crate) async fn ui() -> Html<&'static str> {
-    Html(include_str!("../ui/index.html"))
 }
 
 async fn load_workflow_names(

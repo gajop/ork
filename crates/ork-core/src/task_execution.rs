@@ -45,53 +45,44 @@ pub async fn execute_task<E: ExecutorManager>(
             *env_value = serde_json::json!({});
         }
         if let Some(env_obj) = env_value.as_object_mut() {
-            env_obj.insert(
-                "ORK_ATTEMPT".to_string(),
-                serde_json::json!(attempt_number),
-            );
+            env_obj.insert("ORK_ATTEMPT".to_string(), serde_json::json!(attempt_number));
         }
     }
 
-    if !task_with_workflow.depends_on.is_empty() {
-        if let Some(outputs) = outputs_by_run.get(&task_with_workflow.run_id) {
-            let mut upstream_map = serde_json::Map::new();
-            for dep in &task_with_workflow.depends_on {
-                let value = outputs
-                    .get(dep)
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                upstream_map.insert(dep.clone(), value);
-            }
+    if !task_with_workflow.depends_on.is_empty()
+        && let Some(outputs) = outputs_by_run.get(&task_with_workflow.run_id)
+    {
+        let mut upstream_map = serde_json::Map::new();
+        for dep in &task_with_workflow.depends_on {
+            let value = outputs.get(dep).cloned().unwrap_or(serde_json::Value::Null);
+            upstream_map.insert(dep.clone(), value);
+        }
 
-            if !upstream_map.is_empty() {
-                let upstream_value = serde_json::Value::Object(upstream_map);
-                if let Some(obj) = params.as_object_mut() {
-                    obj.entry("upstream".to_string())
-                        .or_insert(upstream_value.clone());
+        if !upstream_map.is_empty() {
+            let upstream_value = serde_json::Value::Object(upstream_map);
+            if let Some(obj) = params.as_object_mut() {
+                obj.entry("upstream".to_string())
+                    .or_insert(upstream_value.clone());
 
-                    match obj.get_mut("task_input") {
-                        Some(task_input) => {
-                            if task_input.is_null() {
-                                *task_input = serde_json::json!({
-                                    "upstream": upstream_value.clone()
-                                });
-                            } else if let Some(input_obj) = task_input.as_object_mut() {
-                                if input_obj.is_empty() {
-                                    input_obj.insert(
-                                        "upstream".to_string(),
-                                        upstream_value.clone(),
-                                    );
-                                }
-                            }
+                match obj.get_mut("task_input") {
+                    Some(task_input) => {
+                        if task_input.is_null() {
+                            *task_input = serde_json::json!({
+                                "upstream": upstream_value.clone()
+                            });
+                        } else if let Some(input_obj) = task_input.as_object_mut()
+                            && input_obj.is_empty()
+                        {
+                            input_obj.insert("upstream".to_string(), upstream_value.clone());
                         }
-                        None => {
-                            obj.insert(
-                                "task_input".to_string(),
-                                serde_json::json!({
-                                    "upstream": upstream_value.clone()
-                                }),
-                            );
-                        }
+                    }
+                    None => {
+                        obj.insert(
+                            "task_input".to_string(),
+                            serde_json::json!({
+                                "upstream": upstream_value.clone()
+                            }),
+                        );
                     }
                 }
             }
@@ -99,17 +90,13 @@ pub async fn execute_task<E: ExecutorManager>(
     }
 
     let execution_result = match executor_manager
-        .get_executor(&task_with_workflow.executor_type, &workflow)
+        .get_executor(&task_with_workflow.executor_type, workflow)
         .await
     {
         Ok(executor) => {
             executor.set_status_channel(status_tx).await;
             executor
-                .execute(
-                    task_with_workflow.task_id,
-                    &job_name,
-                    Some(params),
-                )
+                .execute(task_with_workflow.task_id, &job_name, Some(params))
                 .await
         }
         Err(e) => Err(e),

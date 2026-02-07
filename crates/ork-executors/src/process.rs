@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{RwLock, mpsc, Mutex};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -84,17 +84,17 @@ impl ProcessExecutor {
             let (mut cmd, uses_uv) = if let Some(task_file) = task_file.as_ref() {
                 let (mut python_cmd, uses_uv) =
                     build_python_command(task_file, python_path.as_ref());
-                let runner = runner_path.or_else(|| {
-                    crate::python_runtime::get_run_task_script().ok()
-                }).unwrap_or_else(|| PathBuf::from("run_python_task.py"));
+                let runner = runner_path
+                    .or_else(|| crate::python_runtime::get_run_task_script().ok())
+                    .unwrap_or_else(|| PathBuf::from("run_python_task.py"));
                 python_cmd.arg(runner);
                 (python_cmd, uses_uv)
             } else if task_module.is_some() {
                 let (mut python_cmd, uses_uv) =
                     build_python_command(Path::new("."), python_path.as_ref());
-                let runner = runner_path.or_else(|| {
-                    crate::python_runtime::get_run_task_script().ok()
-                }).unwrap_or_else(|| PathBuf::from("run_python_task.py"));
+                let runner = runner_path
+                    .or_else(|| crate::python_runtime::get_run_task_script().ok())
+                    .unwrap_or_else(|| PathBuf::from("run_python_task.py"));
                 python_cmd.arg(runner);
                 (python_cmd, uses_uv)
             } else {
@@ -125,7 +125,11 @@ impl ProcessExecutor {
                 if let Some(run_id) = env_vars.get("run_id").cloned() {
                     env_vars.insert("ORK_RUN_ID".to_string(), run_id);
                 }
-                if let Some(root) = python_path.as_ref().cloned().or_else(|| find_project_root(task_file)) {
+                if let Some(root) = python_path
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| find_project_root(task_file))
+                {
                     cmd.current_dir(&root);
                     env_vars.insert("PYTHONPATH".to_string(), root.to_string_lossy().to_string());
                 }
@@ -169,7 +173,7 @@ impl ProcessExecutor {
             }
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-                let mut child = match cmd.spawn() {
+            let mut child = match cmd.spawn() {
                 Ok(child) => child,
                 Err(e) => {
                     warn!(
@@ -190,14 +194,8 @@ impl ProcessExecutor {
                 });
             }
 
-            let stdout_reader = child
-                .stdout
-                .take()
-                .map(|out| BufReader::new(out));
-            let stderr_reader = child
-                .stderr
-                .take()
-                .map(|err| BufReader::new(err));
+            let stdout_reader = child.stdout.take().map(BufReader::new);
+            let stderr_reader = child.stderr.take().map(BufReader::new);
 
             let status_tx_logs = status_tx_clone.clone();
             let log_task_id = task_id;
@@ -212,10 +210,11 @@ impl ProcessExecutor {
                             Ok(_) => {
                                 let trimmed = line.trim_end();
                                 // Check for output prefix to distinguish from debug prints
-                                if let Some(json_str) = trimmed.strip_prefix("ORK_OUTPUT:") {
-                                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str.trim()) {
-                                        *output_store.lock().await = Some(value);
-                                    }
+                                if let Some(json_str) = trimmed.strip_prefix("ORK_OUTPUT:")
+                                    && let Ok(value) =
+                                        serde_json::from_str::<serde_json::Value>(json_str.trim())
+                                {
+                                    *output_store.lock().await = Some(value);
                                 }
                                 // Send all stdout lines as logs
                                 if let Some(tx) = status_tx_logs.read().await.as_ref() {
@@ -329,9 +328,7 @@ impl ProcessExecutor {
     }
 }
 
-fn build_env_vars(
-    params: Option<serde_json::Value>,
-) -> (
+type ProcessEnvBuild = (
     HashMap<String, String>,
     Option<PathBuf>,
     Option<String>,
@@ -339,7 +336,9 @@ fn build_env_vars(
     Option<serde_json::Value>,
     Option<PathBuf>,
     Option<PathBuf>,
-) {
+);
+
+fn build_env_vars(params: Option<serde_json::Value>) -> ProcessEnvBuild {
     let mut env_vars = HashMap::new();
     let mut task_file = None;
     let mut task_module = None;
@@ -348,48 +347,48 @@ fn build_env_vars(
     let mut runner_path = None;
     let mut python_path = None;
 
-    if let Some(params) = params {
-        if let Some(obj) = params.as_object() {
-            for (k, v) in obj.iter() {
-                match k.as_str() {
-                    "task_file" => {
-                        if let Some(path) = v.as_str() {
-                            task_file = Some(PathBuf::from(path));
-                        }
+    if let Some(params) = params
+        && let Some(obj) = params.as_object()
+    {
+        for (k, v) in obj.iter() {
+            match k.as_str() {
+                "task_file" => {
+                    if let Some(path) = v.as_str() {
+                        task_file = Some(PathBuf::from(path));
                     }
-                    "task_input" => {
-                        task_input = Some(v.clone());
-                        env_vars.insert("ORK_INPUT_JSON".to_string(), v.to_string());
+                }
+                "task_input" => {
+                    task_input = Some(v.clone());
+                    env_vars.insert("ORK_INPUT_JSON".to_string(), v.to_string());
+                }
+                "task_module" => {
+                    if let Some(module) = v.as_str() {
+                        task_module = Some(module.to_string());
                     }
-                    "task_module" => {
-                        if let Some(module) = v.as_str() {
-                            task_module = Some(module.to_string());
-                        }
+                }
+                "task_function" => {
+                    if let Some(function) = v.as_str() {
+                        task_function = Some(function.to_string());
                     }
-                    "task_function" => {
-                        if let Some(function) = v.as_str() {
-                            task_function = Some(function.to_string());
-                        }
+                }
+                "python_path" => {
+                    if let Some(path) = v.as_str() {
+                        python_path = Some(PathBuf::from(path));
                     }
-                    "python_path" => {
-                        if let Some(path) = v.as_str() {
-                            python_path = Some(PathBuf::from(path));
-                        }
+                }
+                "runner_path" => {
+                    if let Some(path) = v.as_str() {
+                        runner_path = Some(PathBuf::from(path));
                     }
-                    "runner_path" => {
-                        if let Some(path) = v.as_str() {
-                            runner_path = Some(PathBuf::from(path));
-                        }
-                    }
-                    "upstream" => {
-                        env_vars.insert("ORK_UPSTREAM_JSON".to_string(), v.to_string());
-                    }
-                    _ => {
-                        if let Some(val) = v.as_str() {
-                            env_vars.insert(k.clone(), val.to_string());
-                        } else if v.is_number() || v.is_boolean() {
-                            env_vars.insert(k.clone(), v.to_string());
-                        }
+                }
+                "upstream" => {
+                    env_vars.insert("ORK_UPSTREAM_JSON".to_string(), v.to_string());
+                }
+                _ => {
+                    if let Some(val) = v.as_str() {
+                        env_vars.insert(k.clone(), val.to_string());
+                    } else if v.is_number() || v.is_boolean() {
+                        env_vars.insert(k.clone(), v.to_string());
                     }
                 }
             }
@@ -425,8 +424,7 @@ fn build_python_command(task_file: &Path, python_path: Option<&PathBuf>) -> (Com
         .cloned()
         .or_else(|| find_project_root(task_file))
         .unwrap_or_else(|| PathBuf::from("."));
-    if root.join("pyproject.toml").exists()
-    {
+    if root.join("pyproject.toml").exists() {
         let mut cmd = Command::new("uv");
         cmd.args(["run", "python3"]);
         (cmd, true)

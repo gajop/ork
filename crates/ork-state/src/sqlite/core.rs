@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqlitePoolOptions;
 use uuid::Uuid;
 
 use ork_core::models::{Task, TaskWithWorkflow, WorkflowTask};
@@ -96,19 +96,27 @@ impl SqliteDatabase {
             .await?;
 
         // Enable foreign keys
-        sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&pool)
+            .await?;
 
         // Enable WAL mode for better concurrency (allows concurrent reads during writes)
-        sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await?;
+        sqlx::query("PRAGMA journal_mode = WAL;")
+            .execute(&pool)
+            .await?;
 
         // Reduce fsync overhead - NORMAL is safe and much faster than FULL
-        sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await?;
+        sqlx::query("PRAGMA synchronous = NORMAL;")
+            .execute(&pool)
+            .await?;
 
         Ok(Self { pool })
     }
 
     pub async fn run_migrations(&self) -> Result<()> {
-        sqlx::migrate!("./migrations_sqlite").run(&self.pool).await?;
+        sqlx::migrate!("./migrations_sqlite")
+            .run(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -126,8 +134,8 @@ impl SqliteDatabase {
             timeout_seconds: row.timeout_seconds,
             retry_at: parse_retry_at(row.retry_at),
             execution_name: row.execution_name,
-            params: row.params.map(|v| v),
-            output: row.output.map(|v| v),
+            params: row.params,
+            output: row.output,
             logs: row.logs,
             error: row.error,
             dispatched_at: row.dispatched_at,
@@ -145,7 +153,7 @@ impl SqliteDatabase {
             task_name: row.task_name,
             executor_type: row.executor_type,
             depends_on: parse_depends_on(Some(row.depends_on)),
-            params: row.params.map(|v| v),
+            params: row.params,
             created_at: row.created_at,
         }
     }
@@ -164,7 +172,7 @@ impl SqliteDatabase {
             timeout_seconds: row.timeout_seconds,
             retry_at: parse_retry_at(row.retry_at),
             execution_name: row.execution_name,
-            params: row.params.map(|v| v),
+            params: row.params,
             workflow_id: row.workflow_id,
             job_name: row.job_name,
             project: row.project,

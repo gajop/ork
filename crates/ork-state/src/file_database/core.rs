@@ -44,7 +44,8 @@ impl FileDatabase {
     }
 
     pub(super) fn workflow_tasks_path(&self, workflow_id: Uuid) -> PathBuf {
-        self.workflow_tasks_dir().join(format!("{}.json", workflow_id))
+        self.workflow_tasks_dir()
+            .join(format!("{}.json", workflow_id))
     }
 
     pub(super) async fn ensure_dirs(&self) -> Result<()> {

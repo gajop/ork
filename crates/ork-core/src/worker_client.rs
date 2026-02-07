@@ -53,9 +53,7 @@ pub enum ExecuteResponse {
         deferred: Option<Vec<serde_json::Value>>,
     },
     #[serde(rename = "failed")]
-    Failed {
-        error: String,
-    },
+    Failed { error: String },
 }
 
 impl WorkerClient {
@@ -69,10 +67,7 @@ impl WorkerClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self {
-            client,
-            worker_url,
-        }
+        Self { client, worker_url }
     }
 
     /// Compile a workflow by calling POST /compile
@@ -80,12 +75,7 @@ impl WorkerClient {
         let url = format!("{}/compile", self.worker_url);
         let req = CompileRequest { workflow_path };
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&req)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&req).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -105,14 +95,13 @@ impl WorkerClient {
     pub async fn execute(&self, req: ExecuteRequest) -> Result<ExecuteResponse> {
         let url = format!("{}/execute", self.worker_url);
 
-        tracing::debug!("Calling worker execute: task={}, executor={}", req.task_name, req.executor_type);
+        tracing::debug!(
+            "Calling worker execute: task={}, executor={}",
+            req.task_name,
+            req.executor_type
+        );
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&req)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&req).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();

@@ -5,7 +5,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use ork_core::database::NewTask;
-use ork_core::models::{json_inner, Task};
+use ork_core::models::{Task, json_inner};
 
 use super::core::FileDatabase;
 
@@ -53,7 +53,11 @@ impl FileDatabase {
         Ok(())
     }
 
-    pub(super) async fn batch_create_dag_tasks_impl(&self, run_id: Uuid, tasks: &[NewTask]) -> Result<()> {
+    pub(super) async fn batch_create_dag_tasks_impl(
+        &self,
+        run_id: Uuid,
+        tasks: &[NewTask],
+    ) -> Result<()> {
         self.ensure_dirs().await?;
         let now = Utc::now();
         for task in tasks {
@@ -79,7 +83,8 @@ impl FileDatabase {
                 "finished_at": null,
                 "created_at": now,
             }))?;
-            self.write_json(&self.task_path(task_json.id), &task_json).await?;
+            self.write_json(&self.task_path(task_json.id), &task_json)
+                .await?;
         }
         Ok(())
     }
@@ -94,11 +99,31 @@ impl FileDatabase {
         let path = self.task_path(task_id);
         let task: Task = self.read_json(&path).await?;
         let now = Utc::now();
-        let dispatched_at = if status == "dispatched" && task.dispatched_at.is_none() { Some(now) } else { task.dispatched_at };
-        let started_at = if status == "running" && task.started_at.is_none() { Some(now) } else { task.started_at };
-        let finished_at = if matches!(status, "success" | "failed") && task.finished_at.is_none() { Some(now) } else { task.finished_at };
-        let attempts = if status == "failed" { task.attempts + 1 } else { task.attempts };
-        let retry_at = if matches!(status, "pending" | "paused") { task.retry_at } else { None };
+        let dispatched_at = if status == "dispatched" && task.dispatched_at.is_none() {
+            Some(now)
+        } else {
+            task.dispatched_at
+        };
+        let started_at = if status == "running" && task.started_at.is_none() {
+            Some(now)
+        } else {
+            task.started_at
+        };
+        let finished_at = if matches!(status, "success" | "failed") && task.finished_at.is_none() {
+            Some(now)
+        } else {
+            task.finished_at
+        };
+        let attempts = if status == "failed" {
+            task.attempts + 1
+        } else {
+            task.attempts
+        };
+        let retry_at = if matches!(status, "pending" | "paused") {
+            task.retry_at
+        } else {
+            None
+        };
         let updated_task: Task = serde_json::from_value(serde_json::json!({
             "id": task.id,
             "run_id": task.run_id,
@@ -130,7 +155,8 @@ impl FileDatabase {
         updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         for (task_id, status, execution_name, error) in updates {
-            self.update_task_status_impl(*task_id, status, *execution_name, *error).await?;
+            self.update_task_status_impl(*task_id, status, *execution_name, *error)
+                .await?;
         }
         Ok(())
     }
@@ -193,7 +219,12 @@ impl FileDatabase {
     pub(super) async fn append_task_log_impl(&self, task_id: Uuid, chunk: &str) -> Result<()> {
         let path = self.task_path(task_id);
         let task: Task = self.read_json(&path).await?;
-        let logs = task.logs.unwrap_or_default().chars().take(2_000_000).collect::<String>();
+        let logs = task
+            .logs
+            .unwrap_or_default()
+            .chars()
+            .take(2_000_000)
+            .collect::<String>();
         let updated_task: Task = serde_json::from_value(serde_json::json!({
             "id": task.id, "run_id": task.run_id, "task_index": task.task_index, "task_name": task.task_name,
             "executor_type": task.executor_type, "depends_on": task.depends_on, "status": task.status,
@@ -207,7 +238,11 @@ impl FileDatabase {
         Ok(())
     }
 
-    pub(super) async fn update_task_output_impl(&self, task_id: Uuid, output: serde_json::Value) -> Result<()> {
+    pub(super) async fn update_task_output_impl(
+        &self,
+        task_id: Uuid,
+        output: serde_json::Value,
+    ) -> Result<()> {
         let path = self.task_path(task_id);
         let task: Task = self.read_json(&path).await?;
         let updated_task: Task = serde_json::from_value(serde_json::json!({
@@ -265,7 +300,10 @@ impl FileDatabase {
         Ok(map)
     }
 
-    pub(super) async fn get_task_retry_meta_impl(&self, task_ids: &[Uuid]) -> Result<HashMap<Uuid, (i32, i32)>> {
+    pub(super) async fn get_task_retry_meta_impl(
+        &self,
+        task_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, (i32, i32)>> {
         if task_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -310,7 +348,11 @@ impl FileDatabase {
             if task.run_id != run_id || !matches!(task.status_str(), "pending" | "paused") {
                 continue;
             }
-            if task.depends_on.iter().any(|name| failed_task_names.contains(name)) {
+            if task
+                .depends_on
+                .iter()
+                .any(|name| failed_task_names.contains(name))
+            {
                 let updated_task: Task = serde_json::from_value(serde_json::json!({
                     "id": task.id, "run_id": task.run_id, "task_index": task.task_index, "task_name": task.task_name,
                     "executor_type": task.executor_type, "depends_on": task.depends_on, "status": "failed",
@@ -328,7 +370,10 @@ impl FileDatabase {
     pub(super) async fn get_run_task_stats_impl(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
         let tasks = self.list_tasks_impl(run_id).await?;
         let total = tasks.len() as i64;
-        let completed = tasks.iter().filter(|t| matches!(t.status_str(), "success" | "failed")).count() as i64;
+        let completed = tasks
+            .iter()
+            .filter(|t| matches!(t.status_str(), "success" | "failed"))
+            .count() as i64;
         let failed = tasks.iter().filter(|t| t.status_str() == "failed").count() as i64;
         Ok((total, completed, failed))
     }

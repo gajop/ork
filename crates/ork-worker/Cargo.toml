@@ -21,3 +21,6 @@ uuid = { workspace = true }
 [[bin]]
 name = "ork-worker"
 path = "src/main.rs"
+
+[lints]
+workspace = true

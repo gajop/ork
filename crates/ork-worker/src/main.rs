@@ -9,7 +9,7 @@
 //! - POST /compile - Parse and compile DAG from embedded workflow
 //! - POST /execute - Execute a specific task
 
-use axum::{response::IntoResponse, routing::post, Json, Router};
+use axum::{Json, Router, response::IntoResponse, routing::post};
 use clap::Parser;
 use std::sync::Arc;
 use tracing::info;

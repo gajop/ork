@@ -1,8 +1,8 @@
 mod core;
-mod workflows;
+mod deferred_jobs;
 mod runs;
 mod tasks;
-mod deferred_jobs;
+mod workflows;
 
 pub use core::PostgresDatabase;
 
@@ -21,8 +21,28 @@ impl DatabaseTrait for PostgresDatabase {
         PostgresDatabase::run_migrations(self).await
     }
 
-    async fn create_workflow(&self, name: &str, description: Option<&str>, job_name: &str, region: &str, project: &str, executor_type: &str, task_params: Option<serde_json::Value>, schedule: Option<&str>) -> Result<Workflow> {
-        self.create_workflow_impl(name, description, job_name, region, project, executor_type, task_params, schedule).await
+    async fn create_workflow(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        job_name: &str,
+        region: &str,
+        project: &str,
+        executor_type: &str,
+        task_params: Option<serde_json::Value>,
+        schedule: Option<&str>,
+    ) -> Result<Workflow> {
+        self.create_workflow_impl(
+            name,
+            description,
+            job_name,
+            region,
+            project,
+            executor_type,
+            task_params,
+            schedule,
+        )
+        .await
     }
 
     async fn get_workflow(&self, name: &str) -> Result<Workflow> {
@@ -41,7 +61,12 @@ impl DatabaseTrait for PostgresDatabase {
         self.create_run_impl(workflow_id, triggered_by).await
     }
 
-    async fn update_run_status(&self, run_id: Uuid, status: &str, error: Option<&str>) -> Result<()> {
+    async fn update_run_status(
+        &self,
+        run_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
         self.update_run_status_impl(run_id, status, error).await
     }
 
@@ -61,19 +86,36 @@ impl DatabaseTrait for PostgresDatabase {
         self.cancel_run_impl(run_id).await
     }
 
-    async fn batch_create_tasks(&self, run_id: Uuid, task_count: i32, workflow_name: &str, executor_type: &str) -> Result<()> {
-        self.batch_create_tasks_impl(run_id, task_count, workflow_name, executor_type).await
+    async fn batch_create_tasks(
+        &self,
+        run_id: Uuid,
+        task_count: i32,
+        workflow_name: &str,
+        executor_type: &str,
+    ) -> Result<()> {
+        self.batch_create_tasks_impl(run_id, task_count, workflow_name, executor_type)
+            .await
     }
 
     async fn batch_create_dag_tasks(&self, run_id: Uuid, tasks: &[NewTask]) -> Result<()> {
         self.batch_create_dag_tasks_impl(run_id, tasks).await
     }
 
-    async fn update_task_status(&self, task_id: Uuid, status: &str, execution_name: Option<&str>, error: Option<&str>) -> Result<()> {
-        self.update_task_status_impl(task_id, status, execution_name, error).await
+    async fn update_task_status(
+        &self,
+        task_id: Uuid,
+        status: &str,
+        execution_name: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        self.update_task_status_impl(task_id, status, execution_name, error)
+            .await
     }
 
-    async fn batch_update_task_status(&self, updates: &[(Uuid, &str, Option<&str>, Option<&str>)]) -> Result<()> {
+    async fn batch_update_task_status(
+        &self,
+        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+    ) -> Result<()> {
         self.batch_update_task_status_impl(updates).await
     }
 
@@ -97,8 +139,14 @@ impl DatabaseTrait for PostgresDatabase {
         self.update_task_output_impl(task_id, output).await
     }
 
-    async fn reset_task_for_retry(&self, task_id: Uuid, error: Option<&str>, retry_at: Option<chrono::DateTime<chrono::Utc>>) -> Result<()> {
-        self.reset_task_for_retry_impl(task_id, error, retry_at).await
+    async fn reset_task_for_retry(
+        &self,
+        task_id: Uuid,
+        error: Option<&str>,
+        retry_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        self.reset_task_for_retry_impl(task_id, error, retry_at)
+            .await
     }
 
     async fn get_pending_tasks_with_workflow(&self, limit: i64) -> Result<Vec<TaskWithWorkflow>> {
@@ -113,7 +161,11 @@ impl DatabaseTrait for PostgresDatabase {
         self.get_workflow_by_id_impl(workflow_id).await
     }
 
-    async fn get_task_outputs(&self, run_id: Uuid, task_names: &[String]) -> Result<HashMap<String, serde_json::Value>> {
+    async fn get_task_outputs(
+        &self,
+        run_id: Uuid,
+        task_names: &[String],
+    ) -> Result<HashMap<String, serde_json::Value>> {
         self.get_task_outputs_impl(run_id, task_names).await
     }
 
@@ -129,15 +181,25 @@ impl DatabaseTrait for PostgresDatabase {
         self.get_task_identity_impl(task_id).await
     }
 
-    async fn mark_tasks_failed_by_dependency(&self, run_id: Uuid, failed_task_names: &[String], error: &str) -> Result<Vec<String>> {
-        self.mark_tasks_failed_by_dependency_impl(run_id, failed_task_names, error).await
+    async fn mark_tasks_failed_by_dependency(
+        &self,
+        run_id: Uuid,
+        failed_task_names: &[String],
+        error: &str,
+    ) -> Result<Vec<String>> {
+        self.mark_tasks_failed_by_dependency_impl(run_id, failed_task_names, error)
+            .await
     }
 
     async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
         self.get_run_task_stats_impl(run_id).await
     }
 
-    async fn create_workflow_tasks(&self, workflow_id: Uuid, tasks: &[NewWorkflowTask]) -> Result<()> {
+    async fn create_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> Result<()> {
         self.create_workflow_tasks_impl(workflow_id, tasks).await
     }
 
@@ -155,7 +217,8 @@ impl DatabaseTrait for PostgresDatabase {
         last_scheduled_at: chrono::DateTime<chrono::Utc>,
         next_scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<()> {
-        self.update_workflow_schedule_times_impl(workflow_id, last_scheduled_at, next_scheduled_at).await
+        self.update_workflow_schedule_times_impl(workflow_id, last_scheduled_at, next_scheduled_at)
+            .await
     }
 
     async fn update_workflow_schedule(
@@ -164,7 +227,8 @@ impl DatabaseTrait for PostgresDatabase {
         schedule: Option<&str>,
         schedule_enabled: bool,
     ) -> Result<()> {
-        self.update_workflow_schedule_impl(workflow_id, schedule, schedule_enabled).await
+        self.update_workflow_schedule_impl(workflow_id, schedule, schedule_enabled)
+            .await
     }
 
     // Deferred job operations
@@ -175,7 +239,8 @@ impl DatabaseTrait for PostgresDatabase {
         job_id: &str,
         job_data: serde_json::Value,
     ) -> Result<DeferredJob> {
-        self.create_deferred_job(task_id, service_type, job_id, job_data).await
+        self.create_deferred_job(task_id, service_type, job_id, job_data)
+            .await
     }
 
     async fn get_pending_deferred_jobs(&self) -> Result<Vec<DeferredJob>> {

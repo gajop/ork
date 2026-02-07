@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::info;
 
 use ork_core::config::OrchestratorConfig;
@@ -37,8 +37,8 @@ impl Execute {
         let yaml_content = std::fs::read_to_string(&self.file)
             .with_context(|| format!("Failed to read workflow file: {}", self.file))?;
 
-        let yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_content)
-            .with_context(|| "Failed to parse YAML")?;
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str(&yaml_content).with_context(|| "Failed to parse YAML")?;
 
         let workflow_name = yaml
             .get("name")
@@ -87,6 +87,7 @@ impl Execute {
                 max_concurrent_dispatches: 10,
                 max_concurrent_status_checks: 50,
                 db_pool_size: 5,
+                enable_triggerer: true,
             };
             Scheduler::new_with_config(db.clone(), executor_manager, config)
         };
@@ -117,7 +118,11 @@ impl Execute {
 
                 let success_count = tasks.iter().filter(|t| t.status_str() == "success").count();
                 let failed_count = tasks.iter().filter(|t| t.status_str() == "failed").count();
-                let run_status = if failed_count > 0 { "failed" } else { "success" };
+                let run_status = if failed_count > 0 {
+                    "failed"
+                } else {
+                    "success"
+                };
 
                 let run_info = db.get_run(run.id).await?;
                 if run_info.status_str() != "success" && run_info.status_str() != "failed" {
@@ -125,12 +130,20 @@ impl Execute {
                 }
 
                 if run_status == "success" {
-                    println!("✓ Run completed successfully in {:.2}s", elapsed.as_secs_f64());
+                    println!(
+                        "✓ Run completed successfully in {:.2}s",
+                        elapsed.as_secs_f64()
+                    );
                 } else {
                     println!("✗ Run failed in {:.2}s", elapsed.as_secs_f64());
                 }
 
-                println!("  Tasks: {} success, {} failed, {} total", success_count, failed_count, tasks.len());
+                println!(
+                    "  Tasks: {} success, {} failed, {} total",
+                    success_count,
+                    failed_count,
+                    tasks.len()
+                );
                 println!();
 
                 // Show task details
@@ -178,12 +191,7 @@ impl Execute {
 
                     println!(
                         "{:<20} {:<15} {:<10} {:<8} {:<24} {:<24}",
-                        task.task_name,
-                        status_str,
-                        duration,
-                        attempts_display,
-                        started,
-                        finished
+                        task.task_name, status_str, duration, attempts_display, started, finished
                     );
                 }
 
@@ -198,7 +206,10 @@ impl Execute {
                 Err(e)
             }
             Err(_) => {
-                println!("✗ Timeout waiting for workflow to complete after {}s", self.timeout);
+                println!(
+                    "✗ Timeout waiting for workflow to complete after {}s",
+                    self.timeout
+                );
                 std::process::exit(1);
             }
         }

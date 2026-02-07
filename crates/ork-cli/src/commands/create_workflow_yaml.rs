@@ -23,7 +23,14 @@ pub struct CreateWorkflowYaml {
 impl CreateWorkflowYaml {
     pub async fn execute(self, db: Arc<dyn Database>) -> Result<()> {
         let yaml_content = std::fs::read_to_string(&self.file)?;
-        let workflow = create_workflow_from_yaml_str(&*db, &yaml_content, &self.file, &self.project, &self.region).await?;
+        let workflow = create_workflow_from_yaml_str(
+            &*db,
+            &yaml_content,
+            &self.file,
+            &self.project,
+            &self.region,
+        )
+        .await?;
 
         println!("✓ Created workflow from YAML: {}", workflow.name);
         println!("  ID: {}", workflow.id);

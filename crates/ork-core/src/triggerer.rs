@@ -184,7 +184,7 @@ impl<D: Database> Triggerer<D> {
         // Poll the job with timeout
         let poll_result = tokio::time::timeout(
             timeout,
-            tracker.poll_job(&job.job_id, &crate::models::json_inner(&job.job_data)),
+            tracker.poll_job(&job.job_id, crate::models::json_inner(&job.job_data)),
         )
         .await;
 

@@ -56,7 +56,7 @@ pub enum ExecutorType {
 }
 
 impl ExecutorType {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "cloudrun" => Some(Self::CloudRun),
             "process" => Some(Self::Process),
@@ -73,6 +73,14 @@ impl ExecutorType {
             Self::Python => "python",
             Self::Library => "library",
         }
+    }
+}
+
+impl std::str::FromStr for ExecutorType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or(())
     }
 }
 
@@ -105,7 +113,7 @@ pub enum RunStatus {
 }
 
 impl RunStatus {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "pending" => Some(Self::Pending),
             "running" => Some(Self::Running),
@@ -127,6 +135,14 @@ impl RunStatus {
     }
 }
 
+impl std::str::FromStr for RunStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct Run {
@@ -142,7 +158,7 @@ pub struct Run {
 
 impl Run {
     pub fn status(&self) -> RunStatus {
-        RunStatus::from_str(&self.status).unwrap_or(RunStatus::Pending)
+        RunStatus::parse(&self.status).unwrap_or(RunStatus::Pending)
     }
 
     pub fn status_str(&self) -> &str {
@@ -237,7 +253,7 @@ pub enum DeferredJobStatus {
 }
 
 impl DeferredJobStatus {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "pending" => Some(Self::Pending),
             "polling" => Some(Self::Polling),
@@ -256,6 +272,14 @@ impl DeferredJobStatus {
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
         }
+    }
+}
+
+impl std::str::FromStr for DeferredJobStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or(())
     }
 }
 
@@ -279,7 +303,7 @@ pub struct DeferredJob {
 
 impl DeferredJob {
     pub fn status(&self) -> DeferredJobStatus {
-        DeferredJobStatus::from_str(&self.status).unwrap_or(DeferredJobStatus::Pending)
+        DeferredJobStatus::parse(&self.status).unwrap_or(DeferredJobStatus::Pending)
     }
 
     pub fn status_str(&self) -> &str {

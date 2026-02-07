@@ -46,14 +46,17 @@ impl Workflow {
             let file = match task.executor {
                 ExecutorKind::Python => {
                     let task_file = if let Some(file) = task.file.as_ref() {
-                         Some(resolve_file(root, name, file)?)
+                        Some(resolve_file(root, name, file)?)
                     } else {
                         None
                     };
 
                     if let Some(path) = task_file.as_ref() {
                         let func_name = task.function.as_deref().unwrap_or("main");
-                        signature = Some(introspect_python_signature(path, func_name).map_err(|e| OrkError::InvalidWorkflow(WorkflowValidationError::Custom(e)))?);
+                        signature =
+                            Some(introspect_python_signature(path, func_name).map_err(|e| {
+                                OrkError::InvalidWorkflow(WorkflowValidationError::Custom(e))
+                            })?);
                     }
                     task_file
                 }
@@ -183,7 +186,10 @@ fn get_inspect_script() -> std::result::Result<PathBuf, String> {
     Ok(script_path)
 }
 
-fn introspect_python_signature(path: &Path, func_name: &str) -> std::result::Result<serde_json::Value, String> {
+fn introspect_python_signature(
+    path: &Path,
+    func_name: &str,
+) -> std::result::Result<serde_json::Value, String> {
     use std::process::Command;
 
     let script_path = get_inspect_script()?;
@@ -197,7 +203,11 @@ fn introspect_python_signature(path: &Path, func_name: &str) -> std::result::Res
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Introspection failed ({}): {}", func_name, stderr.trim()));
+        return Err(format!(
+            "Introspection failed ({}): {}",
+            func_name,
+            stderr.trim()
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

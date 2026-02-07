@@ -19,7 +19,7 @@ impl SqliteDatabase {
         schedule: Option<&str>,
     ) -> Result<Workflow> {
         let workflow_id = Uuid::new_v4();
-        let params_json = task_params.map(|v| sqlx::types::Json(v));
+        let params_json = task_params.map(sqlx::types::Json);
         let workflow = sqlx::query_as::<_, Workflow>(
             r#"INSERT INTO workflows (id, name, description, job_name, region, project, executor_type, task_params, schedule)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"#,
@@ -31,30 +31,48 @@ impl SqliteDatabase {
 
     pub(super) async fn get_workflow_impl(&self, name: &str) -> Result<Workflow> {
         let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE name = ?")
-            .bind(name).fetch_one(&self.pool).await?;
+            .bind(name)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(workflow)
     }
 
     pub(super) async fn list_workflows_impl(&self) -> Result<Vec<Workflow>> {
-        let workflows = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows ORDER BY created_at DESC")
-            .fetch_all(&self.pool).await?;
+        let workflows =
+            sqlx::query_as::<_, Workflow>("SELECT * FROM workflows ORDER BY created_at DESC")
+                .fetch_all(&self.pool)
+                .await?;
         Ok(workflows)
     }
 
     pub(super) async fn delete_workflow_impl(&self, name: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM runs WHERE workflow_id = (SELECT id FROM workflows WHERE name = ?)")
-            .bind(name).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM workflows WHERE name = ?").bind(name).execute(&mut *tx).await?;
+        sqlx::query(
+            "DELETE FROM runs WHERE workflow_id = (SELECT id FROM workflows WHERE name = ?)",
+        )
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM workflows WHERE name = ?")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
 
-    pub(super) async fn get_workflows_by_ids_impl(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+    pub(super) async fn get_workflows_by_ids_impl(
+        &self,
+        workflow_ids: &[Uuid],
+    ) -> Result<Vec<Workflow>> {
         if workflow_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = workflow_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = workflow_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
         let query_str = format!("SELECT * FROM workflows WHERE id IN ({})", placeholders);
         let mut query = sqlx::query_as::<_, Workflow>(&query_str);
         for id in workflow_ids {
@@ -66,19 +84,27 @@ impl SqliteDatabase {
 
     pub(super) async fn get_workflow_by_id_impl(&self, workflow_id: Uuid) -> Result<Workflow> {
         let workflow = sqlx::query_as::<_, Workflow>("SELECT * FROM workflows WHERE id = ?")
-            .bind(workflow_id).fetch_one(&self.pool).await?;
+            .bind(workflow_id)
+            .fetch_one(&self.pool)
+            .await?;
         Ok(workflow)
     }
 
-    pub(super) async fn create_workflow_tasks_impl(&self, workflow_id: Uuid, tasks: &[NewWorkflowTask]) -> Result<()> {
+    pub(super) async fn create_workflow_tasks_impl(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM workflow_tasks WHERE workflow_id = ?")
-            .bind(workflow_id).execute(&mut *tx).await?;
+            .bind(workflow_id)
+            .execute(&mut *tx)
+            .await?;
         for task in tasks {
             let task_id = Uuid::new_v4();
             let depends_on_json = encode_depends_on(&task.depends_on);
             let params_json = sqlx::types::Json(&task.params);
-            let signature_json = task.signature.as_ref().map(|s| sqlx::types::Json(s));
+            let signature_json = task.signature.as_ref().map(sqlx::types::Json);
             sqlx::query(
                 r#"INSERT INTO workflow_tasks (id, workflow_id, task_index, task_name, executor_type, depends_on, params, signature)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
@@ -98,11 +124,16 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    pub(super) async fn list_workflow_tasks_impl(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+    pub(super) async fn list_workflow_tasks_impl(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Vec<WorkflowTask>> {
         let rows = sqlx::query_as::<_, WorkflowTaskRow>(
             "SELECT * FROM workflow_tasks WHERE workflow_id = ? ORDER BY task_index",
         )
-        .bind(workflow_id).fetch_all(&self.pool).await?;
+        .bind(workflow_id)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows.into_iter().map(Self::map_workflow_task).collect())
     }
 
@@ -113,8 +144,11 @@ impl SqliteDatabase {
                WHERE schedule_enabled = 1
                AND schedule IS NOT NULL
                AND (next_scheduled_at IS NULL OR next_scheduled_at <= ?)
-               ORDER BY next_scheduled_at"#
-        ).bind(now).fetch_all(&self.pool).await?;
+               ORDER BY next_scheduled_at"#,
+        )
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(workflows)
     }
 
@@ -125,8 +159,13 @@ impl SqliteDatabase {
         next_scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE workflows SET last_scheduled_at = ?, next_scheduled_at = ? WHERE id = ?"
-        ).bind(last_scheduled_at).bind(next_scheduled_at).bind(workflow_id).execute(&self.pool).await?;
+            "UPDATE workflows SET last_scheduled_at = ?, next_scheduled_at = ? WHERE id = ?",
+        )
+        .bind(last_scheduled_at)
+        .bind(next_scheduled_at)
+        .bind(workflow_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -136,9 +175,12 @@ impl SqliteDatabase {
         schedule: Option<&str>,
         schedule_enabled: bool,
     ) -> Result<()> {
-        sqlx::query(
-            "UPDATE workflows SET schedule = ?, schedule_enabled = ? WHERE id = ?"
-        ).bind(schedule).bind(schedule_enabled).bind(workflow_id).execute(&self.pool).await?;
+        sqlx::query("UPDATE workflows SET schedule = ?, schedule_enabled = ? WHERE id = ?")
+            .bind(schedule)
+            .bind(schedule_enabled)
+            .bind(workflow_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

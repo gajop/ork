@@ -47,3 +47,6 @@ sysinfo = { workspace = true }
 
 # For perf-test binary
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+
+[lints]
+workspace = true

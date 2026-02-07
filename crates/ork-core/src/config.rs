@@ -17,6 +17,9 @@ pub struct OrchestratorConfig {
 
     /// Database connection pool size
     pub db_pool_size: u32,
+
+    /// Enable deferred-job triggerer startup.
+    pub enable_triggerer: bool,
 }
 
 impl Default for OrchestratorConfig {
@@ -42,6 +45,10 @@ impl Default for OrchestratorConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10),
+            enable_triggerer: std::env::var("ENABLE_TRIGGERER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(true),
         }
     }
 }
@@ -55,6 +62,7 @@ impl OrchestratorConfig {
             max_concurrent_dispatches: 5,     // Limited concurrency
             max_concurrent_status_checks: 20, // Moderate status checks
             db_pool_size: 5,                  // Minimal connections
+            enable_triggerer: true,
         }
     }
 
@@ -66,6 +74,7 @@ impl OrchestratorConfig {
             max_concurrent_dispatches: 50,
             max_concurrent_status_checks: 100,
             db_pool_size: 20,
+            enable_triggerer: true,
         }
     }
 }
