@@ -393,6 +393,39 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 }
             }
             if let Some(output) = update.output.as_ref() {
+                // Check if output contains deferrables
+                if let Some(deferred) = output.get("deferred").and_then(|v| v.as_array()) {
+                    // Task returned deferrables - create deferred jobs
+                    info!("Task {} returned {} deferrables", update.task_id, deferred.len());
+
+                    for deferrable_data in deferred {
+                        if let (Some(service_type), Some(job_id)) = (
+                            deferrable_data.get("service_type").and_then(|v| v.as_str()),
+                            deferrable_data.get("job_id").and_then(|v| v.as_str()),
+                        ) {
+                            match self.db.create_deferred_job(
+                                update.task_id,
+                                service_type,
+                                job_id,
+                                deferrable_data.clone(),
+                            ).await {
+                                Ok(_) => {
+                                    info!("Created deferred job for task {}: {} ({})", update.task_id, job_id, service_type);
+                                }
+                                Err(e) => {
+                                    error!("Failed to create deferred job for task {}: {}", update.task_id, e);
+                                }
+                            }
+                        } else {
+                            error!("Invalid deferrable data for task {}: missing service_type or job_id", update.task_id);
+                        }
+                    }
+
+                    // Don't mark task as success yet - it will be marked when deferred jobs complete
+                    // Update task to a "deferred" status (we'll treat it as running)
+                    continue;
+                }
+
                 if let Err(e) = self.db.update_task_output(update.task_id, output.clone()).await {
                     error!("Failed to store output for task {}: {}", update.task_id, e);
                 }
