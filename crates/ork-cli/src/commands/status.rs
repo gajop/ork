@@ -61,3 +61,61 @@ impl Status {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_state::SqliteDatabase;
+
+    async fn setup_db() -> (Arc<SqliteDatabase>, uuid::Uuid) {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+        let workflow = db
+            .create_workflow(
+                "wf-status",
+                None,
+                "job",
+                "local",
+                "local",
+                "process",
+                None,
+                None,
+            )
+            .await
+            .expect("create workflow");
+        let run = db
+            .create_run(workflow.id, "test")
+            .await
+            .expect("create run");
+        (db, run.id)
+    }
+
+    #[tokio::test]
+    async fn test_status_command_branches() {
+        let (db, run_id) = setup_db().await;
+
+        Status {
+            run_id: Some(run_id.to_string()),
+            workflow: None,
+        }
+        .execute(db.clone())
+        .await
+        .expect("status by run id should succeed");
+
+        Status {
+            run_id: None,
+            workflow: Some("wf-status".to_string()),
+        }
+        .execute(db.clone())
+        .await
+        .expect("status by workflow should succeed");
+
+        Status {
+            run_id: None,
+            workflow: None,
+        }
+        .execute(db)
+        .await
+        .expect("status all should succeed");
+    }
+}

@@ -63,3 +63,32 @@ impl CreateWorkflow {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_state::SqliteDatabase;
+
+    #[tokio::test]
+    async fn test_create_workflow_command() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let cmd = CreateWorkflow {
+            name: "wf".to_string(),
+            description: Some("desc".to_string()),
+            job_name: "job".to_string(),
+            project: "local".to_string(),
+            region: "local".to_string(),
+            task_count: 3,
+            executor: "process".to_string(),
+        };
+        cmd.execute(db.clone())
+            .await
+            .expect("create workflow command should succeed");
+
+        let workflow = db.get_workflow("wf").await.expect("workflow should exist");
+        assert_eq!(workflow.name, "wf");
+        assert_eq!(workflow.executor_type, "process");
+    }
+}

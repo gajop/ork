@@ -181,3 +181,198 @@ fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<
 
     tasks
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_core::compiled::{CompiledTask, CompiledWorkflow};
+    use ork_core::database::Database;
+    use ork_core::workflow::{TaskDefinition, Workflow};
+    use ork_state::SqliteDatabase;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_create_workflow_from_yaml_str_creates_workflow_and_tasks() {
+        let db = SqliteDatabase::new(":memory:").await.expect("create db");
+        db.run_migrations().await.expect("migrate");
+
+        let yaml = r#"
+name: wf-yaml
+tasks:
+  first:
+    executor: process
+    command: "echo first"
+  second:
+    executor: process
+    command: "echo second"
+    depends_on: ["first"]
+"#;
+
+        let workflow =
+            create_workflow_from_yaml_str(&db, yaml, "/tmp/workflow.yaml", "local", "local")
+                .await
+                .expect("create workflow from yaml");
+        assert_eq!(workflow.name, "wf-yaml");
+
+        let tasks = db
+            .list_workflow_tasks(workflow.id)
+            .await
+            .expect("list workflow tasks");
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[1].depends_on, vec!["first".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_create_workflow_yaml_command_execute() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let path = std::env::temp_dir().join(format!(
+            "ork-create-workflow-yaml-{}.yaml",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            r#"
+name: wf-yaml-cmd
+tasks:
+  first:
+    executor: process
+    command: "echo first"
+"#,
+        )
+        .expect("write temp workflow");
+
+        CreateWorkflowYaml {
+            file: path.to_string_lossy().to_string(),
+            project: "local".to_string(),
+            region: "local".to_string(),
+        }
+        .execute(db.clone())
+        .await
+        .expect("command execute should succeed");
+
+        let workflow = db
+            .get_workflow("wf-yaml-cmd")
+            .await
+            .expect("workflow should exist");
+        let tasks = db
+            .list_workflow_tasks(workflow.id)
+            .await
+            .expect("list tasks");
+        assert_eq!(tasks.len(), 1);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_build_workflow_tasks_maps_process_command_and_dependencies() {
+        let mut workflow_tasks = indexmap::IndexMap::new();
+        workflow_tasks.insert(
+            "a".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("echo a".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![],
+                timeout: 5,
+                retries: 1,
+            },
+        );
+        workflow_tasks.insert(
+            "b".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("echo b".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({"x": 1}),
+                depends_on: vec!["a".to_string()],
+                timeout: 7,
+                retries: 2,
+            },
+        );
+        let workflow = Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks: workflow_tasks,
+        };
+
+        let compiled = workflow
+            .compile(std::path::Path::new("."))
+            .expect("compile workflow");
+        let tasks = super::build_workflow_tasks(&compiled);
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].executor_type, "process");
+        assert_eq!(tasks[1].depends_on, vec!["a".to_string()]);
+        assert_eq!(tasks[1].params["task_input"], serde_json::json!({"x": 1}));
+    }
+
+    #[test]
+    fn test_build_workflow_tasks_maps_all_executor_specific_params() {
+        let compiled = CompiledWorkflow {
+            name: "wf".to_string(),
+            tasks: vec![
+                CompiledTask {
+                    name: "cloud".to_string(),
+                    executor: ExecutorKind::CloudRun,
+                    file: None,
+                    command: None,
+                    job: Some("job-a".to_string()),
+                    module: None,
+                    function: None,
+                    input: serde_json::Value::Null,
+                    depends_on: vec![],
+                    timeout: 10,
+                    retries: 0,
+                    signature: None,
+                },
+                CompiledTask {
+                    name: "python".to_string(),
+                    executor: ExecutorKind::Python,
+                    file: None,
+                    command: None,
+                    job: None,
+                    module: Some("pkg.tasks".to_string()),
+                    function: Some("run".to_string()),
+                    input: serde_json::json!({"v": 1}),
+                    depends_on: vec![0],
+                    timeout: 20,
+                    retries: 1,
+                    signature: None,
+                },
+                CompiledTask {
+                    name: "lib".to_string(),
+                    executor: ExecutorKind::Library,
+                    file: Some(PathBuf::from("/tmp/libtask.so")),
+                    command: None,
+                    job: None,
+                    module: None,
+                    function: None,
+                    input: serde_json::Value::Null,
+                    depends_on: vec![1],
+                    timeout: 30,
+                    retries: 2,
+                    signature: None,
+                },
+            ],
+            name_index: indexmap::IndexMap::new(),
+            topo: vec![0, 1, 2],
+            root: PathBuf::from("/tmp"),
+        };
+
+        let tasks = super::build_workflow_tasks(&compiled);
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0].params["job_name"], serde_json::json!("job-a"));
+        assert_eq!(tasks[1].params["task_module"], serde_json::json!("pkg.tasks"));
+        assert_eq!(tasks[1].params["task_function"], serde_json::json!("run"));
+        assert_eq!(tasks[1].params["python_path"], serde_json::json!("/tmp"));
+        assert_eq!(tasks[2].params["library_path"], serde_json::json!("/tmp/libtask.so"));
+    }
+}

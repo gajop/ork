@@ -48,5 +48,10 @@ sysinfo = { workspace = true }
 # For perf-test binary
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 
+[dev-dependencies]
+ork-state = { path = "../ork-state", features = ["sqlite"] }
+indexmap = { workspace = true }
+axum = { workspace = true }
+
 [lints]
 workspace = true

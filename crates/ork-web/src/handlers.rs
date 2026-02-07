@@ -75,7 +75,8 @@ pub async fn create_workflow(
                 {
                     Ok(wf) => wf,
                     Err(err) => {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                            .into_response();
                     }
                 }
             } else {

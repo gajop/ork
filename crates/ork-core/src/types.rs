@@ -136,3 +136,112 @@ impl Run {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiled::{CompiledTask, CompiledWorkflow};
+    use crate::workflow::TaskDefinition;
+    use std::path::PathBuf;
+
+    fn sample_workflow() -> Workflow {
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "task_a".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("echo ok".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({"x": 1}),
+                depends_on: Vec::new(),
+                timeout: 300,
+                retries: 1,
+            },
+        );
+        Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks,
+        }
+    }
+
+    #[test]
+    fn test_task_spec_from_workflow_and_missing_task() {
+        let workflow = sample_workflow();
+        let upstream = IndexMap::from([(String::from("dep"), serde_json::json!({"ok": true}))]);
+        let spec = TaskSpec::from_workflow(&workflow, "run-1".to_string(), "task_a", 2, upstream)
+            .expect("task should exist");
+
+        assert_eq!(spec.workflow_name, "wf");
+        assert_eq!(spec.task_name, "task_a");
+        assert_eq!(spec.attempt, 2);
+        assert!(matches!(spec.executor, ExecutorKind::Process));
+        assert_eq!(spec.input, serde_json::json!({"x": 1}));
+        assert!(TaskSpec::from_workflow(
+            &workflow,
+            "run-1".to_string(),
+            "missing",
+            1,
+            IndexMap::new()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_task_spec_from_compiled_and_missing_index() {
+        let compiled = CompiledWorkflow {
+            name: "wf-compiled".to_string(),
+            tasks: vec![CompiledTask {
+                name: "task0".to_string(),
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("echo".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({"value": 42}),
+                depends_on: Vec::new(),
+                timeout: 300,
+                retries: 0,
+                signature: None,
+            }],
+            name_index: IndexMap::from([(String::from("task0"), 0)]),
+            topo: vec![0],
+            root: PathBuf::from("."),
+        };
+
+        let spec = TaskSpec::from_compiled(
+            &compiled,
+            "run-2".to_string(),
+            0,
+            1,
+            IndexMap::new(),
+        )
+        .expect("compiled task should exist");
+        assert_eq!(spec.workflow_name, "wf-compiled");
+        assert_eq!(spec.task_name, "task0");
+        assert_eq!(spec.input, serde_json::json!({"value": 42}));
+        assert!(TaskSpec::from_compiled(
+            &compiled,
+            "run-2".to_string(),
+            9,
+            1,
+            IndexMap::new()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_run_new_initializes_pending_state() {
+        let workflow = sample_workflow();
+        let run = Run::new(&workflow);
+        assert_eq!(run.workflow, workflow.name);
+        assert_eq!(run.status, RunStatus::Pending);
+        assert!(run.started_at.is_none());
+        assert!(run.finished_at.is_none());
+        assert!(!run.id.is_empty());
+    }
+}

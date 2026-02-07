@@ -22,3 +22,39 @@ impl Trigger {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_state::SqliteDatabase;
+
+    #[tokio::test]
+    async fn test_trigger_command_creates_run() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+        let workflow = db
+            .create_workflow(
+                "wf-trigger",
+                None,
+                "job",
+                "local",
+                "local",
+                "process",
+                None,
+                None,
+            )
+            .await
+            .expect("create workflow");
+
+        Trigger {
+            workflow_name: "wf-trigger".to_string(),
+        }
+        .execute(db.clone())
+        .await
+        .expect("trigger command should succeed");
+
+        let runs = db.list_runs(Some(workflow.id)).await.expect("list runs");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].triggered_by, "manual");
+    }
+}

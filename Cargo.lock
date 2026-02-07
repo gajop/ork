@@ -2449,8 +2449,10 @@ name = "ork-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "clap",
+ "indexmap 2.13.0",
  "ork-core",
  "ork-executors",
  "ork-state",
@@ -2529,6 +2531,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "fs2",
+ "indexmap 2.13.0",
  "ork-core",
  "serde",
  "serde_json",

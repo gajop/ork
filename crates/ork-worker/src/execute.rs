@@ -57,9 +57,7 @@ pub async fn execute_handler(
     match result {
         Ok(output) => {
             // Check if output contains deferrables
-            let deferred = output
-                .get("deferred")
-                .and_then(|v| v.as_array()).cloned();
+            let deferred = output.get("deferred").and_then(|v| v.as_array()).cloned();
 
             if deferred.is_some() {
                 info!("Task {} returned deferrables", req.task_name);
@@ -103,4 +101,84 @@ async fn execute_process_task(
         .map_err(|e| format!("Failed to parse task output as JSON: {}", e))?;
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    async fn run_handler(req: ExecuteRequest) -> serde_json::Value {
+        let state = std::sync::Arc::new(crate::WorkerState {
+            workflow_path: "workflow.yaml".to_string(),
+            working_dir: ".".to_string(),
+        });
+        let response = execute_handler(State(state), Json(req))
+            .await
+            .expect("handler should return Ok response")
+            .into_response();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        serde_json::from_slice(&body).expect("response should be valid json")
+    }
+
+    #[tokio::test]
+    async fn test_execute_handler_rejects_unsupported_executor() {
+        let value = run_handler(ExecuteRequest {
+            task_id: Uuid::new_v4(),
+            task_name: "task".to_string(),
+            executor_type: "unknown".to_string(),
+            params: None,
+        })
+        .await;
+
+        assert_eq!(value["status"], "failed");
+        assert!(
+            value["error"]
+                .as_str()
+                .expect("error should be string")
+                .contains("Unsupported executor type")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_handler_rejects_library_executor() {
+        let value = run_handler(ExecuteRequest {
+            task_id: Uuid::new_v4(),
+            task_name: "task".to_string(),
+            executor_type: "library".to_string(),
+            params: None,
+        })
+        .await;
+
+        assert_eq!(value["status"], "failed");
+        assert!(
+            value["error"]
+                .as_str()
+                .expect("error should be string")
+                .contains("not yet supported")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_handler_process_returns_failed_for_non_json_output() {
+        let value = run_handler(ExecuteRequest {
+            task_id: Uuid::new_v4(),
+            task_name: "task".to_string(),
+            executor_type: "process".to_string(),
+            params: Some(serde_json::json!({
+                "command": "echo hello"
+            })),
+        })
+        .await;
+
+        assert_eq!(value["status"], "failed");
+        assert!(
+            value["error"]
+                .as_str()
+                .expect("error should be string")
+                .contains("Failed to parse task output as JSON")
+        );
+    }
 }

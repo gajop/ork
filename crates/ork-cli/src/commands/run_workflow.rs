@@ -122,3 +122,117 @@ impl RunWorkflow {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        Json, Router,
+        extract::Path,
+        routing::{get, post},
+    };
+    use std::net::SocketAddr;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn test_run_workflow_missing_file_errors() {
+        let cmd = RunWorkflow {
+            file: "/tmp/does-not-exist-workflow.yaml".to_string(),
+            api_url: "http://127.0.0.1:4000".to_string(),
+            project: "local".to_string(),
+            region: "local".to_string(),
+            root: None,
+            replace: true,
+        };
+
+        let result = cmd.execute().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_missing_name_field_errors() {
+        let path = std::env::temp_dir().join(format!("ork-run-workflow-{}.yaml", Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+tasks:
+  a:
+    executor: process
+    command: "echo hi"
+"#,
+        )
+        .expect("write temp workflow");
+
+        let cmd = RunWorkflow {
+            file: path.to_string_lossy().to_string(),
+            api_url: "http://127.0.0.1:4000".to_string(),
+            project: "local".to_string(),
+            region: "local".to_string(),
+            root: None,
+            replace: true,
+        };
+
+        let result = cmd.execute().await;
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn test_run_workflow_success_with_mock_api() {
+        async fn create_handler() -> Json<serde_json::Value> {
+            Json(serde_json::json!({"ok": true}))
+        }
+
+        async fn trigger_handler() -> Json<serde_json::Value> {
+            Json(serde_json::json!({"run_id": "run-1"}))
+        }
+
+        async fn run_status_handler(Path(_run_id): Path<String>) -> Json<serde_json::Value> {
+            Json(serde_json::json!({
+                "run": { "status": "success" }
+            }))
+        }
+
+        let app = Router::new()
+            .route("/api/workflows", post(create_handler))
+            .route("/api/runs", post(trigger_handler))
+            .route("/api/runs/{run_id}", get(run_status_handler));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr: SocketAddr = listener.local_addr().expect("get listener addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock api");
+        });
+
+        let path = std::env::temp_dir().join(format!("ork-run-workflow-{}.yaml", Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+name: wf-api
+tasks:
+  a:
+    executor: process
+    command: "echo hi"
+"#,
+        )
+        .expect("write temp workflow");
+
+        let cmd = RunWorkflow {
+            file: path.to_string_lossy().to_string(),
+            api_url: format!("http://{}", addr),
+            project: "local".to_string(),
+            region: "local".to_string(),
+            root: None,
+            replace: true,
+        };
+
+        let result = cmd.execute().await;
+        server.abort();
+        let _ = std::fs::remove_file(path);
+
+        assert!(result.is_ok());
+    }
+}

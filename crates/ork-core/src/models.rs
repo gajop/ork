@@ -310,3 +310,107 @@ impl DeferredJob {
         &self.status
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn test_executor_type_parse_and_from_str() {
+        assert_eq!(ExecutorType::parse("cloudrun"), Some(ExecutorType::CloudRun));
+        assert_eq!(ExecutorType::parse("PROCESS"), Some(ExecutorType::Process));
+        assert_eq!(ExecutorType::parse("python"), Some(ExecutorType::Python));
+        assert_eq!(ExecutorType::parse("library"), Some(ExecutorType::Library));
+        assert_eq!(ExecutorType::parse("unknown"), None);
+
+        assert_eq!(ExecutorType::CloudRun.as_str(), "cloudrun");
+        assert_eq!("process".parse::<ExecutorType>(), Ok(ExecutorType::Process));
+        assert!("invalid".parse::<ExecutorType>().is_err());
+    }
+
+    #[test]
+    fn test_run_status_parse_and_accessors() {
+        assert_eq!(RunStatus::parse("pending"), Some(RunStatus::Pending));
+        assert_eq!(RunStatus::parse("RUNNING"), Some(RunStatus::Running));
+        assert_eq!(RunStatus::parse("paused"), Some(RunStatus::Paused));
+        assert_eq!(RunStatus::parse("success"), Some(RunStatus::Success));
+        assert_eq!(RunStatus::parse("failed"), Some(RunStatus::Failed));
+        assert_eq!(RunStatus::parse("other"), None);
+        assert_eq!(RunStatus::Success.as_str(), "success");
+        assert_eq!("running".parse::<RunStatus>(), Ok(RunStatus::Running));
+        assert!("invalid".parse::<RunStatus>().is_err());
+
+        let run = Run {
+            id: Uuid::new_v4(),
+            workflow_id: Uuid::new_v4(),
+            status: "running".to_string(),
+            triggered_by: "test".to_string(),
+            started_at: Some(Utc::now()),
+            finished_at: None,
+            error: None,
+            created_at: Utc::now(),
+        };
+        assert_eq!(run.status(), RunStatus::Running);
+        assert_eq!(run.status_str(), "running");
+
+        let fallback = Run {
+            status: "not-a-status".to_string(),
+            ..run
+        };
+        assert_eq!(fallback.status(), RunStatus::Pending);
+    }
+
+    #[test]
+    fn test_task_and_deferred_status_accessors() {
+        assert_eq!(TaskStatus::Running.as_str(), "running");
+        assert_eq!(TaskStatus::Paused.as_str(), "paused");
+        assert_eq!(TaskStatus::Success.as_str(), "success");
+        assert_eq!(TaskStatus::Failed.as_str(), "failed");
+
+        assert_eq!(
+            DeferredJobStatus::parse("completed"),
+            Some(DeferredJobStatus::Completed)
+        );
+        assert_eq!(
+            DeferredJobStatus::parse("CANCELLED"),
+            Some(DeferredJobStatus::Cancelled)
+        );
+        assert_eq!(DeferredJobStatus::parse("bad"), None);
+        assert_eq!(DeferredJobStatus::Failed.as_str(), "failed");
+        assert_eq!(
+            "polling".parse::<DeferredJobStatus>(),
+            Ok(DeferredJobStatus::Polling)
+        );
+        assert!("invalid".parse::<DeferredJobStatus>().is_err());
+
+        let deferred = DeferredJob {
+            id: Uuid::new_v4(),
+            task_id: Uuid::new_v4(),
+            service_type: "cloud_run".to_string(),
+            job_id: "job-1".to_string(),
+            job_data: serde_json::json!({"k": "v"}).into(),
+            status: "completed".to_string(),
+            error: None,
+            created_at: Utc::now(),
+            started_at: Some(Utc::now()),
+            last_polled_at: Some(Utc::now()),
+            finished_at: Some(Utc::now()),
+        };
+        assert_eq!(deferred.status(), DeferredJobStatus::Completed);
+        assert_eq!(deferred.status_str(), "completed");
+
+        let fallback = DeferredJob {
+            status: "unknown".to_string(),
+            ..deferred
+        };
+        assert_eq!(fallback.status(), DeferredJobStatus::Pending);
+    }
+
+    #[test]
+    fn test_json_inner_returns_value_reference() {
+        let value: JsonValue = serde_json::json!({"hello": "world"}).into();
+        let inner = json_inner(&value);
+        assert_eq!(inner, &serde_json::json!({"hello": "world"}));
+    }
+}

@@ -66,3 +66,99 @@ impl StateStore for InMemoryStateStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indexmap::IndexMap;
+    use ork_core::types::{TaskRun, TaskStatus};
+    use ork_core::workflow::{ExecutorKind, TaskDefinition, Workflow};
+
+    fn sample_workflow() -> Workflow {
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("echo hi".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![],
+                timeout: 60,
+                retries: 0,
+            },
+        );
+        Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_and_get_run() {
+        let store = InMemoryStateStore::default();
+        let workflow = sample_workflow();
+        let run = store.create_run(&workflow).await.expect("create run");
+
+        let fetched = store.get_run(&run.id).await.expect("get run");
+        assert!(fetched.is_some());
+        assert_eq!(fetched.expect("run exists").workflow, workflow.name);
+    }
+
+    #[tokio::test]
+    async fn test_upsert_and_list_task_runs() {
+        let store = InMemoryStateStore::default();
+        let workflow = sample_workflow();
+        let run = store.create_run(&workflow).await.expect("create run");
+        let task_run = TaskRun {
+            run_id: run.id.clone(),
+            task: "task1".to_string(),
+            status: TaskStatus::Pending,
+            attempt: 0,
+            max_retries: 1,
+            created_at: chrono::Utc::now(),
+            dispatched_at: None,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            output: None,
+        };
+        store
+            .upsert_task_run(task_run)
+            .await
+            .expect("upsert task run");
+
+        let tasks = store.list_task_runs(&run.id).await.expect("list task runs");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].task, "task1");
+    }
+
+    #[tokio::test]
+    async fn test_update_run_status_sets_timestamps() {
+        let store = InMemoryStateStore::default();
+        let workflow = sample_workflow();
+        let run = store.create_run(&workflow).await.expect("create run");
+
+        store
+            .update_run_status(&run.id, RunStatus::Running)
+            .await
+            .expect("set running");
+        store
+            .update_run_status(&run.id, RunStatus::Success)
+            .await
+            .expect("set success");
+
+        let updated = store
+            .get_run(&run.id)
+            .await
+            .expect("get run")
+            .expect("run exists");
+        assert_eq!(updated.status, RunStatus::Success);
+        assert!(updated.started_at.is_some());
+        assert!(updated.finished_at.is_some());
+    }
+}

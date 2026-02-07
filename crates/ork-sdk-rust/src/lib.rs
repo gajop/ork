@@ -210,6 +210,7 @@ macro_rules! ork_task_library {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
+    use std::sync::{Mutex, OnceLock};
 
     #[derive(Deserialize)]
     struct TestInput {
@@ -240,5 +241,89 @@ mod tests {
         fn accepts_input<T: TaskInput>(_: T) {}
         let input = TestInput { value: 21 };
         accepts_input(input);
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn test_read_input_from_upstream_env() {
+        let _guard = env_lock().lock().expect("env lock");
+        let previous_upstream = std::env::var("ORK_UPSTREAM_JSON").ok();
+        let previous_input = std::env::var("ORK_INPUT_JSON").ok();
+
+        unsafe {
+            std::env::set_var("ORK_UPSTREAM_JSON", r#"{"a":{"v":1}}"#);
+            std::env::set_var("ORK_INPUT_JSON", r#"{"value":999}"#);
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct UpstreamInput {
+            upstream: std::collections::HashMap<String, serde_json::Value>,
+        }
+
+        let parsed: UpstreamInput = read_input().expect("upstream input should parse");
+        assert_eq!(parsed.upstream["a"], serde_json::json!({"v": 1}));
+
+        match previous_upstream {
+            Some(v) => unsafe { std::env::set_var("ORK_UPSTREAM_JSON", v) },
+            None => unsafe { std::env::remove_var("ORK_UPSTREAM_JSON") },
+        }
+        match previous_input {
+            Some(v) => unsafe { std::env::set_var("ORK_INPUT_JSON", v) },
+            None => unsafe { std::env::remove_var("ORK_INPUT_JSON") },
+        }
+    }
+
+    #[test]
+    fn test_read_input_from_input_env() {
+        let _guard = env_lock().lock().expect("env lock");
+        let previous_upstream = std::env::var("ORK_UPSTREAM_JSON").ok();
+        let previous_input = std::env::var("ORK_INPUT_JSON").ok();
+
+        unsafe {
+            std::env::remove_var("ORK_UPSTREAM_JSON");
+            std::env::set_var("ORK_INPUT_JSON", r#"{"value":123}"#);
+        }
+
+        let parsed: TestInput = read_input().expect("input env should parse");
+        assert_eq!(parsed.value, 123);
+
+        match previous_upstream {
+            Some(v) => unsafe { std::env::set_var("ORK_UPSTREAM_JSON", v) },
+            None => unsafe { std::env::remove_var("ORK_UPSTREAM_JSON") },
+        }
+        match previous_input {
+            Some(v) => unsafe { std::env::set_var("ORK_INPUT_JSON", v) },
+            None => unsafe { std::env::remove_var("ORK_INPUT_JSON") },
+        }
+    }
+
+    #[test]
+    fn test_write_output_and_run_task_success_path() {
+        let _guard = env_lock().lock().expect("env lock");
+        let previous_upstream = std::env::var("ORK_UPSTREAM_JSON").ok();
+        let previous_input = std::env::var("ORK_INPUT_JSON").ok();
+
+        write_output(&serde_json::json!({"ok": true})).expect("write_output should succeed");
+
+        unsafe {
+            std::env::remove_var("ORK_UPSTREAM_JSON");
+            std::env::set_var("ORK_INPUT_JSON", r#"{"value":10}"#);
+        }
+        run_task(|input: TestInput| TestOutput {
+            result: input.value * 3,
+        });
+
+        match previous_upstream {
+            Some(v) => unsafe { std::env::set_var("ORK_UPSTREAM_JSON", v) },
+            None => unsafe { std::env::remove_var("ORK_UPSTREAM_JSON") },
+        }
+        match previous_input {
+            Some(v) => unsafe { std::env::set_var("ORK_INPUT_JSON", v) },
+            None => unsafe { std::env::remove_var("ORK_INPUT_JSON") },
+        }
     }
 }

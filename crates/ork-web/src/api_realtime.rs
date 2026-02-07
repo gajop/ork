@@ -48,3 +48,14 @@ async fn websocket_connection(socket: WebSocket, api: ApiServer) {
 pub(crate) async fn ui() -> Html<&'static str> {
     Html(include_str!("../ui/index.html"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_ui_serves_embedded_html() {
+        let Html(body) = ui().await;
+        assert!(body.contains("<html"));
+    }
+}

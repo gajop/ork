@@ -38,6 +38,10 @@ struct Cli {
     database_url: String,
 }
 
+fn resolve_database_url(default_url: String) -> String {
+    std::env::var("DATABASE_URL").unwrap_or(default_url)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
@@ -50,11 +54,12 @@ async fn main() -> Result<()> {
     } = Cli::parse();
 
     if command.uses_api()
-        && let Commands::RunWorkflow(cmd) = command {
-            return cmd.execute().await;
-        }
+        && let Commands::RunWorkflow(cmd) = command
+    {
+        return cmd.execute().await;
+    }
 
-    let database_url = std::env::var("DATABASE_URL").unwrap_or(database_url);
+    let database_url = resolve_database_url(database_url);
 
     let db = Arc::new(Db::new(&database_url).await?);
 
@@ -73,4 +78,57 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn test_cli_parse_defaults() {
+        let cli = Cli::parse_from(["ork", "init"]);
+        assert_eq!(
+            cli.database_url,
+            "postgres://postgres:postgres@localhost:5432/orchestrator"
+        );
+    }
+
+    #[test]
+    fn test_resolve_database_url_prefers_env_var() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev = std::env::var("DATABASE_URL").ok();
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://env-db");
+        }
+        let resolved = resolve_database_url("postgres://default-db".to_string());
+        assert_eq!(resolved, "postgres://env-db");
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("DATABASE_URL", v) },
+            None => unsafe { std::env::remove_var("DATABASE_URL") },
+        }
+    }
+
+    #[test]
+    fn test_resolve_database_url_falls_back_to_default() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev = std::env::var("DATABASE_URL").ok();
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+        let resolved = resolve_database_url("postgres://default-db".to_string());
+        assert_eq!(resolved, "postgres://default-db");
+
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("DATABASE_URL", v);
+            }
+        }
+    }
 }

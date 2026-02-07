@@ -33,3 +33,23 @@ impl Run {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_state::SqliteDatabase;
+
+    #[tokio::test]
+    async fn test_run_command_errors_on_missing_config_file() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let result = Run {
+            config: Some("/tmp/does-not-exist-config.yaml".to_string()),
+        }
+        .execute(db)
+        .await;
+
+        assert!(result.is_err());
+    }
+}

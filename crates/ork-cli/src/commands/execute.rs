@@ -215,3 +215,80 @@ impl Execute {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_state::SqliteDatabase;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn test_execute_command_errors_on_missing_workflow_file() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let result = Execute {
+            file: "/tmp/does-not-exist-workflow.yaml".to_string(),
+            config: None,
+            timeout: 1,
+        }
+        .execute(db)
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_success_path() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let temp_dir = std::env::temp_dir().join(format!("ork-execute-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let workflow_path = temp_dir.join("workflow.yaml");
+        let config_path = temp_dir.join("orchestrator.yaml");
+
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: wf-execute-success
+tasks:
+  task_a:
+    executor: process
+    command: "printf 'ORK_OUTPUT:{\"ok\":true}\n'"
+"#,
+        )
+        .expect("write workflow");
+        std::fs::write(
+            &config_path,
+            r#"
+poll_interval_secs: 0.01
+max_tasks_per_batch: 100
+max_concurrent_dispatches: 10
+max_concurrent_status_checks: 50
+db_pool_size: 5
+enable_triggerer: false
+"#,
+        )
+        .expect("write config");
+
+        let result = Execute {
+            file: workflow_path.to_string_lossy().to_string(),
+            config: Some(config_path.to_string_lossy().to_string()),
+            timeout: 10,
+        }
+        .execute(db.clone())
+        .await;
+
+        assert!(result.is_ok());
+        let workflow = db
+            .get_workflow("wf-execute-success")
+            .await
+            .expect("workflow should exist");
+        let runs = db.list_runs(Some(workflow.id)).await.expect("list runs");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status_str(), "success");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+}

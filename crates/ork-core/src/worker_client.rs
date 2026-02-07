@@ -137,10 +137,38 @@ impl WorkerClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_worker_client_creation() {
         let client = WorkerClient::new("http://localhost:8081".to_string());
         assert_eq!(client.worker_url, "http://localhost:8081");
+    }
+
+    #[test]
+    fn test_compile_request_skips_missing_path() {
+        let req = CompileRequest {
+            workflow_path: None,
+        };
+        let value =
+            serde_json::to_value(req).expect("compile request serialization should succeed");
+        assert!(value.get("workflow_path").is_none());
+    }
+
+    #[test]
+    fn test_execute_response_deserialization_variants() {
+        let success: ExecuteResponse = serde_json::from_value(json!({
+            "status": "success",
+            "output": { "ok": true }
+        }))
+        .expect("success execute response should deserialize");
+        assert!(matches!(success, ExecuteResponse::Success { .. }));
+
+        let failed: ExecuteResponse = serde_json::from_value(json!({
+            "status": "failed",
+            "error": "boom"
+        }))
+        .expect("failed execute response should deserialize");
+        assert!(matches!(failed, ExecuteResponse::Failed { .. }));
     }
 }

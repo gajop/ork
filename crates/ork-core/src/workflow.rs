@@ -166,3 +166,223 @@ fn detect_cycle(workflow: &Workflow) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::WorkflowValidationError;
+    use tempfile::NamedTempFile;
+
+    fn process_task() -> TaskDefinition {
+        TaskDefinition {
+            executor: ExecutorKind::Process,
+            file: None,
+            command: Some("echo ok".to_string()),
+            job: None,
+            module: None,
+            function: None,
+            input: serde_json::json!({}),
+            depends_on: Vec::new(),
+            timeout: 300,
+            retries: 0,
+        }
+    }
+
+    #[test]
+    fn test_validate_rejects_empty_workflow_name_and_no_tasks() {
+        let empty_name = Workflow {
+            name: "  ".to_string(),
+            schedule: None,
+            tasks: IndexMap::new(),
+        };
+        assert_eq!(
+            empty_name.validate(),
+            Err(WorkflowValidationError::EmptyWorkflowName)
+        );
+
+        let no_tasks = Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks: IndexMap::new(),
+        };
+        assert_eq!(no_tasks.validate(), Err(WorkflowValidationError::NoTasks));
+    }
+
+    #[test]
+    fn test_validate_rejects_dependency_errors() {
+        let mut tasks = IndexMap::new();
+        let mut a = process_task();
+        a.depends_on = vec!["missing".to_string()];
+        tasks.insert("a".to_string(), a);
+
+        let wf = Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks,
+        };
+        assert!(matches!(
+            wf.validate(),
+            Err(WorkflowValidationError::UnknownDependency { .. })
+        ));
+
+        let mut tasks = IndexMap::new();
+        let mut self_dep = process_task();
+        self_dep.depends_on = vec!["a".to_string()];
+        tasks.insert("a".to_string(), self_dep);
+        let wf = Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks,
+        };
+        assert!(matches!(
+            wf.validate(),
+            Err(WorkflowValidationError::SelfDependency { task }) if task == "a"
+        ));
+    }
+
+    #[test]
+    fn test_validate_rejects_executor_specific_missing_fields() {
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "python".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Python,
+                file: None,
+                command: None,
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({}),
+                depends_on: Vec::new(),
+                timeout: 300,
+                retries: 0,
+            },
+        );
+        assert!(matches!(
+            (Workflow {
+                name: "wf".to_string(),
+                schedule: None,
+                tasks,
+            })
+            .validate(),
+            Err(WorkflowValidationError::MissingTaskFile { .. })
+        ));
+
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "process".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Process,
+                file: None,
+                command: None,
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({}),
+                depends_on: Vec::new(),
+                timeout: 300,
+                retries: 0,
+            },
+        );
+        assert!(matches!(
+            (Workflow {
+                name: "wf".to_string(),
+                schedule: None,
+                tasks,
+            })
+            .validate(),
+            Err(WorkflowValidationError::MissingTaskCommand { .. })
+        ));
+
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "cloudrun".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::CloudRun,
+                file: None,
+                command: None,
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({}),
+                depends_on: Vec::new(),
+                timeout: 300,
+                retries: 0,
+            },
+        );
+        assert!(matches!(
+            (Workflow {
+                name: "wf".to_string(),
+                schedule: None,
+                tasks,
+            })
+            .validate(),
+            Err(WorkflowValidationError::MissingTaskJob { .. })
+        ));
+
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "lib".to_string(),
+            TaskDefinition {
+                executor: ExecutorKind::Library,
+                file: None,
+                command: None,
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::json!({}),
+                depends_on: Vec::new(),
+                timeout: 300,
+                retries: 0,
+            },
+        );
+        assert!(matches!(
+            (Workflow {
+                name: "wf".to_string(),
+                schedule: None,
+                tasks,
+            })
+            .validate(),
+            Err(WorkflowValidationError::MissingTaskFile { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_detects_cycle() {
+        let mut tasks = IndexMap::new();
+        let mut a = process_task();
+        let mut b = process_task();
+        a.depends_on = vec!["b".to_string()];
+        b.depends_on = vec!["a".to_string()];
+        tasks.insert("a".to_string(), a);
+        tasks.insert("b".to_string(), b);
+
+        let wf = Workflow {
+            name: "wf".to_string(),
+            schedule: None,
+            tasks,
+        };
+        assert!(matches!(
+            wf.validate(),
+            Err(WorkflowValidationError::Cycle { .. })
+        ));
+    }
+
+    #[test]
+    fn test_load_parses_valid_yaml() {
+        let mut file = NamedTempFile::new().expect("tempfile should be created");
+        let yaml = r#"
+name: hello
+tasks:
+  first:
+    executor: process
+    command: "echo hello"
+"#;
+        std::io::Write::write_all(&mut file, yaml.as_bytes())
+            .expect("yaml content should be written");
+
+        let loaded = Workflow::load(file.path()).expect("workflow yaml should load");
+        assert_eq!(loaded.name, "hello");
+        assert!(loaded.tasks.contains_key("first"));
+    }
+}

@@ -42,4 +42,6 @@ The base crate: models, traits, and the scheduler loop. Everything else builds o
 | [tests/dag_execution_test.rs](../../../crates/ork-core/tests/dag_execution_test.rs) | DAG execution order/performance integration test. | 2026-02-07 | e57a0cb |
 | [tests/deferrables_test.rs](../../../crates/ork-core/tests/deferrables_test.rs) | Integration tests for deferrable task lifecycle handling. | 2026-02-07 | e13ff26 |
 | [tests/pause_resume_test.rs](../../../crates/ork-core/tests/pause_resume_test.rs) | Pause/resume scheduler integration tests. | 2026-02-07 | a0b6a39 |
+| [tests/schedule_processor_test.rs](../../../crates/ork-core/tests/schedule_processor_test.rs) | Integration tests for scheduled workflow processing and trigger time updates. | 2026-02-07 | 4b0a3f8 |
+| [tests/sqlite_deferred_jobs_test.rs](../../../crates/ork-core/tests/sqlite_deferred_jobs_test.rs) | SQLite integration tests for deferred job lifecycle and cancellation behavior. | 2026-02-07 | 7756af0 |
 | [tests/type_extraction_test.rs](../../../crates/ork-core/tests/type_extraction_test.rs) | Tests for workflow/task type extraction and signature metadata behavior. | 2026-02-07 | 1c4ab3e |

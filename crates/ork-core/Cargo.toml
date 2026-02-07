@@ -39,6 +39,7 @@ google-cloud-dataproc-v1 = { workspace = true }
 ork-state = { path = "../ork-state", features = ["sqlite"] }
 ork-executors = { path = "../ork-executors", features = ["process"] }
 tempfile = "3.24.0"
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "uuid", "chrono", "json"] }
 
 [lints]
 workspace = true

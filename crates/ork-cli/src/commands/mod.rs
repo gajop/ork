@@ -65,3 +65,24 @@ impl Commands {
         matches!(self, Commands::RunWorkflow(_))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uses_api_only_for_run_workflow() {
+        let command = Commands::RunWorkflow(RunWorkflow {
+            file: "wf.yaml".to_string(),
+            api_url: "http://127.0.0.1:4000".to_string(),
+            project: "local".to_string(),
+            region: "local".to_string(),
+            root: None,
+            replace: true,
+        });
+        assert!(command.uses_api());
+
+        let non_api = Commands::Init(Init);
+        assert!(!non_api.uses_api());
+    }
+}

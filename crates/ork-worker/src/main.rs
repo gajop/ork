@@ -82,3 +82,28 @@ async fn health_handler() -> impl IntoResponse {
         "service": "ork-worker"
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    #[test]
+    fn test_args_defaults() {
+        let args = Args::parse_from(["ork-worker"]);
+        assert_eq!(args.addr, "127.0.0.1:8081");
+        assert_eq!(args.workflow_path, "workflow.yaml");
+        assert_eq!(args.working_dir, ".");
+    }
+
+    #[tokio::test]
+    async fn test_health_handler_payload() {
+        let response = health_handler().await.into_response();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("valid json");
+        assert_eq!(json["status"], "healthy");
+        assert_eq!(json["service"], "ork-worker");
+    }
+}

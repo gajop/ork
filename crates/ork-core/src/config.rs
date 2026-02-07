@@ -78,3 +78,44 @@ impl OrchestratorConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_has_sane_values() {
+        let config = OrchestratorConfig::default();
+
+        assert!(config.poll_interval_secs.is_finite());
+        assert!(config.poll_interval_secs > 0.0);
+        assert!(config.max_tasks_per_batch > 0);
+        assert!(config.max_concurrent_dispatches > 0);
+        assert!(config.max_concurrent_status_checks > 0);
+        assert!(config.db_pool_size > 0);
+    }
+
+    #[test]
+    fn test_optimized_profile_values() {
+        let config = OrchestratorConfig::optimized();
+
+        assert_eq!(config.poll_interval_secs, 2.0);
+        assert_eq!(config.max_tasks_per_batch, 50);
+        assert_eq!(config.max_concurrent_dispatches, 5);
+        assert_eq!(config.max_concurrent_status_checks, 20);
+        assert_eq!(config.db_pool_size, 5);
+        assert!(config.enable_triggerer);
+    }
+
+    #[test]
+    fn test_high_throughput_profile_values() {
+        let config = OrchestratorConfig::high_throughput();
+
+        assert_eq!(config.poll_interval_secs, 5.0);
+        assert_eq!(config.max_tasks_per_batch, 500);
+        assert_eq!(config.max_concurrent_dispatches, 50);
+        assert_eq!(config.max_concurrent_status_checks, 100);
+        assert_eq!(config.db_pool_size, 20);
+        assert!(config.enable_triggerer);
+    }
+}

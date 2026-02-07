@@ -196,5 +196,4 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             info!("SCHEDULER_METRICS: {}", metrics_json);
         }
     }
-
 }
