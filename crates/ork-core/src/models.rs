@@ -213,7 +213,6 @@ pub struct TaskWithWorkflow {
     pub task_name: String,
     pub executor_type: String,
     pub depends_on: Vec<String>,
-    #[allow(dead_code)]
     pub task_status: String,
     pub attempts: i32,
     pub max_retries: i32,
@@ -224,7 +223,6 @@ pub struct TaskWithWorkflow {
 
     // Workflow fields
     pub workflow_id: Uuid,
-    #[allow(dead_code)]
     pub job_name: String,
     pub project: String,
     pub region: String,

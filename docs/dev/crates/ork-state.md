@@ -31,12 +31,14 @@ Storage backends for Ork. Implements the [`ork-core::Database`](../../../crates/
 | [migrations/009_add_workflow_schedules.sql](../../../crates/ork-state/migrations/009_add_workflow_schedules.sql) | Add workflow schedule columns and flags. | 2026-02-06 | 12f8574 |
 | [migrations/010_add_pause_status.sql](../../../crates/ork-state/migrations/010_add_pause_status.sql) | Allow paused status for runs and tasks. | 2026-02-06 | 8a21120 |
 | [migrations/011_add_task_signatures.sql](../../../crates/ork-state/migrations/011_add_task_signatures.sql) | Adds task signature metadata storage for workflow task introspection. | 2026-02-06 | 926e46b |
+| [migrations/012_add_deferred_jobs.sql](../../../crates/ork-state/migrations/012_add_deferred_jobs.sql) | Adds deferred job tracking table and indexes for triggerer polling. | 2026-02-07 | c22c80f |
 | [migrations_sqlite/001_init.sql](../../../crates/ork-state/migrations_sqlite/001_init.sql) | Standalone SQLite schema for local runs. | 2026-02-06 | 5ed599a |
 | [migrations_sqlite/002_add_task_logs.sql](../../../crates/ork-state/migrations_sqlite/002_add_task_logs.sql) | Adds task log storage to the SQLite schema. | 2026-02-06 | 336fde8 |
 | [migrations_sqlite/003_add_task_retries_timeouts.sql](../../../crates/ork-state/migrations_sqlite/003_add_task_retries_timeouts.sql) | Adds retry/timeout metadata to SQLite tasks. | 2026-02-06 | f326a0b |
 | [migrations_sqlite/004_add_workflow_schedules.sql](../../../crates/ork-state/migrations_sqlite/004_add_workflow_schedules.sql) | SQLite schedule columns and flags. | 2026-02-06 | f0a496d |
 | [migrations_sqlite/005_add_pause_status.sql](../../../crates/ork-state/migrations_sqlite/005_add_pause_status.sql) | SQLite paused status migration. | 2026-02-06 | bccc7cb |
 | [migrations_sqlite/006_add_task_signatures.sql](../../../crates/ork-state/migrations_sqlite/006_add_task_signatures.sql) | SQLite migration for task signature metadata. | 2026-02-06 | a39905f |
+| [migrations_sqlite/007_add_deferred_jobs.sql](../../../crates/ork-state/migrations_sqlite/007_add_deferred_jobs.sql) | Adds deferred job tracking table and indexes for SQLite mode. | 2026-02-07 | dd08bdd |
 | [src/file.rs](../../../crates/ork-state/src/file.rs) | File-backed `StateStore` implementation for legacy flows. | 2026-02-07 | 9b801f8 |
 | [src/file_database.rs](../../../crates/ork-state/src/file_database.rs) | `FileDatabase` backed by JSON files for local/dev use. | 2026-02-07 | 5986abc |
 | [src/file_database/core.rs](../../../crates/ork-state/src/file_database/core.rs) | File-backed DB path helpers and JSON IO. | 2026-02-07 | eb5fd5b |

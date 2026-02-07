@@ -48,7 +48,6 @@ struct ResourceStats {
 
 #[derive(Debug, Deserialize)]
 struct SchedulerMetrics {
-    #[allow(dead_code)]
     timestamp: u64,
     process_pending_runs_ms: u128,
     process_pending_tasks_ms: u128,
@@ -272,6 +271,7 @@ async fn main() -> Result<()> {
                 .sum();
             let total_sleep: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
             let total_time: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
+            let last_timestamp = all_metrics.back().map(|m| m.timestamp).unwrap_or(0);
 
             let runs_pct = (total_runs as f64 / total_time as f64) * 100.0;
             let tasks_pct = (total_tasks as f64 / total_time as f64) * 100.0;
@@ -279,7 +279,7 @@ async fn main() -> Result<()> {
             let sleep_pct = (total_sleep as f64 / total_time as f64) * 100.0;
 
             format!(
-                "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% updates:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops)",
+                "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% updates:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops, last_ts:{})",
                 total_runs as f64 / 1000.0,
                 runs_pct,
                 total_tasks as f64 / 1000.0,
@@ -289,7 +289,8 @@ async fn main() -> Result<()> {
                 total_sleep as f64 / 1000.0,
                 sleep_pct,
                 total_time as f64 / 1000.0,
-                all_metrics.len()
+                all_metrics.len(),
+                last_timestamp
             )
         } else {
             "waiting for metrics...".to_string()

@@ -5,25 +5,6 @@ use ork_state::SqliteDatabase;
 async fn setup_db_with_task() -> Result<(SqliteDatabase, uuid::Uuid)> {
     let db = SqliteDatabase::new(":memory:").await?;
     db.run_migrations().await?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS deferred_jobs (
-            id BLOB PRIMARY KEY DEFAULT (randomblob(16)),
-            task_id BLOB NOT NULL,
-            service_type TEXT NOT NULL,
-            job_id TEXT NOT NULL,
-            job_data TEXT NOT NULL,
-            status TEXT NOT NULL,
-            error TEXT,
-            created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
-            started_at TEXT,
-            last_polled_at TEXT,
-            finished_at TEXT
-        )
-        "#,
-    )
-    .execute(db.pool())
-    .await?;
 
     let workflow = db
         .create_workflow("wf", None, "job", "local", "local", "process", None, None)

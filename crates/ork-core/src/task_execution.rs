@@ -15,6 +15,15 @@ pub async fn execute_task<E: ExecutorManager>(
     executor_manager: &E,
     status_tx: tokio::sync::mpsc::UnboundedSender<StatusUpdate>,
 ) -> (Uuid, Result<String>) {
+    if task_with_workflow.task_status != "pending" {
+        let err = anyhow::anyhow!(
+            "refusing to dispatch task {} in non-pending status {}",
+            task_with_workflow.task_id,
+            task_with_workflow.task_status
+        );
+        return (task_with_workflow.task_id, Err(err));
+    }
+
     let workflow = match workflow_map.get(&task_with_workflow.workflow_id) {
         Some(workflow) => workflow,
         None => {
@@ -27,7 +36,7 @@ pub async fn execute_task<E: ExecutorManager>(
         }
     };
 
-    let job_name = resolve_job_name(&task_with_workflow, workflow);
+    let job_name = resolve_job_name(&task_with_workflow);
     let mut params = task_with_workflow
         .params
         .as_ref()
@@ -105,7 +114,7 @@ pub async fn execute_task<E: ExecutorManager>(
     (task_with_workflow.task_id, execution_result)
 }
 
-fn resolve_job_name(task: &TaskWithWorkflow, workflow: &Workflow) -> String {
+fn resolve_job_name(task: &TaskWithWorkflow) -> String {
     let params = task.params.as_ref().map(json_inner);
     let override_name = params
         .and_then(|p| p.get("job_name").and_then(|v| v.as_str()))
@@ -114,7 +123,7 @@ fn resolve_job_name(task: &TaskWithWorkflow, workflow: &Workflow) -> String {
 
     override_name
         .map(|s| s.to_string())
-        .unwrap_or_else(|| workflow.job_name.clone())
+        .unwrap_or_else(|| task.job_name.clone())
 }
 
 pub fn retry_backoff_seconds(attempt: i32) -> u64 {
@@ -172,4 +181,60 @@ pub fn build_run_tasks(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_task_with_workflow(params: Option<serde_json::Value>) -> TaskWithWorkflow {
+        TaskWithWorkflow {
+            task_id: Uuid::new_v4(),
+            run_id: Uuid::new_v4(),
+            task_index: 0,
+            task_name: "task".to_string(),
+            executor_type: "process".to_string(),
+            depends_on: Vec::new(),
+            task_status: "pending".to_string(),
+            attempts: 0,
+            max_retries: 0,
+            timeout_seconds: None,
+            retry_at: None,
+            execution_name: None,
+            params: params.map(Into::into),
+            workflow_id: Uuid::new_v4(),
+            job_name: "workflow-job".to_string(),
+            project: "project".to_string(),
+            region: "region".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_resolve_job_name_prefers_params_over_task_default() {
+        let with_command = sample_task_with_workflow(Some(serde_json::json!({
+            "command": "echo hello"
+        })));
+        assert_eq!(resolve_job_name(&with_command), "echo hello");
+
+        let with_job_name = sample_task_with_workflow(Some(serde_json::json!({
+            "job_name": "overridden"
+        })));
+        assert_eq!(resolve_job_name(&with_job_name), "overridden");
+    }
+
+    #[test]
+    fn test_resolve_job_name_falls_back_to_task_joined_data() {
+        let task = sample_task_with_workflow(None);
+        assert_eq!(resolve_job_name(&task), "workflow-job");
+    }
+
+    #[test]
+    fn test_retry_backoff_seconds_caps() {
+        assert_eq!(retry_backoff_seconds(0), 1);
+        assert_eq!(retry_backoff_seconds(1), 1);
+        assert_eq!(retry_backoff_seconds(2), 2);
+        assert_eq!(retry_backoff_seconds(6), 32);
+        assert_eq!(retry_backoff_seconds(10), 60);
+        assert_eq!(retry_backoff_seconds(15), 60);
+    }
 }

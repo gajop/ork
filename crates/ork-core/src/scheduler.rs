@@ -29,7 +29,6 @@ mod processing;
 
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
-    #[allow(dead_code)]
     pub timestamp: u64,
     pub process_pending_runs_ms: u128,
     pub process_pending_tasks_ms: u128,
