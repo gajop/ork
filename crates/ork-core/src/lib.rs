@@ -14,6 +14,7 @@ pub mod schedule_processor;
 pub mod scheduler;
 pub mod task_execution;
 pub mod triggerer;
+pub mod worker_client;
 
 pub use error::{OrkError, OrkResult};
 pub use types::*;

@@ -10,6 +10,7 @@ default = ["process", "library"]
 process = []
 cloudrun = ["dep:gcp_auth", "dep:reqwest"]
 library = ["dep:libloading"]
+worker = ["dep:reqwest"]
 fargate = []  # Future
 lambda = []   # Future
 
