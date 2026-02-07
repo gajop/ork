@@ -74,6 +74,7 @@ tasks:
     executor: python
     file: tasks.py
     function: analyze_data
+    output_type: BigQueryJob
 ```
 
 Python task definition

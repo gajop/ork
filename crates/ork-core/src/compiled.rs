@@ -27,7 +27,6 @@ pub struct CompiledTask {
     pub depends_on: Vec<usize>,
     pub timeout: u64,
     pub retries: u32,
-    pub env: std::collections::HashMap<String, String>,
     pub signature: Option<serde_json::Value>,
 }
 
@@ -91,7 +90,6 @@ impl Workflow {
                 depends_on,
                 timeout: task.timeout,
                 retries: task.retries,
-                env: task.env.clone(),
                 signature,
             });
         }

@@ -105,14 +105,6 @@ fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<
             "timeout_seconds".to_string(),
             serde_json::Value::Number(task.timeout.into()),
         );
-        if !task.env.is_empty() {
-            let env_json = task
-                .env
-                .iter()
-                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                .collect::<serde_json::Map<_, _>>();
-            params.insert("env".to_string(), serde_json::Value::Object(env_json));
-        }
 
         match task.executor {
             ExecutorKind::CloudRun => {

@@ -32,8 +32,6 @@ pub struct TaskDefinition {
     pub timeout: u64,
     #[serde(default = "default_retries")]
     pub retries: u32,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

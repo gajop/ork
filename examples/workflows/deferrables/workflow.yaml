@@ -8,8 +8,6 @@ tasks:
     file: tasks.py
     params:
       task_name: simulate_bigquery_job
-      env:
-        GCP_PROJECT: my-demo-project
 
   # Task 2: Simulate a custom HTTP job
   custom_http_job:
@@ -24,8 +22,6 @@ tasks:
     file: tasks.py
     params:
       task_name: multiple_jobs
-      env:
-        GCP_PROJECT: my-demo-project
 
   # Task 4: Process results after deferred job completes
   process_results:

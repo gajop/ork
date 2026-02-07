@@ -381,17 +381,6 @@ fn build_env_vars(
                             runner_path = Some(PathBuf::from(path));
                         }
                     }
-                    "env" => {
-                        if let Some(env_obj) = v.as_object() {
-                            for (env_key, env_val) in env_obj {
-                                if let Some(val) = env_val.as_str() {
-                                    env_vars.insert(env_key.clone(), val.to_string());
-                                } else if env_val.is_number() || env_val.is_boolean() {
-                                    env_vars.insert(env_key.clone(), env_val.to_string());
-                                }
-                            }
-                        }
-                    }
                     "upstream" => {
                         env_vars.insert("ORK_UPSTREAM_JSON".to_string(), v.to_string());
                     }
