@@ -174,11 +174,6 @@ All components have been implemented and the project builds successfully.
 1. **Real API Integration**: Actual BigQuery/Cloud Run/Dataproc API clients (currently placeholders)
 2. **gRPC Migration**: Replace HTTP with gRPC for better performance (Phase 2)
 3. **Worker Container Images**: Docker images with embedded workflows
-### 🚧 Future Work (Not in Scope)
-1. **Worker HTTP Server**: Separate `/compile` and `/execute` endpoints
-2. **Worker Client**: HTTP client for calling worker endpoints
-3. **Real API Integration**: Actual BigQuery/Cloud Run/Dataproc API clients
-4. **gRPC Migration**: Replace HTTP with gRPC (Phase 2)
 
 ## Usage Example
 
