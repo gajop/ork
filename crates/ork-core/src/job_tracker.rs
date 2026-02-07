@@ -117,14 +117,16 @@ impl JobTracker for BigQueryTracker {
 ///
 /// Polls Cloud Run API to check job execution status.
 pub struct CloudRunTracker {
-    _marker: (),
+    client: google_cloud_run_v2::client::Executions,
 }
 
 impl CloudRunTracker {
     pub async fn new() -> anyhow::Result<Self> {
-        // TODO: Initialize Cloud Run client when gRPC API is fully implemented
-        // let client = google_cloud_run_v2::client::Executions::builder().await?.build().await?;
-        Ok(Self { _marker: () })
+        let client = google_cloud_run_v2::client::Executions::builder()
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create Cloud Run client: {}", e))?;
+        Ok(Self { client })
     }
 }
 
@@ -160,23 +162,48 @@ impl JobTracker for CloudRunTracker {
             execution_id
         );
 
-        // TODO: Implement actual Cloud Run API polling using gRPC client
-        // The google-cloud-run-v2 crate uses a gRPC-based builder API:
-        //
-        // let client = google_cloud_run_v2::client::Executions::builder().await?.build().await?;
-        // let execution_name = format!("projects/{}/locations/{}/jobs/{}/executions/{}",
-        //     project, region, job_name, execution_id);
-        // let execution = client.get_execution()
-        //     .name(&execution_name)
-        //     .send()
-        //     .await?;
-        //
-        // Check execution.status.conditions for "Completed" condition:
-        // - condition.state == "CONDITION_STATE_SUCCEEDED" => Completed
-        // - condition.state == "CONDITION_STATE_FAILED" => Failed
-        // - otherwise => Running
+        // Build execution resource name
+        let execution_name = format!(
+            "projects/{}/locations/{}/jobs/{}/executions/{}",
+            project, region, job_name, execution_id
+        );
 
-        tracing::warn!("Cloud Run job tracking not yet implemented - returning Running");
+        // Call Cloud Run API to get execution status
+        let execution = self.client
+            .get_execution()
+            .set_name(execution_name)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get Cloud Run execution: {}", e))?;
+
+        // Check execution conditions for completion
+        use google_cloud_run_v2::model::condition::State;
+        for condition in &execution.conditions {
+            // Look for the "Ready" or "Completed" condition
+            if condition.r#type == "Ready" || condition.r#type == "Completed" {
+                match condition.state {
+                    State::ConditionSucceeded => {
+                        return Ok(JobStatus::Completed);
+                    }
+                    State::ConditionFailed => {
+                        let error_msg = if condition.message.is_empty() {
+                            "Execution failed".to_string()
+                        } else {
+                            condition.message.clone()
+                        };
+                        return Ok(JobStatus::Failed(format!("Cloud Run execution failed: {}", error_msg)));
+                    }
+                    State::ConditionPending | State::ConditionReconciling => {
+                        // Still in progress
+                    }
+                    _ => {
+                        // Unknown or unspecified state, continue checking
+                    }
+                }
+            }
+        }
+
+        // If no definitive completion condition found, job is still running
         Ok(JobStatus::Running)
     }
 }
@@ -185,14 +212,16 @@ impl JobTracker for CloudRunTracker {
 ///
 /// Polls Dataproc API to check Spark/Hadoop job status.
 pub struct DataprocTracker {
-    _marker: (),
+    client: google_cloud_dataproc_v1::client::JobController,
 }
 
 impl DataprocTracker {
     pub async fn new() -> anyhow::Result<Self> {
-        // TODO: Initialize Dataproc client when gRPC API is fully implemented
-        // let client = google_cloud_dataproc_v1::client::JobController::builder().await?.build().await?;
-        Ok(Self { _marker: () })
+        let client = google_cloud_dataproc_v1::client::JobController::builder()
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create Dataproc client: {}", e))?;
+        Ok(Self { client })
     }
 }
 
@@ -227,25 +256,51 @@ impl JobTracker for DataprocTracker {
             dp_job_id
         );
 
-        // TODO: Implement actual Dataproc API polling using gRPC client
-        // The google-cloud-dataproc-v1 crate uses a gRPC-based builder API:
-        //
-        // let client = google_cloud_dataproc_v1::client::JobController::builder().await?.build().await?;
-        // let job_name = format!("projects/{}/regions/{}/jobs/{}", project, region, dp_job_id);
-        // let job = client.get_job()
-        //     .project_id(project)
-        //     .region(region)
-        //     .job_id(dp_job_id)
-        //     .send()
-        //     .await?;
-        //
-        // Check job.status.state:
-        // - JobState::Done with substate != Failed => Completed
-        // - JobState::Error or JobState::Cancelled => Failed
-        // - otherwise => Running
+        // Call Dataproc API to get job status
+        let job = self.client
+            .get_job()
+            .set_project_id(project)
+            .set_region(region)
+            .set_job_id(dp_job_id)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get Dataproc job: {}", e))?;
 
-        tracing::warn!("Dataproc job tracking not yet implemented - returning Running");
-        Ok(JobStatus::Running)
+        // Check job status state
+        if let Some(status) = job.status {
+            use google_cloud_dataproc_v1::model::job_status::State;
+            match status.state {
+                State::Done => {
+                    // Job completed - check for errors in details
+                    if !status.details.is_empty() && status.details.to_lowercase().contains("error") {
+                        return Ok(JobStatus::Failed(format!("Dataproc job completed with errors: {}", status.details)));
+                    }
+                    Ok(JobStatus::Completed)
+                }
+                State::Error => {
+                    let error_msg = if status.details.is_empty() {
+                        "Job error".to_string()
+                    } else {
+                        status.details
+                    };
+                    Ok(JobStatus::Failed(format!("Dataproc job error: {}", error_msg)))
+                }
+                State::Cancelled => {
+                    Ok(JobStatus::Failed("Job was cancelled".to_string()))
+                }
+                State::Pending | State::SetupDone | State::Running |
+                State::CancelPending | State::CancelStarted => {
+                    Ok(JobStatus::Running)
+                }
+                _ => {
+                    // Unknown state, assume running
+                    Ok(JobStatus::Running)
+                }
+            }
+        } else {
+            // No status yet, assume running
+            Ok(JobStatus::Running)
+        }
     }
 }
 
