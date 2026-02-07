@@ -171,13 +171,13 @@ All components have been implemented and the project builds successfully.
 11. **WorkerExecutor**: Executor that delegates to remote worker containers
 12. **Google Cloud API Clients**: Real API integration for job tracking
     - **BigQuery**: Fully implemented using google-cloud-bigquery REST API
-    - **Cloud Run**: Placeholder with detailed TODO for gRPC implementation
-    - **Dataproc**: Placeholder with detailed TODO for gRPC implementation
+    - **Cloud Run**: Fully implemented using google-cloud-run-v2 gRPC API
+    - **Dataproc**: Fully implemented using google-cloud-dataproc-v1 gRPC API
 
 ### 🚧 Future Work
-1. **Cloud Run gRPC Client**: Implement actual gRPC-based job tracking (TODO in code)
-2. **Dataproc gRPC Client**: Implement actual gRPC-based job tracking (TODO in code)
-3. **Worker Container Images**: Docker images with embedded workflows
+1. **Worker Container Images**: Docker images with embedded workflows
+2. **Integration Testing**: End-to-end tests with real GCP credentials
+3. **Additional Job Types**: Support for more Google Cloud services (Cloud Functions, Vertex AI, etc.)
 
 ## Usage Example
 
