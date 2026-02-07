@@ -158,7 +158,6 @@ All components have been implemented and the project builds successfully.
 
 ## Key Features
 
-### ✅ Implemented
 1. **Deferrable Types**: SDK support for defining external jobs
 2. **Database Layer**: Complete CRUD operations for deferred jobs
 3. **Job Tracking**: Trait-based system for polling external APIs
@@ -167,7 +166,14 @@ All components have been implemented and the project builds successfully.
 6. **Job Lifecycle**: Complete tracking from creation to completion
 7. **Error Handling**: Failed jobs propagate errors to tasks
 8. **Examples**: Working demonstration with Python tasks
+9. **Worker HTTP Server**: Axum server with `/compile` and `/execute` endpoints
+10. **Worker Client**: HTTP client in ork-core for calling worker endpoints
+11. **WorkerExecutor**: Executor that delegates to remote worker containers
 
+### 🚧 Future Work (Not in Scope)
+1. **Real API Integration**: Actual BigQuery/Cloud Run/Dataproc API clients (currently placeholders)
+2. **gRPC Migration**: Replace HTTP with gRPC for better performance (Phase 2)
+3. **Worker Container Images**: Docker images with embedded workflows
 ### 🚧 Future Work (Not in Scope)
 1. **Worker HTTP Server**: Separate `/compile` and `/execute` endpoints
 2. **Worker Client**: HTTP client for calling worker endpoints
