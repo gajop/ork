@@ -22,6 +22,9 @@ use crate::models::{TaskStatus, Workflow, WorkflowTask, json_inner};
 
 use crate::task_execution::{build_run_tasks, execute_task, retry_backoff_seconds};
 
+use crate::triggerer::{JobCompletionNotification, Triggerer, TriggererConfig};
+use crate::job_tracker::{BigQueryTracker, CloudRunTracker, CustomHttpTracker, DataprocTracker};
+
 #[derive(Debug, Default, Serialize)]
 pub struct SchedulerMetrics {
     #[allow(dead_code)]
@@ -39,6 +42,8 @@ pub struct Scheduler<D: Database + 'static, E: ExecutorManager + 'static> {
     executor_manager: Arc<E>,
     status_tx: mpsc::UnboundedSender<StatusUpdate>,
     status_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<StatusUpdate>>>,
+    job_completion_tx: mpsc::UnboundedSender<JobCompletionNotification>,
+    job_completion_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<JobCompletionNotification>>>,
 }
 
 impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
@@ -52,13 +57,33 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         config: OrchestratorConfig,
     ) -> Self {
         let (status_tx, status_rx) = mpsc::unbounded_channel();
+        let (job_completion_tx, job_completion_rx) = mpsc::unbounded_channel();
         Self {
             db,
             config,
             executor_manager,
             status_tx,
             status_rx: Arc::new(tokio::sync::Mutex::new(status_rx)),
+            job_completion_tx,
+            job_completion_rx: Arc::new(tokio::sync::Mutex::new(job_completion_rx)),
         }
+    }
+
+    /// Start the triggerer component for tracking deferred jobs
+    pub fn start_triggerer(&self) -> tokio::task::JoinHandle<()> {
+        let mut triggerer = Triggerer::with_config(
+            Arc::clone(&self.db),
+            self.job_completion_tx.clone(),
+            TriggererConfig::default(),
+        );
+
+        // Register job trackers
+        triggerer.register_tracker(Arc::new(BigQueryTracker::new()));
+        triggerer.register_tracker(Arc::new(CloudRunTracker::new()));
+        triggerer.register_tracker(Arc::new(DataprocTracker::new()));
+        triggerer.register_tracker(Arc::new(CustomHttpTracker::new()));
+
+        triggerer.start()
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -69,7 +94,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             self.config.max_concurrent_status_checks
         );
 
+        // Start triggerer in background
+        let _triggerer_handle = self.start_triggerer();
+        info!("Triggerer started");
+
         let mut status_rx = self.status_rx.lock().await;
+        let mut job_completion_rx = self.job_completion_rx.lock().await;
 
         loop {
             let loop_start = Instant::now();
@@ -98,6 +128,17 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 }
             }
             metrics.process_status_updates_ms = start.elapsed().as_millis();
+
+            // Process deferred job completions from triggerer
+            let mut job_completions = Vec::new();
+            while let Ok(completion) = job_completion_rx.try_recv() {
+                job_completions.push(completion);
+            }
+            if !job_completions.is_empty() {
+                if let Err(e) = self.process_job_completions(job_completions).await {
+                    error!("Error processing job completions: {}", e);
+                }
+            }
 
             if let Err(e) = self.enforce_timeouts().await {
                 error!("Error enforcing timeouts: {}", e);
@@ -488,5 +529,56 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
     async fn process_scheduled_triggers(&self) -> Result<usize> {
         crate::schedule_processor::process_scheduled_triggers(self.db.as_ref()).await
+    }
+
+    /// Process job completion notifications from the triggerer
+    async fn process_job_completions(
+        &self,
+        completions: Vec<JobCompletionNotification>,
+    ) -> Result<()> {
+        for completion in completions {
+            info!(
+                "Processing deferred job completion for task {}: success={}",
+                completion.task_id, completion.success
+            );
+
+            // Update task status based on job completion
+            if completion.success {
+                // Mark task as successful
+                if let Err(e) = self
+                    .db
+                    .update_task_status(completion.task_id, "success", None, None)
+                    .await
+                {
+                    error!(
+                        "Failed to mark task {} as successful: {}",
+                        completion.task_id, e
+                    );
+                    continue;
+                }
+            } else {
+                // Mark task as failed with error
+                let error_msg = completion
+                    .error
+                    .unwrap_or_else(|| "Deferred job failed".to_string());
+                if let Err(e) = self
+                    .db
+                    .update_task_status(completion.task_id, "failed", None, Some(&error_msg))
+                    .await
+                {
+                    error!("Failed to mark task {} as failed: {}", completion.task_id, e);
+                    continue;
+                }
+            }
+
+            // Check if the run should be marked as complete
+            if let Ok(run_id) = self.db.get_task_run_id(completion.task_id).await {
+                if let Err(e) = self.check_run_completion(run_id).await {
+                    error!("Error checking run completion: {}", e);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
