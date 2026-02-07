@@ -169,10 +169,14 @@ All components have been implemented and the project builds successfully.
 9. **Worker HTTP Server**: Axum server with `/compile` and `/execute` endpoints
 10. **Worker Client**: HTTP client in ork-core for calling worker endpoints
 11. **WorkerExecutor**: Executor that delegates to remote worker containers
+12. **Google Cloud API Clients**: Real API integration for job tracking
+    - **BigQuery**: Fully implemented using google-cloud-bigquery REST API
+    - **Cloud Run**: Placeholder with detailed TODO for gRPC implementation
+    - **Dataproc**: Placeholder with detailed TODO for gRPC implementation
 
-### 🚧 Future Work (Not in Scope)
-1. **Real API Integration**: Actual BigQuery/Cloud Run/Dataproc API clients (currently placeholders)
-2. **gRPC Migration**: Replace HTTP with gRPC for better performance (Phase 2)
+### 🚧 Future Work
+1. **Cloud Run gRPC Client**: Implement actual gRPC-based job tracking (TODO in code)
+2. **Dataproc gRPC Client**: Implement actual gRPC-based job tracking (TODO in code)
 3. **Worker Container Images**: Docker images with embedded workflows
 
 ## Usage Example
