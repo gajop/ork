@@ -10,9 +10,6 @@ import json
 import os
 import sys
 
-# Add python-sdk to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../python-sdk'))
-
 from ork_sdk import BigQueryJob, CustomHttp
 
 
