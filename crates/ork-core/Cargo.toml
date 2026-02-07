@@ -29,6 +29,11 @@ reqwest = { workspace = true }
 cron = "0.12"
 dirs = "6.0.0"
 
+# Google Cloud API clients for job tracking
+google-cloud-bigquery = { workspace = true }
+google-cloud-run-v2 = { workspace = true }
+google-cloud-dataproc-v1 = { workspace = true }
+
 [dev-dependencies]
 ork-state = { path = "../ork-state", features = ["sqlite"] }
 ork-executors = { path = "../ork-executors", features = ["process"] }

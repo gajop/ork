@@ -4,7 +4,8 @@ members = [
     "crates/ork-web",
     "crates/ork-core",
     "crates/ork-state",
-    "crates/ork-executors", "crates/ork-sdk-rust",
+    "crates/ork-executors",
+    "crates/ork-sdk-rust",
     "crates/ork-worker",
 ]
 resolver = "2"
@@ -14,7 +15,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
-anyhow = "1.0"
+anyhow = "1.0.101"
 axum = { version = "0.8", default-features = false, features = [
     "http1",
     "json",
@@ -23,21 +24,24 @@ axum = { version = "0.8", default-features = false, features = [
     "ws",
 ] }
 async-trait = "0.1"
-chrono = { version = "0.4.43", default-features = false, features = [
+chrono = { version = "=0.4.39", default-features = false, features = [
     "clock",
     "serde",
 ] }
-clap = { version = "4.5.56", features = ["derive"] }
+clap = { version = "4.5.57", features = ["derive"] }
 fs2 = "0.4"
 futures = "0.3"
 gcp_auth = "0.12"
+google-cloud-bigquery = "0.15.0"
+google-cloud-run-v2 = "1.5.0"
+google-cloud-dataproc-v1 = "1.5.0"
 indexmap = { version = "2", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9.34-deprecated"
 sqlx = { version = "0.8", default-features = false }
-sysinfo = "0.38"
+sysinfo = "0.38.1"
 thiserror = "2"
 tokio = { version = "1", features = [
     "macros",

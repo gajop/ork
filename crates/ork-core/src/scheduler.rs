@@ -70,7 +70,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     }
 
     /// Start the triggerer component for tracking deferred jobs
-    pub fn start_triggerer(&self) -> tokio::task::JoinHandle<()> {
+    pub async fn start_triggerer(&self) -> Result<tokio::task::JoinHandle<()>> {
         let mut triggerer = Triggerer::with_config(
             Arc::clone(&self.db),
             self.job_completion_tx.clone(),
@@ -78,12 +78,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         );
 
         // Register job trackers
-        triggerer.register_tracker(Arc::new(BigQueryTracker::new()));
-        triggerer.register_tracker(Arc::new(CloudRunTracker::new()));
-        triggerer.register_tracker(Arc::new(DataprocTracker::new()));
+        triggerer.register_tracker(Arc::new(BigQueryTracker::new().await?));
+        triggerer.register_tracker(Arc::new(CloudRunTracker::new().await?));
+        triggerer.register_tracker(Arc::new(DataprocTracker::new().await?));
         triggerer.register_tracker(Arc::new(CustomHttpTracker::new()));
 
-        triggerer.start()
+        Ok(triggerer.start())
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -95,7 +95,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         );
 
         // Start triggerer in background
-        let _triggerer_handle = self.start_triggerer();
+        let _triggerer_handle = self.start_triggerer().await?;
         info!("Triggerer started");
 
         let mut status_rx = self.status_rx.lock().await;

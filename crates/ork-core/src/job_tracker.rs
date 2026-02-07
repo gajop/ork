@@ -42,20 +42,18 @@ pub trait JobTracker: Send + Sync {
 ///
 /// Polls BigQuery API to check query job status.
 pub struct BigQueryTracker {
-    // In a real implementation, this would hold BigQuery client
-    // For now, we'll use a placeholder
-    _placeholder: (),
+    client: google_cloud_bigquery::client::Client,
 }
 
 impl BigQueryTracker {
-    pub fn new() -> Self {
-        Self { _placeholder: () }
-    }
-}
-
-impl Default for BigQueryTracker {
-    fn default() -> Self {
-        Self::new()
+    pub async fn new() -> anyhow::Result<Self> {
+        let (config, _project) = google_cloud_bigquery::client::ClientConfig::new_with_auth()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create BigQuery client config: {}", e))?;
+        let client = google_cloud_bigquery::client::Client::new(config)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create BigQuery client: {}", e))?;
+        Ok(Self { client })
     }
 }
 
@@ -80,8 +78,6 @@ impl JobTracker for BigQueryTracker {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing job_id in job_data"))?;
 
-        // TODO: Implement actual BigQuery API polling
-        // For now, return a placeholder
         tracing::debug!(
             "Polling BigQuery job: project={}, location={}, job_id={}",
             project,
@@ -89,13 +85,31 @@ impl JobTracker for BigQueryTracker {
             bq_job_id
         );
 
-        // Placeholder: always return running
-        // In real implementation:
-        // 1. Use google-cloud-bigquery crate
-        // 2. Call jobs().get(project, job_id) API
-        // 3. Check job.status.state (PENDING, RUNNING, DONE)
-        // 4. Check job.status.error_result for failures
-        Ok(JobStatus::Running)
+        // Call BigQuery API to get job status
+        let get_request = google_cloud_bigquery::http::job::get::GetJobRequest {
+            location: Some(location.to_string()),
+            ..Default::default()
+        };
+
+        let job = self.client
+            .job()
+            .get(project, bq_job_id, &get_request)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get BigQuery job: {}", e))?;
+
+        // Check job status
+        use google_cloud_bigquery::http::job::JobState;
+        match job.status.state {
+            JobState::Done => {
+                // Check for errors
+                if let Some(error_result) = job.status.error_result {
+                    let error_msg = error_result.message.unwrap_or_else(|| "Unknown error".to_string());
+                    return Ok(JobStatus::Failed(format!("BigQuery job failed: {}", error_msg)));
+                }
+                Ok(JobStatus::Completed)
+            }
+            JobState::Pending | JobState::Running => Ok(JobStatus::Running),
+        }
     }
 }
 
@@ -103,18 +117,14 @@ impl JobTracker for BigQueryTracker {
 ///
 /// Polls Cloud Run API to check job execution status.
 pub struct CloudRunTracker {
-    _placeholder: (),
+    _marker: (),
 }
 
 impl CloudRunTracker {
-    pub fn new() -> Self {
-        Self { _placeholder: () }
-    }
-}
-
-impl Default for CloudRunTracker {
-    fn default() -> Self {
-        Self::new()
+    pub async fn new() -> anyhow::Result<Self> {
+        // TODO: Initialize Cloud Run client when gRPC API is fully implemented
+        // let client = google_cloud_run_v2::client::Executions::builder().await?.build().await?;
+        Ok(Self { _marker: () })
     }
 }
 
@@ -142,7 +152,6 @@ impl JobTracker for CloudRunTracker {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing execution_id in job_data"))?;
 
-        // TODO: Implement actual Cloud Run API polling
         tracing::debug!(
             "Polling Cloud Run job: project={}, region={}, job={}, execution={}",
             project,
@@ -151,11 +160,23 @@ impl JobTracker for CloudRunTracker {
             execution_id
         );
 
-        // Placeholder: always return running
-        // In real implementation:
-        // 1. Use google-cloud-run crate or REST API
-        // 2. Call executions().get() API
-        // 3. Check execution.status.conditions for completion
+        // TODO: Implement actual Cloud Run API polling using gRPC client
+        // The google-cloud-run-v2 crate uses a gRPC-based builder API:
+        //
+        // let client = google_cloud_run_v2::client::Executions::builder().await?.build().await?;
+        // let execution_name = format!("projects/{}/locations/{}/jobs/{}/executions/{}",
+        //     project, region, job_name, execution_id);
+        // let execution = client.get_execution()
+        //     .name(&execution_name)
+        //     .send()
+        //     .await?;
+        //
+        // Check execution.status.conditions for "Completed" condition:
+        // - condition.state == "CONDITION_STATE_SUCCEEDED" => Completed
+        // - condition.state == "CONDITION_STATE_FAILED" => Failed
+        // - otherwise => Running
+
+        tracing::warn!("Cloud Run job tracking not yet implemented - returning Running");
         Ok(JobStatus::Running)
     }
 }
@@ -164,18 +185,14 @@ impl JobTracker for CloudRunTracker {
 ///
 /// Polls Dataproc API to check Spark/Hadoop job status.
 pub struct DataprocTracker {
-    _placeholder: (),
+    _marker: (),
 }
 
 impl DataprocTracker {
-    pub fn new() -> Self {
-        Self { _placeholder: () }
-    }
-}
-
-impl Default for DataprocTracker {
-    fn default() -> Self {
-        Self::new()
+    pub async fn new() -> anyhow::Result<Self> {
+        // TODO: Initialize Dataproc client when gRPC API is fully implemented
+        // let client = google_cloud_dataproc_v1::client::JobController::builder().await?.build().await?;
+        Ok(Self { _marker: () })
     }
 }
 
@@ -194,7 +211,7 @@ impl JobTracker for DataprocTracker {
             .get("region")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing region in job_data"))?;
-        let cluster_name = job_data
+        let _cluster_name = job_data
             .get("cluster_name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing cluster_name in job_data"))?;
@@ -203,20 +220,31 @@ impl JobTracker for DataprocTracker {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing job_id in job_data"))?;
 
-        // TODO: Implement actual Dataproc API polling
         tracing::debug!(
-            "Polling Dataproc job: project={}, region={}, cluster={}, job_id={}",
+            "Polling Dataproc job: project={}, region={}, job_id={}",
             project,
             region,
-            cluster_name,
             dp_job_id
         );
 
-        // Placeholder: always return running
-        // In real implementation:
-        // 1. Use google-cloud-dataproc crate
-        // 2. Call jobs().get() API
-        // 3. Check job.status.state (PENDING, RUNNING, DONE, ERROR, CANCELLED)
+        // TODO: Implement actual Dataproc API polling using gRPC client
+        // The google-cloud-dataproc-v1 crate uses a gRPC-based builder API:
+        //
+        // let client = google_cloud_dataproc_v1::client::JobController::builder().await?.build().await?;
+        // let job_name = format!("projects/{}/regions/{}/jobs/{}", project, region, dp_job_id);
+        // let job = client.get_job()
+        //     .project_id(project)
+        //     .region(region)
+        //     .job_id(dp_job_id)
+        //     .send()
+        //     .await?;
+        //
+        // Check job.status.state:
+        // - JobState::Done with substate != Failed => Completed
+        // - JobState::Error or JobState::Cancelled => Failed
+        // - otherwise => Running
+
+        tracing::warn!("Dataproc job tracking not yet implemented - returning Running");
         Ok(JobStatus::Running)
     }
 }
@@ -402,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dataproc_poll_validates_job_data() {
-        let tracker = DataprocTracker::new();
+        let tracker = DataprocTracker::new().await.unwrap();
         let invalid_data = json!({});
         let result = tracker.poll_job("test-job", &invalid_data).await;
         assert!(result.is_err());
