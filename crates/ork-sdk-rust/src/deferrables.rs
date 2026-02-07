@@ -32,7 +32,7 @@ use std::collections::HashMap;
 /// 1. Detect that a task returned a deferrable
 /// 2. Extract job tracking information
 /// 3. Route to the appropriate JobTracker implementation
-pub trait Deferrable: Serialize + Send + Sync {
+pub trait Deferrable: Send + Sync {
     /// Get the service type for routing to the correct JobTracker
     fn service_type(&self) -> &str;
 
@@ -40,9 +40,7 @@ pub trait Deferrable: Serialize + Send + Sync {
     fn job_id(&self) -> String;
 
     /// Serialize deferrable to JSON for database storage
-    fn to_json(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
-    }
+    fn to_json(&self) -> serde_json::Value;
 }
 
 /// BigQuery job deferrable
@@ -84,6 +82,10 @@ impl Deferrable for BigQueryJob {
 
     fn job_id(&self) -> String {
         format!("{}/{}/{}", self.project, self.location, self.job_id)
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 }
 
@@ -131,6 +133,10 @@ impl Deferrable for CloudRunJob {
             self.project, self.region, self.job_name, self.execution_id
         )
     }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
 }
 
 /// Dataproc job deferrable
@@ -176,6 +182,10 @@ impl Deferrable for DataprocJob {
             "{}/{}/{}/{}",
             self.project, self.region, self.cluster_name, self.job_id
         )
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 }
 
@@ -239,6 +249,10 @@ impl Deferrable for CustomHttp {
     fn job_id(&self) -> String {
         // Use URL as job identifier
         self.url.clone()
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 }
 

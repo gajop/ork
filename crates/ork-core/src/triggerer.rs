@@ -57,7 +57,7 @@ impl Default for TriggererConfig {
 /// The Triggerer runs in the background, continuously polling external APIs
 /// to check the status of deferred jobs. When a job completes (or fails),
 /// it notifies the scheduler via a channel.
-pub struct Triggerer<D: Database> {
+pub struct Triggerer<D: Database + 'static> {
     db: Arc<D>,
     trackers: HashMap<String, Arc<dyn JobTracker>>,
     config: TriggererConfig,
