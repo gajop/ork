@@ -1,0 +1,23 @@
+[package]
+name = "ork-worker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ork-core = { path = "../ork-core", features = ["sqlx"] }
+ork-executors = { path = "../ork-executors", features = ["process", "library"] }
+
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+uuid = { workspace = true }
+
+[[bin]]
+name = "ork-worker"
+path = "src/main.rs"

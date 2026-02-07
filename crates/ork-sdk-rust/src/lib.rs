@@ -61,7 +61,6 @@
 
 pub mod deferrables;
 
-
 use serde::{Deserialize, Serialize};
 
 /// Read task input from environment variables or stdin
@@ -158,7 +157,6 @@ macro_rules! ork_task_library {
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn ork_task_run(input_ptr: *const c_char) -> *mut c_char {
-
             if input_ptr.is_null() {
                 let error = CString::new(r#"{"error": "null input pointer"}"#).unwrap();
                 return error.into_raw();
@@ -168,7 +166,8 @@ macro_rules! ork_task_library {
                 match CStr::from_ptr(input_ptr).to_str() {
                     Ok(s) => s,
                     Err(e) => {
-                        let error = CString::new(format!(r#"{{"error": "invalid UTF-8: {}"}}"#, e)).unwrap();
+                        let error = CString::new(format!(r#"{{"error": "invalid UTF-8: {}"}}"#, e))
+                            .unwrap();
                         return error.into_raw();
                     }
                 }
@@ -177,7 +176,8 @@ macro_rules! ork_task_library {
             let input = match serde_json::from_str(input_str) {
                 Ok(i) => i,
                 Err(e) => {
-                    let error = CString::new(format!(r#"{{"error": "JSON parse error: {}"}}"#, e)).unwrap();
+                    let error =
+                        CString::new(format!(r#"{{"error": "JSON parse error: {}"}}"#, e)).unwrap();
                     return error.into_raw();
                 }
             };
