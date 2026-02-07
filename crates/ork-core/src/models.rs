@@ -226,3 +226,63 @@ pub struct WorkflowTask {
     pub params: Option<JsonValue>,
     pub created_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferredJobStatus {
+    Pending,
+    Polling,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl DeferredJobStatus {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "pending" => Some(Self::Pending),
+            "polling" => Some(Self::Polling),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Polling => "polling",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Represents a long-running external job being tracked by the scheduler
+/// Used by the Triggerer component to poll external APIs (BigQuery, Cloud Run, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct DeferredJob {
+    pub id: Uuid,
+    pub task_id: Uuid,
+    pub service_type: String,
+    pub job_id: String,
+    pub job_data: JsonValue,
+    status: String,
+    pub error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub last_polled_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+impl DeferredJob {
+    pub fn status(&self) -> DeferredJobStatus {
+        DeferredJobStatus::from_str(&self.status).unwrap_or(DeferredJobStatus::Pending)
+    }
+
+    pub fn status_str(&self) -> &str {
+        &self.status
+    }
+}

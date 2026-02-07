@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-use crate::models::{Run, Task, TaskWithWorkflow, Workflow};
+use crate::models::{DeferredJob, Run, Task, TaskWithWorkflow, Workflow};
 
 #[derive(Debug, Clone)]
 pub struct NewTask {
@@ -192,4 +192,41 @@ pub trait Database: Send + Sync {
         schedule: Option<&str>,
         schedule_enabled: bool,
     ) -> anyhow::Result<()>;
+
+    // Deferred job operations (for Triggerer component)
+
+    /// Create a deferred job for tracking
+    async fn create_deferred_job(
+        &self,
+        task_id: Uuid,
+        service_type: &str,
+        job_id: &str,
+        job_data: serde_json::Value,
+    ) -> anyhow::Result<DeferredJob>;
+
+    /// Get all deferred jobs that need polling (pending or polling status)
+    async fn get_pending_deferred_jobs(&self) -> anyhow::Result<Vec<DeferredJob>>;
+
+    /// Get deferred jobs for a specific task
+    async fn get_deferred_jobs_for_task(&self, task_id: Uuid) -> anyhow::Result<Vec<DeferredJob>>;
+
+    /// Update deferred job status
+    async fn update_deferred_job_status(
+        &self,
+        job_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> anyhow::Result<()>;
+
+    /// Update deferred job last polled timestamp
+    async fn update_deferred_job_polled(&self, job_id: Uuid) -> anyhow::Result<()>;
+
+    /// Mark deferred job as completed
+    async fn complete_deferred_job(&self, job_id: Uuid) -> anyhow::Result<()>;
+
+    /// Mark deferred job as failed
+    async fn fail_deferred_job(&self, job_id: Uuid, error: &str) -> anyhow::Result<()>;
+
+    /// Cancel all deferred jobs for a task
+    async fn cancel_deferred_jobs_for_task(&self, task_id: Uuid) -> anyhow::Result<()>;
 }

@@ -2,6 +2,7 @@ mod core;
 mod workflows;
 mod runs;
 mod tasks;
+mod deferred_jobs;
 
 pub use core::PostgresDatabase;
 
@@ -12,7 +13,7 @@ use uuid::Uuid;
 
 use ork_core::database::Database as DatabaseTrait;
 use ork_core::database::{NewTask, NewWorkflowTask};
-use ork_core::models::{Run, Task, TaskWithWorkflow, Workflow, WorkflowTask};
+use ork_core::models::{DeferredJob, Run, Task, TaskWithWorkflow, Workflow, WorkflowTask};
 
 #[async_trait]
 impl DatabaseTrait for PostgresDatabase {
@@ -164,5 +165,49 @@ impl DatabaseTrait for PostgresDatabase {
         schedule_enabled: bool,
     ) -> Result<()> {
         self.update_workflow_schedule_impl(workflow_id, schedule, schedule_enabled).await
+    }
+
+    // Deferred job operations
+    async fn create_deferred_job(
+        &self,
+        task_id: Uuid,
+        service_type: &str,
+        job_id: &str,
+        job_data: serde_json::Value,
+    ) -> Result<DeferredJob> {
+        self.create_deferred_job(task_id, service_type, job_id, job_data).await
+    }
+
+    async fn get_pending_deferred_jobs(&self) -> Result<Vec<DeferredJob>> {
+        self.get_pending_deferred_jobs().await
+    }
+
+    async fn get_deferred_jobs_for_task(&self, task_id: Uuid) -> Result<Vec<DeferredJob>> {
+        self.get_deferred_jobs_for_task(task_id).await
+    }
+
+    async fn update_deferred_job_status(
+        &self,
+        job_id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        self.update_deferred_job_status(job_id, status, error).await
+    }
+
+    async fn update_deferred_job_polled(&self, job_id: Uuid) -> Result<()> {
+        self.update_deferred_job_polled(job_id).await
+    }
+
+    async fn complete_deferred_job(&self, job_id: Uuid) -> Result<()> {
+        self.complete_deferred_job(job_id).await
+    }
+
+    async fn fail_deferred_job(&self, job_id: Uuid, error: &str) -> Result<()> {
+        self.fail_deferred_job(job_id, error).await
+    }
+
+    async fn cancel_deferred_jobs_for_task(&self, task_id: Uuid) -> Result<()> {
+        self.cancel_deferred_jobs_for_task(task_id).await
     }
 }
