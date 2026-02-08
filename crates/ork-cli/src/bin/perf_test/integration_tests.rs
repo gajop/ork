@@ -75,6 +75,22 @@ async fn ensure_perf_tables(database_url: &str) -> bool {
         return false;
     }
 
+    // Keep each test run isolated from historical rows in shared local DBs.
+    if let Err(err) = sqlx::query("DELETE FROM tasks").execute(&pool).await {
+        eprintln!("skipping perf-test integration path test: failed to clear tasks table: {err}");
+        return false;
+    }
+    if let Err(err) = sqlx::query("DELETE FROM runs").execute(&pool).await {
+        eprintln!("skipping perf-test integration path test: failed to clear runs table: {err}");
+        return false;
+    }
+    if let Err(err) = sqlx::query("DELETE FROM workflows").execute(&pool).await {
+        eprintln!(
+            "skipping perf-test integration path test: failed to clear workflows table: {err}"
+        );
+        return false;
+    }
+
     true
 }
 
@@ -96,22 +112,32 @@ scheduler:
     path
 }
 
-fn write_mock_ork_binary(emit_metrics: bool) -> PathBuf {
+fn write_mock_ork_binary(emit_metrics: bool, fail_create_workflow: bool, run_exits: bool) -> PathBuf {
     let fake_bin_path = std::env::temp_dir().join(format!("ork-mock-{}", Uuid::new_v4()));
+    let create_workflow_body = if fail_create_workflow {
+        "exit 1"
+    } else {
+        "exit 0"
+    };
     let run_body = if emit_metrics {
         r#"echo 'SCHEDULER_METRICS: {"timestamp":1,"process_pending_runs_ms":1,"process_pending_tasks_ms":2,"process_status_updates_ms":3,"sleep_ms":4,"total_loop_ms":10}'"#
     } else {
         ":"
+    };
+    let run_tail = if run_exits {
+        "exit 0"
+    } else {
+        "while true; do sleep 1; done"
     };
     let script = format!(
         r#"#!/usr/bin/env bash
 set -euo pipefail
 cmd="${{1:-}}"
 case "$cmd" in
-  create-workflow) exit 0 ;;
+  create-workflow) {create_workflow_body} ;;
   run)
     {run_body}
-    while true; do sleep 1; done
+    {run_tail}
     ;;
   trigger) exit 0 ;;
   *) exit 0 ;;
@@ -131,6 +157,8 @@ async fn run_with_mock(
     tasks_per_workflow: u32,
     monitor_max_polls: Option<usize>,
     emit_metrics: bool,
+    fail_create_workflow: bool,
+    run_exits: bool,
 ) -> Option<anyhow::Result<()>> {
     let Some(database_url) = resolve_test_database_url().await else {
         eprintln!(
@@ -144,7 +172,7 @@ async fn run_with_mock(
 
     let config_name = format!("test-{}", Uuid::new_v4());
     let config_path = write_perf_config(&config_name, workflows, tasks_per_workflow);
-    let fake_bin_path = write_mock_ork_binary(emit_metrics);
+    let fake_bin_path = write_mock_ork_binary(emit_metrics, fail_create_workflow, run_exits);
 
     let previous_bin = std::env::var("ORK_PERF_ORK_BIN").ok();
     let previous_boot_wait = std::env::var("ORK_PERF_BOOT_WAIT_SECS").ok();
@@ -180,7 +208,7 @@ async fn run_with_mock(
 #[tokio::test]
 async fn test_run_with_mock_ork_binary_and_zero_workflows() {
     let _guard = async_env_lock().await;
-    let Some(result) = run_with_mock(0, 1, None, false).await else {
+    let Some(result) = run_with_mock(0, 1, None, false, false, false).await else {
         return;
     };
     assert!(
@@ -192,11 +220,20 @@ async fn test_run_with_mock_ork_binary_and_zero_workflows() {
 #[tokio::test]
 async fn test_run_with_monitor_cap_exercises_polling_paths() {
     let _guard = async_env_lock().await;
-    let Some(result) = run_with_mock(1, 1, Some(1), true).await else {
+    let Some(result) = run_with_mock(5, 5, Some(1), true, false, true).await else {
         return;
     };
     assert!(
         result.is_ok(),
         "expected perf-test run to succeed: {result:?}"
     );
+}
+
+#[tokio::test]
+async fn test_run_errors_when_create_workflow_fails() {
+    let _guard = async_env_lock().await;
+    let Some(result) = run_with_mock(1, 1, Some(1), false, true, true).await else {
+        return;
+    };
+    assert!(result.is_err(), "expected perf-test run to fail");
 }

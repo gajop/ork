@@ -371,6 +371,18 @@ mod tests {
         };
         assert_eq!(job.service_type(), "custom_http");
         assert_eq!(job.job_id(), "https://api.example.com/status");
+        assert_eq!(
+            job.to_json(),
+            serde_json::json!({
+                "url":"https://api.example.com/status",
+                "method":"GET",
+                "headers":{},
+                "success_status_codes":[200],
+                "completion_field":"status",
+                "completion_value":"done",
+                "failure_value":"failed"
+            })
+        );
     }
 
     #[test]
@@ -431,17 +443,21 @@ mod tests {
 
     #[test]
     fn test_task_result_deferred_and_mixed_helpers() {
+        let mock = MockDeferrable {
+            payload: serde_json::json!({"service_type":"mock","job_id":"job-0"}),
+        };
+        assert_eq!(mock.service_type(), "mock");
+        assert_eq!(mock.job_id(), "mock-job");
+
         let deferred_only: TaskResult<String> =
             TaskResult::deferred(vec![Box::new(MockDeferrable {
                 payload: serde_json::json!({"service_type":"mock","job_id":"job-1"}),
             })]);
-        match deferred_only {
-            TaskResult::Deferred { deferred } => {
-                assert_eq!(deferred.len(), 1);
-                assert_eq!(deferred[0]["service_type"], "mock");
-            }
-            _ => panic!("expected deferred variant"),
-        }
+        let TaskResult::Deferred { deferred } = deferred_only else {
+            panic!("expected deferred variant");
+        };
+        assert_eq!(deferred.len(), 1);
+        assert_eq!(deferred[0]["service_type"], "mock");
 
         let mixed = TaskResult::mixed(
             "data".to_string(),
@@ -449,13 +465,11 @@ mod tests {
                 payload: serde_json::json!({"service_type":"mock","job_id":"job-2"}),
             })],
         );
-        match mixed {
-            TaskResult::Mixed { data, deferred } => {
-                assert_eq!(data, "data");
-                assert_eq!(deferred.len(), 1);
-                assert_eq!(deferred[0]["job_id"], "job-2");
-            }
-            _ => panic!("expected mixed variant"),
-        }
+        let TaskResult::Mixed { data, deferred } = mixed else {
+            panic!("expected mixed variant");
+        };
+        assert_eq!(data, "data");
+        assert_eq!(deferred.len(), 1);
+        assert_eq!(deferred[0]["job_id"], "job-2");
     }
 }

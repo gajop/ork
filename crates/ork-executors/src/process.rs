@@ -219,34 +219,31 @@ impl ProcessExecutor {
             let log_task_id = task_id;
             let output_store = last_output.clone();
             let stdout_handle = tokio::spawn(async move {
-                if let Some(mut reader) = stdout_reader {
-                    let mut line = String::new();
-                    loop {
-                        line.clear();
-                        match reader.read_line(&mut line).await {
-                            Ok(0) => break, // EOF
-                            Ok(_) => {
-                                let trimmed = line.trim_end();
-                                // Check for output prefix to distinguish from debug prints
-                                if let Some(json_str) = trimmed.strip_prefix("ORK_OUTPUT:")
-                                    && let Ok(value) =
-                                        serde_json::from_str::<serde_json::Value>(json_str.trim())
-                                {
-                                    *output_store.lock().await = Some(value);
-                                }
-                                // Send all stdout lines as logs
-                                if let Some(tx) = status_tx_logs.read().await.as_ref() {
-                                    let _ = tx.send(StatusUpdate {
-                                        task_id: log_task_id,
-                                        status: "log".to_string(),
-                                        log: Some(format!("stdout: {}\n", trimmed)),
-                                        output: None,
-                                        error: None,
-                                    });
-                                }
-                            }
-                            Err(_) => break,
-                        }
+                let mut reader = stdout_reader.expect("stdout must be piped");
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    let bytes_read = reader.read_line(&mut line).await.unwrap_or_default();
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    let trimmed = line.trim_end();
+                    // Check for output prefix to distinguish from debug prints
+                    if let Some(json_str) = trimmed.strip_prefix("ORK_OUTPUT:")
+                        && let Ok(value) =
+                            serde_json::from_str::<serde_json::Value>(json_str.trim())
+                    {
+                        *output_store.lock().await = Some(value);
+                    }
+                    // Send all stdout lines as logs
+                    if let Some(tx) = status_tx_logs.read().await.as_ref() {
+                        let _ = tx.send(StatusUpdate {
+                            task_id: log_task_id,
+                            status: "log".to_string(),
+                            log: Some(format!("stdout: {}\n", trimmed)),
+                            output: None,
+                            error: None,
+                        });
                     }
                 }
             });
@@ -254,53 +251,38 @@ impl ProcessExecutor {
             let status_tx_logs = status_tx_clone.clone();
             let log_task_id = task_id;
             let stderr_handle = tokio::spawn(async move {
-                if let Some(mut reader) = stderr_reader {
-                    let mut line = String::new();
-                    loop {
-                        line.clear();
-                        match reader.read_line(&mut line).await {
-                            Ok(0) => break, // EOF
-                            Ok(_) => {
-                                let trimmed = line.trim_end();
-                                if let Some(tx) = status_tx_logs.read().await.as_ref() {
-                                    let _ = tx.send(StatusUpdate {
-                                        task_id: log_task_id,
-                                        status: "log".to_string(),
-                                        log: Some(format!("stderr: {}\n", trimmed)),
-                                        output: None,
-                                        error: None,
-                                    });
-                                }
-                            }
-                            Err(_) => break,
-                        }
+                let mut reader = stderr_reader.expect("stderr must be piped");
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    let bytes_read = reader.read_line(&mut line).await.unwrap_or_default();
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    let trimmed = line.trim_end();
+                    if let Some(tx) = status_tx_logs.read().await.as_ref() {
+                        let _ = tx.send(StatusUpdate {
+                            task_id: log_task_id,
+                            status: "log".to_string(),
+                            log: Some(format!("stderr: {}\n", trimmed)),
+                            output: None,
+                            error: None,
+                        });
                     }
                 }
             });
 
-            let status = match child.wait().await {
-                Ok(exit_status) => {
-                    if exit_status.success() {
-                        info!("Process completed successfully: {}", exec_id_clone);
-                        ProcessStatus::Success
-                    } else {
-                        let warn_msg = format!(
-                            "Process failed for task {}: {}",
-                            task_label_clone, exec_id_clone
-                        );
-                        warn!("{}", warn_msg);
-                        ProcessStatus::Failed
-                    }
-                }
-                Err(e) => {
-                    let warn_msg = format!(
-                        "Failed to execute task {} (execution {}): {}",
-                        task_label_clone, exec_id_clone, e
-                    );
+            let status = child.wait().await.ok().map_or(ProcessStatus::Failed, |exit_status| {
+                if exit_status.success() {
+                    info!("Process completed successfully: {}", exec_id_clone);
+                    ProcessStatus::Success
+                } else {
+                    let warn_msg =
+                        format!("Process failed for task {}: {}", task_label_clone, exec_id_clone);
                     warn!("{}", warn_msg);
                     ProcessStatus::Failed
                 }
-            };
+            });
 
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;

@@ -358,7 +358,7 @@ async fn run(args: Args) -> Result<()> {
     // Cleanup
     println!();
     println!("Cleaning up...");
-    scheduler.kill()?;
+    let _ = scheduler.kill();
     let _ = std::fs::remove_file(&scheduler_config_path);
     let _ = std::fs::remove_file(&scheduler_log_path);
 

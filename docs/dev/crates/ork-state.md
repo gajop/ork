@@ -63,3 +63,4 @@ Storage backends for Ork. Implements the [`ork-core::Database`](../../../crates/
 | [src/sqlite/workflows.rs](../../../crates/ork-state/src/sqlite/workflows.rs) | SQLite workflow CRUD and schedule updates. | 2026-02-07 | 0f59d4a |
 | [tests/postgres_backend_edge_test.rs](../../../crates/ork-state/tests/postgres_backend_edge_test.rs) | Additional Postgres integration edge-case coverage for scheduling, retries, and deferred job branches. | 2026-02-08 | 0000000 |
 | [tests/postgres_backend_test.rs](../../../crates/ork-state/tests/postgres_backend_test.rs) | Postgres integration contract tests for workflow/run/task/deferred-job backend behavior. | 2026-02-08 | 0000000 |
+| [tests/sqlite_backend_edge_test.rs](../../../crates/ork-state/tests/sqlite_backend_edge_test.rs) | SQLite integration edge-case coverage for pending-task accessors, retry metadata, outputs, and deferred-job cancellation. | 2026-02-08 | 0000000 |

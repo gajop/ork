@@ -223,6 +223,25 @@ tasks:
     }
 
     #[tokio::test]
+    async fn test_create_workflow_from_yaml_uses_cwd_when_file_path_has_no_parent() {
+        let db = SqliteDatabase::new(":memory:").await.expect("create db");
+        db.run_migrations().await.expect("migrate");
+
+        let yaml = r#"
+name: wf-yaml-no-parent
+tasks:
+  first:
+    executor: process
+    command: "echo first"
+"#;
+
+        let workflow = create_workflow_from_yaml_str(&db, yaml, "/", "local", "local")
+            .await
+            .expect("create workflow from yaml");
+        assert_eq!(workflow.name, "wf-yaml-no-parent");
+    }
+
+    #[tokio::test]
     async fn test_create_workflow_yaml_command_execute() {
         let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
         db.run_migrations().await.expect("migrate");
@@ -315,6 +334,34 @@ tasks:
     }
 
     #[test]
+    fn test_build_workflow_tasks_maps_process_file_into_command() {
+        let compiled = CompiledWorkflow {
+            name: "wf".to_string(),
+            tasks: vec![CompiledTask {
+                name: "from-file".to_string(),
+                executor: ExecutorKind::Process,
+                file: Some(PathBuf::from("/tmp/task.py")),
+                command: None,
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![],
+                timeout: 5,
+                retries: 0,
+                signature: None,
+            }],
+            name_index: indexmap::IndexMap::new(),
+            topo: vec![0],
+            root: PathBuf::from("/tmp"),
+        };
+
+        let tasks = super::build_workflow_tasks(&compiled);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].params["command"], serde_json::json!("/tmp/task.py"));
+    }
+
+    #[test]
     fn test_build_workflow_tasks_maps_all_executor_specific_params() {
         let compiled = CompiledWorkflow {
             name: "wf".to_string(),
@@ -336,7 +383,7 @@ tasks:
                 CompiledTask {
                     name: "python".to_string(),
                     executor: ExecutorKind::Python,
-                    file: None,
+                    file: Some(PathBuf::from("/tmp/python_task.py")),
                     command: None,
                     job: None,
                     module: Some("pkg.tasks".to_string()),
@@ -373,6 +420,10 @@ tasks:
         assert_eq!(
             tasks[1].params["task_module"],
             serde_json::json!("pkg.tasks")
+        );
+        assert_eq!(
+            tasks[1].params["task_file"],
+            serde_json::json!("/tmp/python_task.py")
         );
         assert_eq!(tasks[1].params["task_function"], serde_json::json!("run"));
         assert_eq!(tasks[1].params["python_path"], serde_json::json!("/tmp"));

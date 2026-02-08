@@ -456,3 +456,26 @@ async fn test_execute_process_with_uv_path_sets_cache_env_and_fails_cleanly() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+#[tokio::test]
+async fn test_execute_process_succeeds_without_status_channel() {
+    let executor = ProcessExecutor::new(None);
+    let task_id = Uuid::new_v4();
+    let execution_id = executor
+        .execute_process(task_id, "printf 'no-channel\\n'", None)
+        .await
+        .expect("execute process");
+
+    timeout(Duration::from_secs(2), async {
+        loop {
+            let states = executor.process_states.read().await;
+            if matches!(states.get(&execution_id), Some(ProcessStatus::Success)) {
+                break;
+            }
+            drop(states);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("process should complete");
+}

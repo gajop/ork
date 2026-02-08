@@ -30,45 +30,47 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         }
 
         for run in &runs {
-            if let Some(workflow) = workflow_map.get(&run.workflow_id) {
-                let create_result =
-                    if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id) {
-                        let tasks = build_run_tasks(run.id, workflow, workflow_tasks);
-                        self.db.batch_create_dag_tasks(run.id, &tasks).await
-                    } else if workflow.executor_type == "dag" {
-                        Err(anyhow::anyhow!(
-                            "workflow '{}' is missing compiled workflow_tasks",
-                            workflow.name
-                        ))
-                    } else {
-                        let task_count = workflow
-                            .task_params
-                            .as_ref()
-                            .and_then(|p| json_inner(p).get("task_count"))
-                            .and_then(|v: &serde_json::Value| v.as_i64())
-                            .unwrap_or(3) as i32;
-                        self.db
-                            .batch_create_tasks(
-                                run.id,
-                                task_count,
-                                &workflow.name,
-                                &workflow.executor_type,
-                            )
-                            .await
-                    };
+            let Some(workflow) = workflow_map.get(&run.workflow_id) else {
+                continue;
+            };
 
-                if let Err(e) = create_result {
-                    error!("Failed to create tasks for run {}: {}", run.id, e);
-                    let _ = self
-                        .db
-                        .update_run_status(run.id, "failed", Some(&e.to_string()))
-                        .await;
-                    continue;
-                }
+            let create_result = if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id)
+            {
+                let tasks = build_run_tasks(run.id, workflow, workflow_tasks);
+                self.db.batch_create_dag_tasks(run.id, &tasks).await
+            } else if workflow.executor_type == "dag" {
+                Err(anyhow::anyhow!(
+                    "workflow '{}' is missing compiled workflow_tasks",
+                    workflow.name
+                ))
+            } else {
+                let task_count = workflow
+                    .task_params
+                    .as_ref()
+                    .and_then(|p| json_inner(p).get("task_count"))
+                    .and_then(|v: &serde_json::Value| v.as_i64())
+                    .unwrap_or(3) as i32;
+                self.db
+                    .batch_create_tasks(
+                        run.id,
+                        task_count,
+                        &workflow.name,
+                        &workflow.executor_type,
+                    )
+                    .await
+            };
 
-                if let Err(e) = self.db.update_run_status(run.id, "running", None).await {
-                    error!("Failed to update run {} to running: {}", run.id, e);
-                }
+            if let Err(e) = create_result {
+                error!("Failed to create tasks for run {}: {}", run.id, e);
+                let _ = self
+                    .db
+                    .update_run_status(run.id, "failed", Some(&e.to_string()))
+                    .await;
+                continue;
+            }
+
+            if let Err(e) = self.db.update_run_status(run.id, "running", None).await {
+                error!("Failed to update run {} to running: {}", run.id, e);
             }
         }
 
@@ -117,10 +119,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     outputs_by_run.insert(run_id, map);
                 }
                 Err(err) => {
-                    error!(
-                        "Failed to load upstream outputs for run {}: {}",
-                        run_id, err
-                    );
+                    error!("Failed to load upstream outputs for run {}: {}", run_id, err);
                 }
             }
         }
@@ -178,11 +177,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             self.db.batch_update_task_status(&updates_ref).await?;
         }
         let db_update_ms = db_update_start.elapsed().as_millis();
-        info!(
-            "Batch updated {} tasks in {}ms",
-            dispatch_updates.len(),
-            db_update_ms
-        );
+        info!("Batch updated {} tasks in {}ms", dispatch_updates.len(), db_update_ms);
 
         if !failure_updates.is_empty() {
             self.process_status_updates(failure_updates).await?;
@@ -214,11 +209,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             }
             if let Some(output) = update.output.as_ref() {
                 if let Some(deferred) = output.get("deferred").and_then(|v| v.as_array()) {
-                    info!(
-                        "Task {} returned {} deferrables",
-                        update.task_id,
-                        deferred.len()
-                    );
+                    info!("Task {} returned {} deferrables", update.task_id, deferred.len());
 
                     for deferrable_data in deferred {
                         if let (Some(service_type), Some(job_id)) = (
@@ -236,23 +227,14 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                                 .await
                             {
                                 Ok(_) => {
-                                    info!(
-                                        "Created deferred job for task {}: {} ({})",
-                                        update.task_id, job_id, service_type
-                                    );
+                                    info!("Created deferred job for task {}: {} ({})", update.task_id, job_id, service_type);
                                 }
                                 Err(e) => {
-                                    error!(
-                                        "Failed to create deferred job for task {}: {}",
-                                        update.task_id, e
-                                    );
+                                    error!("Failed to create deferred job for task {}: {}", update.task_id, e);
                                 }
                             }
                         } else {
-                            error!(
-                                "Invalid deferrable data for task {}: missing service_type or job_id",
-                                update.task_id
-                            );
+                            error!("Invalid deferrable data for task {}: missing service_type or job_id", update.task_id);
                         }
                     }
 
@@ -319,10 +301,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         if !task_updates.is_empty() {
             self.db.batch_update_task_status(&task_updates).await?;
-            info!(
-                "Processed {} status updates from executors",
-                task_updates.len()
-            );
+            info!("Processed {} status updates from executors", task_updates.len());
         }
 
         for (run_id, names) in failed_by_run {
@@ -397,13 +376,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             self.db
                 .update_run_status(run_id, new_status.as_str(), None)
                 .await?;
-            info!(
-                "Run {} completed with status: {} ({}/{} tasks)",
-                run_id,
-                new_status.as_str(),
-                completed,
-                total
-            );
+            info!("Run {} completed with status: {} ({}/{} tasks)", run_id, new_status.as_str(), completed, total);
         }
 
         Ok(())
@@ -418,10 +391,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         completions: Vec<JobCompletionNotification>,
     ) {
         for completion in completions {
-            info!(
-                "Processing deferred job completion for task {}: success={}",
-                completion.task_id, completion.success
-            );
+            info!("Processing deferred job completion for task {}: success={}", completion.task_id, completion.success);
 
             if completion.success {
                 if let Err(e) = self
@@ -429,10 +399,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     .update_task_status(completion.task_id, "success", None, None)
                     .await
                 {
-                    error!(
-                        "Failed to mark task {} as successful: {}",
-                        completion.task_id, e
-                    );
+                    error!("Failed to mark task {} as successful: {}", completion.task_id, e);
                     continue;
                 }
             } else {
@@ -444,10 +411,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     .update_task_status(completion.task_id, "failed", None, Some(&error_msg))
                     .await
                 {
-                    error!(
-                        "Failed to mark task {} as failed: {}",
-                        completion.task_id, e
-                    );
+                    error!("Failed to mark task {} as failed: {}", completion.task_id, e);
                     continue;
                 }
             }

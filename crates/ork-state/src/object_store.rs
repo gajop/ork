@@ -90,10 +90,8 @@ impl ObjectStore for LocalObjectStore {
                 })?;
         }
 
-        let bytes = serde_json::to_vec_pretty(spec).map_err(|source| OrkError::JsonParse {
-            path: path.clone(),
-            source,
-        })?;
+        let bytes = serde_json::to_vec_pretty(spec)
+            .expect("TaskSpec serialization should be infallible");
 
         fs::write(&path, bytes)
             .await
@@ -130,10 +128,8 @@ impl ObjectStore for LocalObjectStore {
                 })?;
         }
 
-        let bytes = serde_json::to_vec_pretty(status).map_err(|source| OrkError::JsonParse {
-            path: path.clone(),
-            source,
-        })?;
+        let bytes = serde_json::to_vec_pretty(status)
+            .expect("TaskStatusFile serialization should be infallible");
         fs::write(&path, bytes)
             .await
             .map_err(|source| OrkError::WriteFile {
@@ -178,10 +174,8 @@ impl ObjectStore for LocalObjectStore {
                     source,
                 })?;
         }
-        let bytes = serde_json::to_vec_pretty(output).map_err(|source| OrkError::JsonParse {
-            path: path.clone(),
-            source,
-        })?;
+        let bytes = serde_json::to_vec_pretty(output)
+            .expect("JSON output serialization should be infallible");
         fs::write(&path, bytes)
             .await
             .map_err(|source| OrkError::WriteFile {
@@ -392,6 +386,25 @@ mod tests {
             .expect_err("create_dir_all on file path should fail");
         assert!(matches!(write_spec_err, OrkError::WriteFile { .. }));
 
+        let status = TaskStatusFile {
+            status: TaskStatus::Running,
+            started_at: Some(Utc::now()),
+            finished_at: None,
+            heartbeat_at: Some(Utc::now()),
+            error: None,
+        };
+        let write_status_err = bad_store
+            .write_status("run-err", "task-err", &status)
+            .await
+            .expect_err("create_dir_all for status path on file base should fail");
+        assert!(matches!(write_status_err, OrkError::WriteFile { .. }));
+
+        let write_output_err = bad_store
+            .write_output("run-err", "task-err", &serde_json::json!({"ok": true}))
+            .await
+            .expect_err("create_dir_all for output path on file base should fail");
+        assert!(matches!(write_output_err, OrkError::WriteFile { .. }));
+
         let task_dir = store.task_dir("run-err", "task-err");
         tokio::fs::create_dir_all(&task_dir)
             .await
@@ -405,13 +418,6 @@ mod tests {
             .expect_err("writing spec to directory path should fail");
         assert!(matches!(write_spec_err, OrkError::WriteFile { .. }));
 
-        let status = TaskStatusFile {
-            status: TaskStatus::Running,
-            started_at: Some(Utc::now()),
-            finished_at: None,
-            heartbeat_at: Some(Utc::now()),
-            error: None,
-        };
         tokio::fs::create_dir(store.status_path("run-err", "task-err"))
             .await
             .expect("create status path dir");
