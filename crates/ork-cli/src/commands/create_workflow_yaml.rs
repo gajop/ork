@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Args;
+use std::path::Path;
 use std::sync::Arc;
 
 use ork_core::database::{Database, NewWorkflowTask};
@@ -126,7 +127,7 @@ fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<
                 if let Some(command) = task.command.as_deref() {
                     params.insert(
                         "command".to_string(),
-                        serde_json::Value::String(command.to_string()),
+                        serde_json::Value::String(resolve_process_command(command, &compiled.root)),
                     );
                 } else if let Some(file) = task.file.as_ref() {
                     params.insert(
@@ -180,6 +181,19 @@ fn build_workflow_tasks(compiled: &ork_core::compiled::CompiledWorkflow) -> Vec<
     }
 
     tasks
+}
+
+fn resolve_process_command(command: &str, root: &Path) -> String {
+    if command.chars().any(char::is_whitespace) {
+        return command.to_string();
+    }
+
+    let path = Path::new(command);
+    if !path.is_relative() || !command.contains('/') {
+        return command.to_string();
+    }
+
+    root.join(path).to_string_lossy().to_string()
 }
 
 #[cfg(test)]
@@ -334,6 +348,37 @@ tasks:
     }
 
     #[test]
+    fn test_build_workflow_tasks_resolves_relative_process_command_from_workflow_root() {
+        let compiled = CompiledWorkflow {
+            name: "wf".to_string(),
+            tasks: vec![CompiledTask {
+                name: "process".to_string(),
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("rust_tasks/target/debug/process_raw".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![],
+                timeout: 5,
+                retries: 0,
+                signature: None,
+            }],
+            name_index: indexmap::IndexMap::new(),
+            topo: vec![0],
+            root: PathBuf::from("/tmp/example"),
+        };
+
+        let tasks = super::build_workflow_tasks(&compiled);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            tasks[0].params["command"],
+            serde_json::json!("/tmp/example/rust_tasks/target/debug/process_raw")
+        );
+    }
+
+    #[test]
     fn test_build_workflow_tasks_maps_process_file_into_command() {
         let compiled = CompiledWorkflow {
             name: "wf".to_string(),
@@ -358,7 +403,10 @@ tasks:
 
         let tasks = super::build_workflow_tasks(&compiled);
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].params["command"], serde_json::json!("/tmp/task.py"));
+        assert_eq!(
+            tasks[0].params["command"],
+            serde_json::json!("/tmp/task.py")
+        );
     }
 
     #[test]

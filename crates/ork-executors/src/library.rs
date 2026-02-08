@@ -126,7 +126,7 @@ impl LibraryExecutor {
         if let Ok(output_value) = serde_json::from_str::<serde_json::Value>(&result) {
             self.send_status(StatusUpdate {
                 task_id,
-                status: "completed".to_string(),
+                status: "success".to_string(),
                 log: None,
                 output: Some(output_value),
                 error: None,

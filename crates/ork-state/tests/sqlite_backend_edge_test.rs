@@ -119,7 +119,10 @@ async fn test_sqlite_branch_and_edge_paths() -> Result<()> {
 
     Database::update_task_output(&db, extract_id, serde_json::json!({"ok": true})).await?;
     let outputs = Database::get_task_outputs(&db, run_id, &[String::from("extract")]).await?;
-    assert_eq!(outputs.get("extract"), Some(&serde_json::json!({"ok": true})));
+    assert_eq!(
+        outputs.get("extract"),
+        Some(&serde_json::json!({"ok": true}))
+    );
 
     let retry_at = Utc::now() + Duration::seconds(30);
     Database::reset_task_for_retry(&db, extract_id, Some("retry"), Some(retry_at)).await?;

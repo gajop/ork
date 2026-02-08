@@ -272,17 +272,23 @@ impl ProcessExecutor {
                 }
             });
 
-            let status = child.wait().await.ok().map_or(ProcessStatus::Failed, |exit_status| {
-                if exit_status.success() {
-                    info!("Process completed successfully: {}", exec_id_clone);
-                    ProcessStatus::Success
-                } else {
-                    let warn_msg =
-                        format!("Process failed for task {}: {}", task_label_clone, exec_id_clone);
-                    warn!("{}", warn_msg);
-                    ProcessStatus::Failed
-                }
-            });
+            let status = child
+                .wait()
+                .await
+                .ok()
+                .map_or(ProcessStatus::Failed, |exit_status| {
+                    if exit_status.success() {
+                        info!("Process completed successfully: {}", exec_id_clone);
+                        ProcessStatus::Success
+                    } else {
+                        let warn_msg = format!(
+                            "Process failed for task {}: {}",
+                            task_label_clone, exec_id_clone
+                        );
+                        warn!("{}", warn_msg);
+                        ProcessStatus::Failed
+                    }
+                });
 
             let _ = stdout_handle.await;
             let _ = stderr_handle.await;
@@ -385,6 +391,17 @@ fn build_env_vars(params: Option<serde_json::Value>) -> ProcessEnvBuild {
                 }
                 "upstream" => {
                     env_vars.insert("ORK_UPSTREAM_JSON".to_string(), v.to_string());
+                }
+                "env" => {
+                    if let Some(env_obj) = v.as_object() {
+                        for (env_key, env_val) in env_obj {
+                            if let Some(val) = env_val.as_str() {
+                                env_vars.insert(env_key.clone(), val.to_string());
+                            } else if env_val.is_number() || env_val.is_boolean() {
+                                env_vars.insert(env_key.clone(), env_val.to_string());
+                            }
+                        }
+                    }
                 }
                 _ => {
                     if let Some(val) = v.as_str() {

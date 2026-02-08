@@ -14,6 +14,7 @@ fn test_build_env_vars_extracts_known_fields() {
         "python_path": "/tmp/python-root",
         "runner_path": "/tmp/runner.py",
         "upstream": {"step_a": {"ok": true}},
+        "env": {"ORK_ATTEMPT": 3, "DEBUG": true},
         "string_meta": "x",
         "numeric_meta": 7,
         "bool_meta": true
@@ -41,6 +42,8 @@ fn test_build_env_vars_extracts_known_fields() {
     assert_eq!(env_vars.get("string_meta").map(String::as_str), Some("x"));
     assert_eq!(env_vars.get("numeric_meta").map(String::as_str), Some("7"));
     assert_eq!(env_vars.get("bool_meta").map(String::as_str), Some("true"));
+    assert_eq!(env_vars.get("ORK_ATTEMPT").map(String::as_str), Some("3"));
+    assert_eq!(env_vars.get("DEBUG").map(String::as_str), Some("true"));
     assert!(env_vars.contains_key("ORK_INPUT_JSON"));
     assert!(env_vars.contains_key("ORK_UPSTREAM_JSON"));
 }

@@ -92,14 +92,14 @@ mod library_tests {
         // Should have received status updates
         assert!(!updates.is_empty(), "No status updates received");
 
-        // Find the completed update
-        let completed = updates.iter().find(|u| u.status == "completed");
-        assert!(completed.is_some(), "No completed status update found");
+        // Find the success update
+        let success = updates.iter().find(|u| u.status == "success");
+        assert!(success.is_some(), "No success status update found");
 
-        let completed = completed.unwrap();
-        assert!(completed.output.is_some(), "No output in completed status");
+        let success = success.unwrap();
+        assert!(success.output.is_some(), "No output in success status");
 
-        let output = completed.output.as_ref().unwrap();
+        let output = success.output.as_ref().unwrap();
         assert!(output.get("sum").is_some(), "Output missing 'sum' field");
         assert!(
             output.get("doubled").is_some(),
@@ -193,10 +193,10 @@ mod library_tests {
             updates.push(update);
         }
 
-        let completed = updates.iter().find(|u| u.status == "completed");
-        assert!(completed.is_some());
+        let success = updates.iter().find(|u| u.status == "success");
+        assert!(success.is_some());
 
-        let output = completed.unwrap().output.as_ref().unwrap();
+        let output = success.unwrap().output.as_ref().unwrap();
         assert_eq!(output["sum"], 0);
         assert_eq!(output["doubled"], serde_json::json!([]));
     }
@@ -226,7 +226,7 @@ mod library_tests {
             updates.push(update);
         }
 
-        // Should have at least running and completed updates
+        // Should have at least running and success updates
         assert!(updates.len() >= 2, "Should have multiple status updates");
 
         // First update should be running
@@ -234,9 +234,9 @@ mod library_tests {
         assert_eq!(updates[0].task_id, task_id);
         assert!(updates[0].log.is_some());
 
-        // Last update should be completed
+        // Last update should be success
         let last = updates.last().unwrap();
-        assert_eq!(last.status, "completed");
+        assert_eq!(last.status, "success");
         assert_eq!(last.task_id, task_id);
     }
 
@@ -324,11 +324,11 @@ pub extern "C" fn ork_task_free(ptr: *mut c_char) {
             updates.push(update);
         }
 
-        let completed = updates
+        let success = updates
             .iter()
-            .find(|u| u.status == "completed")
-            .expect("completed status");
-        assert_eq!(completed.output, Some(serde_json::json!({"plain": true})));
+            .find(|u| u.status == "success")
+            .expect("success status");
+        assert_eq!(success.output, Some(serde_json::json!({"plain": true})));
     }
 
     #[tokio::test]

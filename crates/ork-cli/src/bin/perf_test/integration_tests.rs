@@ -112,7 +112,11 @@ scheduler:
     path
 }
 
-fn write_mock_ork_binary(emit_metrics: bool, fail_create_workflow: bool, run_exits: bool) -> PathBuf {
+fn write_mock_ork_binary(
+    emit_metrics: bool,
+    fail_create_workflow: bool,
+    run_exits: bool,
+) -> PathBuf {
     let fake_bin_path = std::env::temp_dir().join(format!("ork-mock-{}", Uuid::new_v4()));
     let create_workflow_body = if fail_create_workflow {
         "exit 1"

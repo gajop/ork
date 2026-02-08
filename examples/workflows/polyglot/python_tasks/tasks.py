@@ -24,16 +24,16 @@ def format_result(multiplier: int) -> dict:
 
     print(f"[Python] Received upstream data: {upstream}")
 
-    # Extract rust_process output
-    processed = upstream.get("rust_process", {})
-    total = processed.get("sum", 0)
-    doubled = processed.get("doubled", [])
+    # Extract rust_process_sdk output
+    processed = upstream.get("rust_process_sdk", {})
+    total = processed.get("total", 0)
+    tripled = processed.get("tripled", [])
 
     result = {
-        "summary": f"Processed {len(doubled)} numbers",
+        "summary": f"Processed {len(tripled)} numbers",
         "total": total,
         "final_value": total * multiplier,
-        "doubled_numbers": doubled
+        "tripled_numbers": tripled
     }
 
     print(f"[Python] Final result: {result}")

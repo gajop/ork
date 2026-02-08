@@ -26,18 +26,31 @@ up-sqlite:
 example name:
     #!/usr/bin/env bash
     set -euo pipefail
-    export DATABASE_URL=${DATABASE_URL:-sqlite://./.ork/ork.db?mode=rwc}
+    project_root="$(pwd)"
+    export DATABASE_URL=${DATABASE_URL:-sqlite://$project_root/.ork/ork.db?mode=rwc}
     mkdir -p .ork
     cargo run -q -p ork-cli --no-default-features --features sqlite,process --bin ork -- init >/dev/null 2>&1 || true
-    file="examples/workflows/{{name}}/{{name}}.yaml"
+    example_dir_rel="examples/workflows/{{name}}"
+    example_dir="$project_root/$example_dir_rel"
+    if [ ! -d "$example_dir" ]; then
+        echo "Example not found: $example_dir_rel" >&2
+        exit 1
+    fi
+    source ./scripts/prepare-example-env.sh "$example_dir" "$project_root"
+
+    if [ -f "$example_dir/rust_tasks/Cargo.toml" ]; then
+        cargo build --manifest-path "$example_dir/rust_tasks/Cargo.toml"
+    fi
+
+    file="$example_dir/{{name}}.yaml"
     if [ ! -f "$file" ]; then
-        set -- examples/workflows/{{name}}/*.yaml
-        if [ "$1" = "examples/workflows/{{name}}/*.yaml" ]; then
-            echo "No workflow yaml found for examples/workflows/{{name}}" >&2
+        set -- "$example_dir"/*.yaml
+        if [ "$1" = "$example_dir/*.yaml" ]; then
+            echo "No workflow yaml found for $example_dir_rel" >&2
             exit 1
         fi
         if [ -n "${2-}" ]; then
-            echo "Multiple workflow yamls found for examples/workflows/{{name}}; specify one explicitly." >&2
+            echo "Multiple workflow yamls found for $example_dir_rel; specify one explicitly." >&2
             exit 1
         fi
         file="$1"
@@ -125,6 +138,7 @@ examples-check-all timeout_s='240':
     set -euo pipefail
     timeout_value="{{timeout_s}}"
     timeout_value="${timeout_value#timeout_s=}"
+    skip_examples="${ORK_SKIP_EXAMPLES:-deferrables}"
     mkdir -p .ork/reports
     results=.ork/reports/examples-check.tsv
     : > "$results"
@@ -133,6 +147,11 @@ examples-check-all timeout_s='240':
     for dir in examples/workflows/*; do
         [ -d "$dir" ] || continue
         name="$(basename "$dir")"
+        if printf '%s\n' "$skip_examples" | tr ',' '\n' | grep -Fxq "$name"; then
+            printf "%s\tSKIP\t0\t0\n" "$name" >> "$results"
+            echo "$name: SKIP"
+            continue
+        fi
         log=".ork/reports/example-${name}.log"
         start="$(date +%s)"
         if timeout "$timeout_value" just example "$name" >"$log" 2>&1; then
@@ -204,10 +223,12 @@ quality-report report='docs/reports/quality/latest.md' timeout_s='240':
     pass_count=0
     fail_count=0
     timeout_count=0
+    skip_count=0
     if [ -f "$examples_tsv" ]; then
         pass_count="$(awk -F'\t' 'NR>1 && $2=="PASS" {c++} END {print c+0}' "$examples_tsv")"
         fail_count="$(awk -F'\t' 'NR>1 && $2=="FAIL" {c++} END {print c+0}' "$examples_tsv")"
         timeout_count="$(awk -F'\t' 'NR>1 && $2=="TIMEOUT" {c++} END {print c+0}' "$examples_tsv")"
+        skip_count="$(awk -F'\t' 'NR>1 && $2=="SKIP" {c++} END {print c+0}' "$examples_tsv")"
     fi
 
     generated_at="$(date -u +"%Y-%m-%d %H:%M:%SZ")"
@@ -230,6 +251,7 @@ quality-report report='docs/reports/quality/latest.md' timeout_s='240':
         echo "- PASS: $pass_count"
         echo "- FAIL: $fail_count"
         echo "- TIMEOUT: $timeout_count"
+        echo "- SKIP: $skip_count"
         echo "- Matrix file: \`.ork/reports/examples-check.tsv\`"
         echo
         echo "## Notes"

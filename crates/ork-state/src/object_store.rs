@@ -90,8 +90,8 @@ impl ObjectStore for LocalObjectStore {
                 })?;
         }
 
-        let bytes = serde_json::to_vec_pretty(spec)
-            .expect("TaskSpec serialization should be infallible");
+        let bytes =
+            serde_json::to_vec_pretty(spec).expect("TaskSpec serialization should be infallible");
 
         fs::write(&path, bytes)
             .await

@@ -38,3 +38,9 @@ examples/**/warehouse.db
 
 # Coverage artifacts
 coverage/
+
+# Generated quality snapshot
+docs/reports/quality/latest.md
+
+# Python build artifacts
+python-sdk/build/

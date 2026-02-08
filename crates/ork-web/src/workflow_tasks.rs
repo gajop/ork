@@ -2,6 +2,7 @@ use ork_core::compiled::CompiledWorkflow;
 use ork_core::database::NewWorkflowTask;
 use ork_core::workflow::ExecutorKind;
 use serde_json;
+use std::path::Path;
 
 pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask> {
     let mut tasks = Vec::with_capacity(compiled.tasks.len());
@@ -45,7 +46,7 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
                 if let Some(command) = task.command.as_deref() {
                     params.insert(
                         "command".to_string(),
-                        serde_json::Value::String(command.to_string()),
+                        serde_json::Value::String(resolve_process_command(command, &compiled.root)),
                     );
                 } else if let Some(file) = task.file.as_ref() {
                     params.insert(
@@ -99,6 +100,19 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
     }
 
     tasks
+}
+
+fn resolve_process_command(command: &str, root: &Path) -> String {
+    if command.chars().any(char::is_whitespace) {
+        return command.to_string();
+    }
+
+    let path = Path::new(command);
+    if !path.is_relative() || !command.contains('/') {
+        return command.to_string();
+    }
+
+    root.join(path).to_string_lossy().to_string()
 }
 
 #[cfg(test)]
@@ -245,6 +259,20 @@ mod tests {
         assert_eq!(
             library_params.get("library_path"),
             Some(&serde_json::json!("target/libtask.so"))
+        );
+    }
+
+    #[test]
+    fn test_build_workflow_tasks_resolves_relative_process_command_from_workflow_root() {
+        let mut compiled = compiled_fixture();
+        compiled.tasks[0].command = Some("bin/process-task".to_string());
+        compiled.root = PathBuf::from("/tmp/ork-workflow");
+
+        let tasks = build_workflow_tasks(&compiled);
+
+        assert_eq!(
+            tasks[0].params.get("command"),
+            Some(&serde_json::json!("/tmp/ork-workflow/bin/process-task"))
         );
     }
 }

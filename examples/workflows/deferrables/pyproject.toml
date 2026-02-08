@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Example workflow demonstrating deferrables with Ork"
 requires-python = ">=3.8"
 dependencies = [
-    "ork-sdk @ file:///${PROJECT_ROOT}/../../../python-sdk",
+    "ork-sdk",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+ork-sdk = { path = "../../../python-sdk" }
