@@ -26,5 +26,8 @@ Axum-based web UI/API backed by the primary database. It reads workflows/runs/ta
 | [src/lib.rs](../../../crates/ork-web/src/lib.rs) | Library exports for the web crate. | 2026-02-07 | 85c00e7 |
 | [src/main.rs](../../../crates/ork-web/src/main.rs) | Boots the Axum server and configures the app. | 2026-02-07 | 2eac514 |
 | [src/workflow_tasks.rs](../../../crates/ork-web/src/workflow_tasks.rs) | Build workflow task rows from compiled workflows. | 2026-02-07 | 431f0c5 |
+| [tests/api_db_error_paths_test.rs](../../../crates/ork-web/tests/api_db_error_paths_test.rs) | Integration tests for DB failure/error branches across API handlers. | 2026-02-08 | 0000000 |
 | [tests/api_endpoints_test.rs](../../../crates/ork-web/tests/api_endpoints_test.rs) | Integration tests for HTTP API endpoints. | 2026-02-07 | cac3273 |
+| [tests/api_error_paths_test.rs](../../../crates/ork-web/tests/api_error_paths_test.rs) | Integration tests for API error, conflict, and invalid-input paths. | 2026-02-07 | 0000000 |
+| [tests/api_realtime_test.rs](../../../crates/ork-web/tests/api_realtime_test.rs) | Integration tests for realtime websocket broadcasts and API server startup serving the UI. | 2026-02-08 | 0000000 |
 | [ui/index.html](../../../crates/ork-web/ui/index.html) | Static HTML for the web UI. | 2026-02-06 | 752f20c |

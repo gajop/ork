@@ -309,4 +309,139 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[tokio::test]
+    async fn test_object_store_path_helpers_and_missing_spec_error() {
+        let (store, dir) = temp_store();
+        let trait_obj: &dyn ObjectStore = &store;
+
+        let expected_dir = dir.join("run-2").join("task-b");
+        assert_eq!(trait_obj.task_dir("run-2", "task-b"), expected_dir);
+        assert_eq!(
+            trait_obj.spec_path("run-2", "task-b"),
+            expected_dir.join("spec.json")
+        );
+        assert_eq!(
+            trait_obj.output_path("run-2", "task-b"),
+            expected_dir.join("output.json")
+        );
+
+        let err = store
+            .read_spec("run-2", "missing")
+            .await
+            .expect_err("missing spec should error");
+        assert!(matches!(err, OrkError::ReadFile { .. }));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn test_read_spec_status_and_output_invalid_json_errors() {
+        let (store, dir) = temp_store();
+        let task_dir = store.task_dir("run-3", "task-c");
+        tokio::fs::create_dir_all(&task_dir)
+            .await
+            .expect("create task dir");
+
+        tokio::fs::write(store.spec_path("run-3", "task-c"), b"{not-json")
+            .await
+            .expect("write invalid spec");
+        let spec_err = store
+            .read_spec("run-3", "task-c")
+            .await
+            .expect_err("invalid spec json should error");
+        assert!(matches!(spec_err, OrkError::JsonParse { .. }));
+
+        tokio::fs::write(store.status_path("run-3", "task-c"), b"{bad-json")
+            .await
+            .expect("write invalid status");
+        let status_err = store
+            .read_status("run-3", "task-c")
+            .await
+            .expect_err("invalid status json should error");
+        assert!(matches!(status_err, OrkError::JsonParse { .. }));
+
+        tokio::fs::write(store.output_path("run-3", "task-c"), b"{also-bad")
+            .await
+            .expect("write invalid output");
+        let output_err = store
+            .read_output("run-3", "task-c")
+            .await
+            .expect_err("invalid output json should error");
+        assert!(matches!(output_err, OrkError::JsonParse { .. }));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn test_write_and_read_error_paths_return_structured_errors() {
+        let (store, dir) = temp_store();
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp root");
+
+        let base_file = dir.join("base-file");
+        tokio::fs::write(&base_file, b"x")
+            .await
+            .expect("create base file");
+        let bad_store = LocalObjectStore::new(&base_file);
+        let spec = sample_spec("run-err", "task-err");
+        let write_spec_err = bad_store
+            .write_spec(&spec)
+            .await
+            .expect_err("create_dir_all on file path should fail");
+        assert!(matches!(write_spec_err, OrkError::WriteFile { .. }));
+
+        let task_dir = store.task_dir("run-err", "task-err");
+        tokio::fs::create_dir_all(&task_dir)
+            .await
+            .expect("create task dir");
+        tokio::fs::create_dir(store.spec_path("run-err", "task-err"))
+            .await
+            .expect("create spec path dir");
+        let write_spec_err = store
+            .write_spec(&spec)
+            .await
+            .expect_err("writing spec to directory path should fail");
+        assert!(matches!(write_spec_err, OrkError::WriteFile { .. }));
+
+        let status = TaskStatusFile {
+            status: TaskStatus::Running,
+            started_at: Some(Utc::now()),
+            finished_at: None,
+            heartbeat_at: Some(Utc::now()),
+            error: None,
+        };
+        tokio::fs::create_dir(store.status_path("run-err", "task-err"))
+            .await
+            .expect("create status path dir");
+        let write_status_err = store
+            .write_status("run-err", "task-err", &status)
+            .await
+            .expect_err("writing status to directory path should fail");
+        assert!(matches!(write_status_err, OrkError::WriteFile { .. }));
+
+        tokio::fs::create_dir(store.output_path("run-err", "task-err"))
+            .await
+            .expect("create output path dir");
+        let write_output_err = store
+            .write_output("run-err", "task-err", &serde_json::json!({"ok": true}))
+            .await
+            .expect_err("writing output to directory path should fail");
+        assert!(matches!(write_output_err, OrkError::WriteFile { .. }));
+
+        let read_status_err = store
+            .read_status("run-err", "task-err")
+            .await
+            .expect_err("reading status from directory should fail");
+        assert!(matches!(read_status_err, OrkError::ReadFile { .. }));
+
+        let read_output_err = store
+            .read_output("run-err", "task-err")
+            .await
+            .expect_err("reading output from directory should fail");
+        assert!(matches!(read_output_err, OrkError::ReadFile { .. }));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

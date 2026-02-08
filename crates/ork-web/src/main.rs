@@ -3,11 +3,10 @@ use std::net::SocketAddr;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use ork_web::api::ApiServer;
+use ork_core::database::Database;
+use ork_web::api::{ApiServer, build_router};
 use std::sync::Arc;
 
-#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
-use ork_core::database::Database;
 #[cfg(feature = "postgres")]
 use ork_state::PostgresDatabase;
 #[cfg(feature = "sqlite")]
@@ -27,15 +26,43 @@ struct Args {
     addr: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
+fn resolve_database_url(default_url: String) -> String {
+    std::env::var("DATABASE_URL").unwrap_or(default_url)
+}
 
-    tracing_subscriber::fmt()
+fn parse_addr(addr: &str) -> SocketAddr {
+    addr.parse().expect("invalid address")
+}
+
+fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()))
-        .init();
+        .try_init();
+}
 
-    let database_url = std::env::var("DATABASE_URL").unwrap_or(args.database_url);
+async fn run_api_server<S>(
+    db: Arc<dyn Database>,
+    addr: SocketAddr,
+    shutdown: S,
+) -> anyhow::Result<()>
+where
+    S: std::future::Future<Output = ()> + Send + 'static,
+{
+    let api = ApiServer::new(db);
+    let app = build_router(api);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
+    Ok(())
+}
+
+async fn run_from_args<S>(args: Args, shutdown: S) -> anyhow::Result<()>
+where
+    S: std::future::Future<Output = ()> + Send + 'static,
+{
+    let addr: SocketAddr = parse_addr(&args.addr);
+    let database_url = resolve_database_url(args.database_url);
 
     #[cfg(all(feature = "postgres", not(feature = "sqlite")))]
     let db = Arc::new(PostgresDatabase::new(&database_url).await?);
@@ -51,10 +78,176 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("No database backend enabled. Enable 'postgres' or 'sqlite' feature.".into());
     };
 
-    let server = ApiServer::new(db);
-    let addr: SocketAddr = args.addr.parse().expect("invalid address");
-    server.serve(addr).await;
+    let db: Arc<dyn Database> = db;
     println!("Serving on http://{}", addr);
-    futures::future::pending::<()>().await;
-    Ok(())
+    run_api_server(db, addr, shutdown).await
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    init_tracing();
+    let args = Args::parse();
+    run_from_args(args, futures::future::pending::<()>()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ork_state::SqliteDatabase;
+    use std::sync::{Mutex, OnceLock};
+    use tokio::sync::oneshot;
+    use tokio::time::{Duration, sleep};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn free_local_addr() -> SocketAddr {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
+        listener.local_addr().expect("local addr")
+    }
+
+    #[test]
+    fn test_args_defaults() {
+        let args = Args::parse_from(["ork-web"]);
+        assert_eq!(
+            args.database_url,
+            "postgres://postgres:postgres@localhost:5432/orchestrator"
+        );
+        assert_eq!(args.addr, "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn test_resolve_database_url_env_override_and_fallback() {
+        let _guard = env_lock().lock().expect("env lock");
+        let prev = std::env::var("DATABASE_URL").ok();
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://env-db");
+        }
+        assert_eq!(
+            resolve_database_url("postgres://default-db".to_string()),
+            "postgres://env-db"
+        );
+
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+        assert_eq!(
+            resolve_database_url("postgres://default-db".to_string()),
+            "postgres://default-db"
+        );
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("DATABASE_URL", v) },
+            None => unsafe { std::env::remove_var("DATABASE_URL") },
+        }
+    }
+
+    #[test]
+    fn test_parse_addr() {
+        let addr = parse_addr("127.0.0.1:4000");
+        assert_eq!(addr, "127.0.0.1:4000".parse::<SocketAddr>().expect("addr"));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid address")]
+    fn test_parse_addr_panics_on_invalid_input() {
+        let _ = parse_addr("definitely-not-an-address");
+    }
+
+    #[tokio::test]
+    async fn test_run_api_server_returns_error_when_bind_fails() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("sqlite db"));
+        db.run_migrations().await.expect("migrations");
+        let db: Arc<dyn Database> = db;
+
+        let addr = free_local_addr();
+        let _occupied = std::net::TcpListener::bind(addr).expect("occupy addr");
+        let result = run_api_server(db, addr, async {}).await;
+        assert!(result.is_err(), "bind on occupied addr should fail");
+    }
+
+    #[tokio::test]
+    async fn test_run_api_server_serves_ui() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("sqlite db"));
+        db.run_migrations().await.expect("migrations");
+        let db: Arc<dyn Database> = db;
+
+        let addr = free_local_addr();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            run_api_server(db, addr, async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+        });
+
+        let response = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match reqwest::get(format!("http://{addr}/")).await {
+                    Ok(resp) => break resp,
+                    Err(_) => sleep(Duration::from_millis(50)).await,
+                }
+            }
+        })
+        .await
+        .expect("http timeout");
+
+        assert!(response.status().is_success());
+        let body = response.text().await.expect("ui body");
+        assert!(body.contains("<html"));
+
+        let _ = shutdown_tx.send(());
+        let result = server.await.expect("join server");
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn test_run_from_args_serves_ui() {
+        init_tracing();
+        let addr = free_local_addr();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let args = Args {
+            database_url: ":memory:".to_string(),
+            addr: addr.to_string(),
+        };
+
+        let server = tokio::spawn(async move {
+            run_from_args(args, async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+        });
+
+        let response = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match reqwest::get(format!("http://{addr}/")).await {
+                    Ok(resp) => break resp,
+                    Err(_) => sleep(Duration::from_millis(50)).await,
+                }
+            }
+        })
+        .await
+        .expect("http timeout");
+        assert!(response.status().is_success());
+
+        let _ = shutdown_tx.send(());
+        let result = server.await.expect("join server");
+        assert!(result.is_ok());
+    }
+
+    #[cfg(all(feature = "postgres", not(feature = "sqlite")))]
+    #[tokio::test]
+    async fn test_run_from_args_errors_when_database_cannot_connect() {
+        init_tracing();
+        let args = Args {
+            database_url: "postgres://postgres:postgres@127.0.0.1:1/ork".to_string(),
+            addr: free_local_addr().to_string(),
+        };
+
+        let result = run_from_args(args, async {}).await;
+        assert!(result.is_err(), "expected DB connect failure");
+    }
 }

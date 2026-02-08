@@ -39,7 +39,10 @@ The main host process for Ork. It owns the CLI surface and starts the scheduler 
 | [scripts/dump-schema.sh](../../../crates/ork-cli/scripts/dump-schema.sh) | Generates `schema.sql` via pg_dump after migrations. | 2026-02-06 | b698ac4 |
 | [scripts/test-e2e.sh](../../../crates/ork-cli/scripts/test-e2e.sh) | End-to-end CLI test that triggers and inspects a run. | 2026-02-06 | bd553d1 |
 | [scripts/test-load.sh](../../../crates/ork-cli/scripts/test-load.sh) | Simple load test that triggers many workflows. | 2026-02-06 | 844ff75 |
-| [src/bin/perf-test.rs](../../../crates/ork-cli/src/bin/perf-test.rs) | Performance test binary used by `just perf-*` workflows. | 2026-02-07 | 0143561 |
+| [src/bin/perf-test.rs](../../../crates/ork-cli/src/bin/perf-test.rs) | Performance test binary used by `just perf-*` workflows. | 2026-02-08 | c6274ca |
+| [src/bin/perf_test/integration_tests.rs](../../../crates/ork-cli/src/bin/perf_test/integration_tests.rs) | Integration-style perf-test coverage using a mock `ork-cloud-run` binary and controlled config. | 2026-02-08 | 7f56161 |
+| [src/bin/perf_test/perf_metrics.rs](../../../crates/ork-cli/src/bin/perf_test/perf_metrics.rs) | Helpers for parsing and summarizing scheduler metrics in perf-test output. | 2026-02-08 | f93003e |
+| [src/bin/perf_test/perf_support.rs](../../../crates/ork-cli/src/bin/perf_test/perf_support.rs) | Perf-test support helpers for config loading, script setup, and throughput reporting. | 2026-02-08 | bbb0033 |
 | [src/commands/create_workflow.rs](../../../crates/ork-cli/src/commands/create_workflow.rs) | Implements `ork create-workflow` for ad-hoc workflows. | 2026-02-06 | f58af8c |
 | [src/commands/create_workflow_yaml.rs](../../../crates/ork-cli/src/commands/create_workflow_yaml.rs) | Implements `ork create-workflow-yaml` for YAML DAGs. | 2026-02-07 | 0bca210 |
 | [src/commands/delete_workflow.rs](../../../crates/ork-cli/src/commands/delete_workflow.rs) | Implements `ork delete-workflow`. | 2026-02-06 | 97bad38 |

@@ -201,6 +201,20 @@ fn introspect_python_signature(
         .output()
         .map_err(|e| format!("Failed to execute introspection script: {}", e))?;
 
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed = serde_json::from_str::<serde_json::Value>(&stdout);
+    if let Ok(value) = parsed {
+        if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
+            return Err(format!("Task analysis error: {}", err));
+        }
+        if output.status.success() {
+            return Ok(value);
+        }
+    } else if output.status.success() {
+        let parse_err = parsed.expect_err("parse should fail in this branch");
+        return Err(format!("Failed to parse introspection output: {}", parse_err));
+    }
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
@@ -209,14 +223,8 @@ fn introspect_python_signature(
             stderr.trim()
         ));
     }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let result: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse introspection output: {}", e))?;
-
-    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
-        return Err(format!("Task analysis error: {}", err));
-    }
-
-    Ok(result)
+    Err("Unexpected introspection state".to_string())
 }
+
+#[cfg(test)]
+mod tests;

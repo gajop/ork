@@ -176,10 +176,26 @@ impl ProcessExecutor {
             let mut child = match cmd.spawn() {
                 Ok(child) => child,
                 Err(e) => {
+                    let error_msg = format!(
+                        "failed to spawn process for task {} (execution {}): {}",
+                        task_label_clone, exec_id_clone, e
+                    );
                     warn!(
                         "Failed to execute task {} (execution {}): {}",
                         task_label_clone, exec_id_clone, e
                     );
+                    let mut states = states_clone.write().await;
+                    states.insert(exec_id_clone.clone(), ProcessStatus::Failed);
+                    drop(states);
+                    if let Some(tx) = status_tx_clone.read().await.as_ref() {
+                        let _ = tx.send(StatusUpdate {
+                            task_id,
+                            status: "failed".to_string(),
+                            log: None,
+                            output: None,
+                            error: Some(error_msg),
+                        });
+                    }
                     return;
                 }
             };
@@ -461,3 +477,6 @@ impl Executor for ProcessExecutor {
         *status_tx = Some(tx);
     }
 }
+
+#[cfg(test)]
+mod tests;

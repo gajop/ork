@@ -19,7 +19,9 @@ pub async fn process_scheduled_triggers<D: Database>(db: &D) -> Result<usize> {
     let mut triggered_count = 0;
 
     for workflow in workflows {
-        triggered_count += process_workflow_schedule(db, &workflow, now).await;
+        if let Some(schedule_str) = workflow.schedule.as_deref() {
+            triggered_count += process_workflow_schedule(db, &workflow, schedule_str, now).await;
+        }
     }
 
     if triggered_count > 0 {
@@ -32,13 +34,9 @@ pub async fn process_scheduled_triggers<D: Database>(db: &D) -> Result<usize> {
 async fn process_workflow_schedule<D: Database>(
     db: &D,
     workflow: &Workflow,
+    schedule_str: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> usize {
-    let schedule_str = match &workflow.schedule {
-        Some(s) => s,
-        None => return 0,
-    };
-
     // Parse cron expression
     let schedule = match cron::Schedule::from_str(schedule_str) {
         Ok(s) => s,

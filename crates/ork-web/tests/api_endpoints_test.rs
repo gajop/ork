@@ -303,3 +303,92 @@ async fn test_task_pause_resume_endpoints() {
         .unwrap();
     assert_eq!(task.status_str(), "pending");
 }
+
+#[tokio::test]
+async fn test_resume_run_with_no_tasks_sets_pending_status() {
+    let (app, db) = setup().await;
+    let workflow = db
+        .create_workflow(
+            "resume_no_tasks",
+            None,
+            "dag",
+            "local",
+            "local",
+            "dag",
+            None,
+            None,
+        )
+        .await
+        .expect("workflow");
+    let run = db.create_run(workflow.id, "test").await.expect("run");
+    db.update_run_status(run.id, "paused", None)
+        .await
+        .expect("pause run");
+
+    let (status, _) = request_json(
+        &app,
+        Method::POST,
+        &format!("/api/runs/{}/resume", run.id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let resumed = db.get_run(run.id).await.expect("run");
+    assert_eq!(resumed.status_str(), "pending");
+}
+
+#[tokio::test]
+async fn test_run_detail_includes_task_timestamps_logs_output_and_error() {
+    let (app, db) = setup().await;
+    let workflow = create_workflow_with_tasks(&db, "detail_fields_workflow").await;
+    let run_id = create_run_with_tasks(&db, &workflow, 1).await;
+    db.update_run_status(run_id, "running", None)
+        .await
+        .expect("set run running");
+
+    let task = db
+        .list_tasks(run_id)
+        .await
+        .expect("tasks")
+        .into_iter()
+        .next()
+        .expect("task exists");
+
+    db.update_task_status(task.id, "dispatched", Some("exec-1"), None)
+        .await
+        .expect("set dispatched");
+    db.update_task_status(task.id, "running", Some("exec-1"), None)
+        .await
+        .expect("set running");
+    db.append_task_log(task.id, "line one\n")
+        .await
+        .expect("append log");
+    db.update_task_output(task.id, json!({"value": 42}))
+        .await
+        .expect("set output");
+    db.update_task_status(task.id, "failed", Some("exec-1"), Some("boom"))
+        .await
+        .expect("set failed");
+
+    let (status, body) =
+        request_json(&app, Method::GET, &format!("/api/runs/{}", run_id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let first_task = body["tasks"]
+        .as_array()
+        .expect("tasks array")
+        .first()
+        .expect("first task");
+    assert_eq!(first_task["status"], "failed");
+    assert!(first_task["started_at"].is_string());
+    assert!(first_task["finished_at"].is_string());
+    assert!(first_task["dispatched_at"].is_string());
+    assert_eq!(first_task["output"]["value"], 42);
+    assert!(
+        first_task["logs"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("line one")
+    );
+    assert_eq!(first_task["error"], "boom");
+}

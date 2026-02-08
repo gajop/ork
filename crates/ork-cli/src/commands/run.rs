@@ -38,6 +38,8 @@ impl Run {
 mod tests {
     use super::*;
     use ork_state::SqliteDatabase;
+    use tokio::time::{Duration, sleep};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_run_command_errors_on_missing_config_file() {
@@ -51,5 +53,35 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_errors_on_invalid_yaml_config() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let path = std::env::temp_dir().join(format!("ork-run-invalid-{}.yaml", Uuid::new_v4()));
+        std::fs::write(&path, "this: [is: not-valid-yaml").expect("write invalid yaml");
+
+        let result = Run {
+            config: Some(path.to_string_lossy().to_string()),
+        }
+        .execute(db)
+        .await;
+
+        let _ = std::fs::remove_file(path);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_run_command_uses_default_config_branch() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let handle = tokio::spawn(async move { Run { config: None }.execute(db).await });
+        sleep(Duration::from_millis(60)).await;
+        handle.abort();
+        let join = handle.await;
+        assert!(join.is_err(), "aborted scheduler loop should cancel task");
     }
 }

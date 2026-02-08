@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use std::sync::Arc;
 use std::time::Instant;
@@ -196,7 +196,7 @@ impl Execute {
                 }
 
                 if run_status != "success" {
-                    std::process::exit(1);
+                    return Err(anyhow!("Run completed with failed status"));
                 }
 
                 Ok(())
@@ -206,11 +206,12 @@ impl Execute {
                 Err(e)
             }
             Err(_) => {
-                println!(
-                    "✗ Timeout waiting for workflow to complete after {}s",
+                let msg = format!(
+                    "Timeout waiting for workflow to complete after {}s",
                     self.timeout
                 );
-                std::process::exit(1);
+                println!("✗ {msg}");
+                Err(anyhow!(msg))
             }
         }
     }
@@ -219,6 +220,7 @@ impl Execute {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ork_core::database::Database;
     use ork_state::SqliteDatabase;
     use uuid::Uuid;
 
@@ -288,6 +290,152 @@ enable_triggerer: false
         let runs = db.list_runs(Some(workflow.id)).await.expect("list runs");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status_str(), "success");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_replaces_existing_workflow_name() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+        db.create_workflow(
+            "wf-execute-replace",
+            Some("old"),
+            "job",
+            "local",
+            "local",
+            "process",
+            None,
+            None,
+        )
+        .await
+        .expect("pre-create workflow");
+
+        let temp_dir = std::env::temp_dir().join(format!("ork-execute-replace-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let workflow_path = temp_dir.join("workflow.yaml");
+        let config_path = temp_dir.join("orchestrator.yaml");
+
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: wf-execute-replace
+tasks:
+  step:
+    executor: process
+    command: "printf 'ORK_OUTPUT:{\"ok\":true}\n'"
+"#,
+        )
+        .expect("write workflow");
+        std::fs::write(
+            &config_path,
+            r#"
+poll_interval_secs: 0.01
+max_tasks_per_batch: 100
+max_concurrent_dispatches: 10
+max_concurrent_status_checks: 50
+db_pool_size: 5
+enable_triggerer: false
+"#,
+        )
+        .expect("write config");
+
+        let result = Execute {
+            file: workflow_path.to_string_lossy().to_string(),
+            config: Some(config_path.to_string_lossy().to_string()),
+            timeout: 10,
+        }
+        .execute(db.clone())
+        .await;
+        assert!(result.is_ok());
+
+        let workflows = db.list_workflows().await.expect("list workflows");
+        let matching: Vec<_> = workflows
+            .into_iter()
+            .filter(|w| w.name == "wf-execute-replace")
+            .collect();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].executor_type, "dag");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_returns_error_on_failed_run() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let temp_dir = std::env::temp_dir().join(format!("ork-execute-failed-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let workflow_path = temp_dir.join("workflow.yaml");
+        let config_path = temp_dir.join("orchestrator.yaml");
+
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: wf-execute-failed
+tasks:
+  step:
+    executor: process
+    command: "exit 1"
+"#,
+        )
+        .expect("write workflow");
+        std::fs::write(
+            &config_path,
+            r#"
+poll_interval_secs: 0.01
+max_tasks_per_batch: 100
+max_concurrent_dispatches: 10
+max_concurrent_status_checks: 50
+db_pool_size: 5
+enable_triggerer: false
+"#,
+        )
+        .expect("write config");
+
+        let err = Execute {
+            file: workflow_path.to_string_lossy().to_string(),
+            config: Some(config_path.to_string_lossy().to_string()),
+            timeout: 10,
+        }
+        .execute(db)
+        .await
+        .expect_err("failed run should return error");
+        assert!(err.to_string().contains("failed status"));
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_without_config_can_timeout() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let temp_dir = std::env::temp_dir().join(format!("ork-execute-timeout-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let workflow_path = temp_dir.join("workflow.yaml");
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: wf-execute-timeout
+tasks:
+  step:
+    executor: process
+    command: "printf 'ORK_OUTPUT:{\"ok\":true}\n'"
+"#,
+        )
+        .expect("write workflow");
+
+        let err = Execute {
+            file: workflow_path.to_string_lossy().to_string(),
+            config: None,
+            timeout: 0,
+        }
+        .execute(db)
+        .await
+        .expect_err("timeout should return error");
+        assert!(err.to_string().contains("Timeout waiting for workflow to complete"));
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

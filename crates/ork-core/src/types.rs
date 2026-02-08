@@ -180,14 +180,16 @@ mod tests {
         assert_eq!(spec.attempt, 2);
         assert!(matches!(spec.executor, ExecutorKind::Process));
         assert_eq!(spec.input, serde_json::json!({"x": 1}));
-        assert!(TaskSpec::from_workflow(
-            &workflow,
-            "run-1".to_string(),
-            "missing",
-            1,
-            IndexMap::new()
-        )
-        .is_none());
+        assert!(
+            TaskSpec::from_workflow(
+                &workflow,
+                "run-1".to_string(),
+                "missing",
+                1,
+                IndexMap::new()
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -213,25 +215,15 @@ mod tests {
             root: PathBuf::from("."),
         };
 
-        let spec = TaskSpec::from_compiled(
-            &compiled,
-            "run-2".to_string(),
-            0,
-            1,
-            IndexMap::new(),
-        )
-        .expect("compiled task should exist");
+        let spec = TaskSpec::from_compiled(&compiled, "run-2".to_string(), 0, 1, IndexMap::new())
+            .expect("compiled task should exist");
         assert_eq!(spec.workflow_name, "wf-compiled");
         assert_eq!(spec.task_name, "task0");
         assert_eq!(spec.input, serde_json::json!({"value": 42}));
-        assert!(TaskSpec::from_compiled(
-            &compiled,
-            "run-2".to_string(),
-            9,
-            1,
-            IndexMap::new()
-        )
-        .is_none());
+        assert!(
+            TaskSpec::from_compiled(&compiled, "run-2".to_string(), 9, 1, IndexMap::new())
+                .is_none()
+        );
     }
 
     #[test]

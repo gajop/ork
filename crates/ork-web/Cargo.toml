@@ -27,6 +27,9 @@ ork-state = { path = "../ork-state" }
 [dev-dependencies]
 ork-state = { path = "../ork-state", features = ["sqlite"] }
 tower = { workspace = true }
+tokio-tungstenite = "0.28"
+reqwest = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "uuid"] }
 
 [lints]
 workspace = true

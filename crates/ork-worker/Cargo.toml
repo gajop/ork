@@ -22,5 +22,8 @@ uuid = { workspace = true }
 name = "ork-worker"
 path = "src/main.rs"
 
+[dev-dependencies]
+reqwest = { workspace = true }
+
 [lints]
 workspace = true

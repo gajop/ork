@@ -316,13 +316,19 @@ mod tests {
 
     #[test]
     fn test_executor_type_parse_and_from_str() {
-        assert_eq!(ExecutorType::parse("cloudrun"), Some(ExecutorType::CloudRun));
+        assert_eq!(
+            ExecutorType::parse("cloudrun"),
+            Some(ExecutorType::CloudRun)
+        );
         assert_eq!(ExecutorType::parse("PROCESS"), Some(ExecutorType::Process));
         assert_eq!(ExecutorType::parse("python"), Some(ExecutorType::Python));
         assert_eq!(ExecutorType::parse("library"), Some(ExecutorType::Library));
         assert_eq!(ExecutorType::parse("unknown"), None);
 
         assert_eq!(ExecutorType::CloudRun.as_str(), "cloudrun");
+        assert_eq!(ExecutorType::Process.as_str(), "process");
+        assert_eq!(ExecutorType::Python.as_str(), "python");
+        assert_eq!(ExecutorType::Library.as_str(), "library");
         assert_eq!("process".parse::<ExecutorType>(), Ok(ExecutorType::Process));
         assert!("invalid".parse::<ExecutorType>().is_err());
     }
@@ -335,7 +341,11 @@ mod tests {
         assert_eq!(RunStatus::parse("success"), Some(RunStatus::Success));
         assert_eq!(RunStatus::parse("failed"), Some(RunStatus::Failed));
         assert_eq!(RunStatus::parse("other"), None);
+        assert_eq!(RunStatus::Pending.as_str(), "pending");
+        assert_eq!(RunStatus::Running.as_str(), "running");
+        assert_eq!(RunStatus::Paused.as_str(), "paused");
         assert_eq!(RunStatus::Success.as_str(), "success");
+        assert_eq!(RunStatus::Failed.as_str(), "failed");
         assert_eq!("running".parse::<RunStatus>(), Ok(RunStatus::Running));
         assert!("invalid".parse::<RunStatus>().is_err());
 
@@ -375,7 +385,11 @@ mod tests {
             Some(DeferredJobStatus::Cancelled)
         );
         assert_eq!(DeferredJobStatus::parse("bad"), None);
+        assert_eq!(DeferredJobStatus::Pending.as_str(), "pending");
+        assert_eq!(DeferredJobStatus::Polling.as_str(), "polling");
+        assert_eq!(DeferredJobStatus::Completed.as_str(), "completed");
         assert_eq!(DeferredJobStatus::Failed.as_str(), "failed");
+        assert_eq!(DeferredJobStatus::Cancelled.as_str(), "cancelled");
         assert_eq!(
             "polling".parse::<DeferredJobStatus>(),
             Ok(DeferredJobStatus::Polling)

@@ -11,7 +11,9 @@
 mod library_tests {
     use ork_core::executor::Executor;
     use ork_executors::LibraryExecutor;
+    use std::fs;
     use std::path::PathBuf;
+    use std::process::Command;
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
@@ -33,6 +35,29 @@ mod library_tests {
             );
         }
 
+        lib_path
+    }
+
+    fn compile_test_library(name: &str, source: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ork-library-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let src_path = dir.join(format!("{name}.rs"));
+        fs::write(&src_path, source).expect("write rust source");
+
+        let lib_path = dir.join(format!("lib{name}.{}", std::env::consts::DLL_EXTENSION));
+        let status = Command::new("rustc")
+            .args([
+                "--crate-type",
+                "cdylib",
+                "--edition",
+                "2024",
+                src_path.to_str().expect("source path str"),
+                "-o",
+                lib_path.to_str().expect("lib path str"),
+            ])
+            .status()
+            .expect("invoke rustc");
+        assert!(status.success(), "failed to compile test library");
         lib_path
     }
 
@@ -213,5 +238,205 @@ mod library_tests {
         let last = updates.last().unwrap();
         assert_eq!(last.status, "completed");
         assert_eq!(last.task_id, task_id);
+    }
+
+    #[tokio::test]
+    async fn test_library_executor_handles_null_pointer_output() {
+        let lib_path = compile_test_library(
+            "null_ptr",
+            r#"
+use std::os::raw::c_char;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_run(_input: *const c_char) -> *mut c_char {
+    std::ptr::null_mut()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_free(_ptr: *mut c_char) {}
+"#,
+        );
+
+        let executor = LibraryExecutor::new();
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        executor.set_status_channel(tx).await;
+
+        let result = executor
+            .execute(
+                task_id,
+                "test_task",
+                Some(serde_json::json!({"library_path": lib_path.to_string_lossy()})),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("null pointer"));
+
+        let mut updates = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            updates.push(update);
+        }
+        assert!(updates.iter().any(|u| u.status == "running"));
+        assert!(updates.iter().any(|u| u.status == "failed"));
+    }
+
+    #[tokio::test]
+    async fn test_library_executor_accepts_plain_json_output_without_prefix() {
+        let lib_path = compile_test_library(
+            "plain_json",
+            r#"
+use std::ffi::CString;
+use std::os::raw::c_char;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_run(_input: *const c_char) -> *mut c_char {
+    CString::new("{\"plain\":true}").expect("cstring").into_raw()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_free(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        unsafe {
+            let _ = CString::from_raw(ptr);
+        }
+    }
+}
+"#,
+        );
+
+        let executor = LibraryExecutor::new();
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        executor.set_status_channel(tx).await;
+
+        let result = executor
+            .execute(
+                task_id,
+                "test_task",
+                Some(serde_json::json!({"library_path": lib_path.to_string_lossy()})),
+            )
+            .await;
+        assert!(result.is_ok());
+
+        let mut updates = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            updates.push(update);
+        }
+
+        let completed = updates
+            .iter()
+            .find(|u| u.status == "completed")
+            .expect("completed status");
+        assert_eq!(completed.output, Some(serde_json::json!({"plain": true})));
+    }
+
+    #[tokio::test]
+    async fn test_library_executor_reports_missing_required_symbols() {
+        let lib_path = compile_test_library(
+            "missing_free_symbol",
+            r#"
+use std::ffi::CString;
+use std::os::raw::c_char;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_run(_input: *const c_char) -> *mut c_char {
+    CString::new("{\"ok\":true}").expect("cstring").into_raw()
+}
+"#,
+        );
+
+        let executor = LibraryExecutor::new();
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        executor.set_status_channel(tx).await;
+
+        let result = executor
+            .execute(
+                task_id,
+                "test_task",
+                Some(serde_json::json!({"library_path": lib_path.to_string_lossy()})),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to find ork_task_free")
+        );
+        assert!(rx.try_recv().is_ok(), "expected at least one status update");
+    }
+
+    #[tokio::test]
+    async fn test_library_executor_reports_missing_run_symbol() {
+        let lib_path = compile_test_library(
+            "missing_run_symbol",
+            r#"
+use std::os::raw::c_char;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_free(_ptr: *mut c_char) {}
+"#,
+        );
+
+        let executor = LibraryExecutor::new();
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        executor.set_status_channel(tx).await;
+
+        let result = executor
+            .execute(
+                task_id,
+                "test_task",
+                Some(serde_json::json!({"library_path": lib_path.to_string_lossy()})),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to find ork_task_run")
+        );
+        assert!(rx.try_recv().is_ok(), "expected at least one status update");
+    }
+
+    #[tokio::test]
+    async fn test_library_executor_reports_invalid_utf8_output() {
+        let lib_path = compile_test_library(
+            "invalid_utf8",
+            r#"
+use std::os::raw::c_char;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_run(_input: *const c_char) -> *mut c_char {
+    b"\xFF\0".as_ptr() as *mut c_char
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ork_task_free(_ptr: *mut c_char) {}
+"#,
+        );
+
+        let executor = LibraryExecutor::new();
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        executor.set_status_channel(tx).await;
+
+        let result = executor
+            .execute(
+                task_id,
+                "test_task",
+                Some(serde_json::json!({"library_path": lib_path.to_string_lossy()})),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid UTF-8"));
+        let updates: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(updates.iter().any(|u| u.status == "failed"));
     }
 }

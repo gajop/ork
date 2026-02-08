@@ -35,3 +35,6 @@ __pycache__/
 *.egg-info/
 .venv/
 examples/**/warehouse.db
+
+# Coverage artifacts
+coverage/

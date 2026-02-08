@@ -26,6 +26,7 @@ Execution backends and the executor manager. Implements [`ork-core::Executor`](.
 | [src/library.rs](../../../crates/ork-executors/src/library.rs) | Dynamic library executor for loading and invoking task symbols. | 2026-02-07 | 85acf78 |
 | [src/manager.rs](../../../crates/ork-executors/src/manager.rs) | `ExecutorManager` implementation and backend selection per task. | 2026-02-07 | 4189265 |
 | [src/process.rs](../../../crates/ork-executors/src/process.rs) | Local script/Python execution and task status reporting. | 2026-02-07 | 41c68d8 |
+| [src/process/tests.rs](../../../crates/ork-executors/src/process/tests.rs) | Unit tests for process executor helpers (env mapping, command resolution, Python root discovery). | 2026-02-07 | 0000000 |
 | [src/python_runtime.rs](../../../crates/ork-executors/src/python_runtime.rs) | Python runtime orchestration and environment/bootstrap helpers. | 2026-02-06 | eb0b9e2 |
 | [src/worker.rs](../../../crates/ork-executors/src/worker.rs) | Worker executor implementation for remote task execution mode. | 2026-02-07 | af13705 |
 | [tests/test_library.rs](../../../crates/ork-executors/tests/test_library.rs) | Integration tests for the dynamic library executor path. | 2026-02-07 | 99f8f2c |

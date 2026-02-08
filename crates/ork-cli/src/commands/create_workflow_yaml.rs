@@ -370,9 +370,15 @@ tasks:
         let tasks = super::build_workflow_tasks(&compiled);
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[0].params["job_name"], serde_json::json!("job-a"));
-        assert_eq!(tasks[1].params["task_module"], serde_json::json!("pkg.tasks"));
+        assert_eq!(
+            tasks[1].params["task_module"],
+            serde_json::json!("pkg.tasks")
+        );
         assert_eq!(tasks[1].params["task_function"], serde_json::json!("run"));
         assert_eq!(tasks[1].params["python_path"], serde_json::json!("/tmp"));
-        assert_eq!(tasks[2].params["library_path"], serde_json::json!("/tmp/libtask.so"));
+        assert_eq!(
+            tasks[2].params["library_path"],
+            serde_json::json!("/tmp/libtask.so")
+        );
     }
 }

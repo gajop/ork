@@ -25,6 +25,8 @@ sqlx = { workspace = true, optional = true, features = ["runtime-tokio", "tls-ru
 
 [dev-dependencies]
 indexmap = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+url = { workspace = true }
 
 [lints]
 workspace = true

@@ -2474,6 +2474,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "chrono",
  "cron",
  "dirs",
@@ -2494,6 +2495,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -2503,6 +2505,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "dirs",
  "gcp_auth",
  "libloading",
@@ -2537,6 +2540,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "url",
  "uuid",
 ]
 
@@ -2551,10 +2555,13 @@ dependencies = [
  "futures",
  "ork-core",
  "ork-state",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sqlx",
  "tokio",
+ "tokio-tungstenite",
  "tower 0.5.3",
  "tower-http",
  "tracing-subscriber",
@@ -2570,6 +2577,7 @@ dependencies = [
  "clap",
  "ork-core",
  "ork-executors",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "serde_yaml",

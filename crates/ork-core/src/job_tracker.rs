@@ -42,7 +42,7 @@ pub trait JobTracker: Send + Sync {
 ///
 /// Polls BigQuery API to check query job status.
 pub struct BigQueryTracker {
-    client: google_cloud_bigquery::client::Client,
+    client: Option<google_cloud_bigquery::client::Client>,
 }
 
 impl BigQueryTracker {
@@ -53,7 +53,14 @@ impl BigQueryTracker {
         let client = google_cloud_bigquery::client::Client::new(config)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create BigQuery client: {}", e))?;
-        Ok(Self { client })
+        Ok(Self {
+            client: Some(client),
+        })
+    }
+
+    #[cfg(test)]
+    fn without_client() -> Self {
+        Self { client: None }
     }
 }
 
@@ -90,8 +97,12 @@ impl JobTracker for BigQueryTracker {
             location: Some(location.to_string()),
         };
 
-        let job = self
+        let client = self
             .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("BigQuery client not initialized"))?;
+
+        let job = client
             .job()
             .get(project, bq_job_id, &get_request)
             .await
@@ -122,7 +133,7 @@ impl JobTracker for BigQueryTracker {
 ///
 /// Polls Cloud Run API to check job execution status.
 pub struct CloudRunTracker {
-    client: google_cloud_run_v2::client::Executions,
+    client: Option<google_cloud_run_v2::client::Executions>,
 }
 
 impl CloudRunTracker {
@@ -131,7 +142,14 @@ impl CloudRunTracker {
             .build()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create Cloud Run client: {}", e))?;
-        Ok(Self { client })
+        Ok(Self {
+            client: Some(client),
+        })
+    }
+
+    #[cfg(test)]
+    fn without_client() -> Self {
+        Self { client: None }
     }
 }
 
@@ -174,8 +192,12 @@ impl JobTracker for CloudRunTracker {
         );
 
         // Call Cloud Run API to get execution status
-        let execution = self
+        let client = self
             .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Cloud Run client not initialized"))?;
+
+        let execution = client
             .get_execution()
             .set_name(execution_name)
             .send()
@@ -221,7 +243,7 @@ impl JobTracker for CloudRunTracker {
 ///
 /// Polls Dataproc API to check Spark/Hadoop job status.
 pub struct DataprocTracker {
-    client: google_cloud_dataproc_v1::client::JobController,
+    client: Option<google_cloud_dataproc_v1::client::JobController>,
 }
 
 impl DataprocTracker {
@@ -230,7 +252,14 @@ impl DataprocTracker {
             .build()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create Dataproc client: {}", e))?;
-        Ok(Self { client })
+        Ok(Self {
+            client: Some(client),
+        })
+    }
+
+    #[cfg(test)]
+    fn without_client() -> Self {
+        Self { client: None }
     }
 }
 
@@ -266,8 +295,12 @@ impl JobTracker for DataprocTracker {
         );
 
         // Call Dataproc API to get job status
-        let job = self
+        let client = self
             .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Dataproc client not initialized"))?;
+
+        let job = client
             .get_job()
             .set_project_id(project)
             .set_region(region)

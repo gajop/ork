@@ -91,10 +91,15 @@ test-one name:
     @echo "Running test: {{name}}"
     cargo test --workspace {{name}} -- --nocapture --exact
 
-# Run tests and generate coverage report (requires cargo-tarpaulin)
+# Run tests and generate coverage report (requires cargo-llvm-cov)
 test-coverage:
     @echo "Generating test coverage..."
-    cargo tarpaulin --workspace --out Html --output-dir coverage
+    cargo llvm-cov --workspace --html --output-dir coverage
+
+# Run Postgres backend coverage for ork-state (requires running Postgres and cargo-llvm-cov).
+test-coverage-postgres:
+    @echo "Generating Postgres coverage for ork-state..."
+    cargo llvm-cov -p ork-state --features postgres --test postgres_backend_test --html --output-dir coverage/postgres -- --nocapture
 
 # Run all linting checks.
 lint:

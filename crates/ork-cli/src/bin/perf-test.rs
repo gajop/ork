@@ -3,11 +3,19 @@ use clap::Parser;
 use serde::Deserialize;
 use sqlx::PgPool;
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufReader, Seek, SeekFrom};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 use tokio::time::sleep;
+
+#[path = "perf_test/perf_metrics.rs"]
+mod perf_metrics;
+#[path = "perf_test/perf_support.rs"]
+mod perf_support;
+#[cfg(test)]
+#[path = "perf_test/integration_tests.rs"]
+mod integration_tests;
 
 #[derive(Parser)]
 #[command(name = "perf-test")]
@@ -18,7 +26,7 @@ struct Args {
     config: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 struct PerfConfig {
     workflows: u32,
     tasks_per_workflow: u32,
@@ -56,19 +64,10 @@ struct SchedulerMetrics {
     total_loop_ms: u128,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    // Load config from file
-    let config_path = format!("perf-configs/{}.yaml", args.config);
-    let config_content = std::fs::read_to_string(&config_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", config_path, e))?;
-    let config = serde_yaml::from_str::<PerfConfig>(&config_content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config file {}: {}", config_path, e))?;
-
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/orchestrator".to_string());
+async fn run(args: Args) -> Result<()> {
+    let config = perf_support::load_config_by_name(&args.config)?;
+    let database_url = perf_support::resolve_database_url();
+    let ork_bin = perf_support::resolve_ork_binary();
 
     let pool = PgPool::connect(&database_url).await?;
 
@@ -85,23 +84,39 @@ async fn main() -> Result<()> {
 
     // Create test script
     println!("Creating test script...");
-    std::fs::create_dir_all("test-scripts")?;
-    std::fs::write(
-        "test-scripts/perf-task.sh",
-        format!("#!/bin/bash\nsleep {}\n", config.duration),
-    )?;
-    Command::new("chmod")
-        .args(["+x", "test-scripts/perf-task.sh"])
-        .status()?;
+    perf_support::ensure_perf_task_script(config.duration)?;
 
     // Clean old workflow
     println!("Creating performance test workflow...");
+    sqlx::query(
+        r#"
+        DELETE FROM tasks
+        WHERE run_id IN (
+            SELECT r.id
+            FROM runs r
+            JOIN workflows w ON r.workflow_id = w.id
+            WHERE w.name = 'perf-test'
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        DELETE FROM runs
+        WHERE workflow_id IN (
+            SELECT id FROM workflows WHERE name = 'perf-test'
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
     sqlx::query("DELETE FROM workflows WHERE name = 'perf-test'")
         .execute(&pool)
         .await?;
 
     // Create workflow
-    let create_status = Command::new("../../target/release/ork-cloud-run")
+    let create_status = Command::new(&ork_bin)
         .args([
             "create-workflow",
             "--name",
@@ -126,9 +141,7 @@ async fn main() -> Result<()> {
     }
 
     // Write scheduler config to temp file
-    let scheduler_config_path = format!("/tmp/ork-scheduler-{}.yaml", std::process::id());
-    let scheduler_config_yaml = serde_yaml::to_string(&config.scheduler)?;
-    std::fs::write(&scheduler_config_path, scheduler_config_yaml)?;
+    let scheduler_config_path = perf_support::write_scheduler_config(&config.scheduler)?;
 
     // Start scheduler in background with config
     println!("Starting scheduler...");
@@ -147,7 +160,7 @@ async fn main() -> Result<()> {
     let scheduler_log_path = format!("/tmp/ork-scheduler-{}.log", std::process::id());
     let log_file = std::fs::File::create(&scheduler_log_path)?;
 
-    let mut scheduler = Command::new("../../target/release/ork-cloud-run")
+    let mut scheduler = Command::new(&ork_bin)
         .args(["run", "--config", &scheduler_config_path])
         .env("RUST_LOG", "info")
         .stdout(log_file.try_clone()?)
@@ -155,7 +168,7 @@ async fn main() -> Result<()> {
         .spawn()?;
 
     let scheduler_pid = Pid::from_u32(scheduler.id());
-    sleep(Duration::from_secs(2)).await;
+    sleep(perf_support::scheduler_boot_wait()).await;
 
     // Get initial memory stats
     let mut system = System::new_all();
@@ -172,8 +185,9 @@ async fn main() -> Result<()> {
 
     let mut trigger_handles = Vec::new();
     for _ in 0..config.workflows {
-        let handle = tokio::spawn(async {
-            Command::new("../../target/release/ork-cloud-run")
+        let ork_bin = ork_bin.clone();
+        let handle = tokio::spawn(async move {
+            Command::new(&ork_bin)
                 .args(["trigger", "perf-test"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -197,34 +211,20 @@ async fn main() -> Result<()> {
     let mut completed = 0u32;
     let mut all_metrics: VecDeque<SchedulerMetrics> = VecDeque::new();
     let mut log_position: u64 = 0;
+    let max_monitor_polls = perf_support::monitor_max_polls();
+    let mut monitor_polls = 0usize;
 
     while completed < total_tasks {
         sleep(Duration::from_millis(500)).await;
+        monitor_polls += 1;
 
         // Get task counts by status
         let status_counts: Vec<(String, i64)> =
             sqlx::query_as("SELECT status, COUNT(*) FROM tasks GROUP BY status")
                 .fetch_all(&pool)
                 .await?;
-
-        let mut pending = 0i64;
-        let mut dispatched = 0i64;
-        let mut running = 0i64;
-        let mut success = 0i64;
-        let mut failed = 0i64;
-
-        for (status, count) in status_counts {
-            match status.as_str() {
-                "pending" => pending = count,
-                "dispatched" => dispatched = count,
-                "running" => running = count,
-                "success" => success = count,
-                "failed" => failed = count,
-                _ => {}
-            }
-        }
-
-        completed = (success + failed) as u32;
+        let counts = perf_metrics::status_counts_from_rows(status_counts);
+        completed = (counts.success + counts.failed) as u32;
 
         // Get resource stats
         system.refresh_processes(ProcessesToUpdate::Some(&[scheduler_pid]), true);
@@ -247,14 +247,7 @@ async fn main() -> Result<()> {
             && file.seek(SeekFrom::Start(log_position)).is_ok()
         {
             let reader = BufReader::new(&file);
-            for line in reader.lines().map_while(Result::ok) {
-                if let Some(json_start) = line.find("SCHEDULER_METRICS: ") {
-                    let json_str = &line[json_start + "SCHEDULER_METRICS: ".len()..];
-                    if let Ok(metrics) = serde_json::from_str::<SchedulerMetrics>(json_str) {
-                        all_metrics.push_back(metrics);
-                    }
-                }
-            }
+            perf_metrics::append_metrics_from_reader(reader, &mut all_metrics);
             // Update position to current end of file
             if let Ok(metadata) = std::fs::metadata(&scheduler_log_path) {
                 log_position = metadata.len();
@@ -262,52 +255,31 @@ async fn main() -> Result<()> {
         }
 
         // Show cumulative metrics with both absolute values and percentages
-        let metrics_display = if !all_metrics.is_empty() {
-            let total_runs: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
-            let total_tasks: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
-            let total_status_updates: u128 = all_metrics
-                .iter()
-                .map(|m| m.process_status_updates_ms)
-                .sum();
-            let total_sleep: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
-            let total_time: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
-            let last_timestamp = all_metrics.back().map(|m| m.timestamp).unwrap_or(0);
-
-            let runs_pct = (total_runs as f64 / total_time as f64) * 100.0;
-            let tasks_pct = (total_tasks as f64 / total_time as f64) * 100.0;
-            let status_updates_pct = (total_status_updates as f64 / total_time as f64) * 100.0;
-            let sleep_pct = (total_sleep as f64 / total_time as f64) * 100.0;
-
-            format!(
-                "runs:{:.1}s/{:.1}% tasks:{:.1}s/{:.1}% updates:{:.1}s/{:.1}% sleep:{:.1}s/{:.1}% total:{:.1}s ({} loops, last_ts:{})",
-                total_runs as f64 / 1000.0,
-                runs_pct,
-                total_tasks as f64 / 1000.0,
-                tasks_pct,
-                total_status_updates as f64 / 1000.0,
-                status_updates_pct,
-                total_sleep as f64 / 1000.0,
-                sleep_pct,
-                total_time as f64 / 1000.0,
-                all_metrics.len(),
-                last_timestamp
-            )
-        } else {
-            "waiting for metrics...".to_string()
-        };
+        let metrics_display = perf_metrics::format_metrics_display(&all_metrics);
 
         println!(
             "[{:.1}s] Completed:{}/{} | Pending:{} Dispatched:{} Running:{} | Scheduler: {} KB, {:.1}% CPU | {}",
             elapsed,
             completed,
             total_tasks,
-            pending,
-            dispatched,
-            running,
+            counts.pending,
+            counts.dispatched,
+            counts.running,
             resource_stats.scheduler_rss_kb,
             resource_stats.scheduler_cpu_percent,
             metrics_display
         );
+
+        if let Some(max_polls) = max_monitor_polls
+            && monitor_polls >= max_polls
+            && completed < total_tasks
+        {
+            println!(
+                "Stopping monitor after {} polls before completion (ORK_PERF_MONITOR_MAX_POLLS={})",
+                monitor_polls, max_polls
+            );
+            break;
+        }
     }
 
     let end_time = Instant::now();
@@ -318,43 +290,11 @@ async fn main() -> Result<()> {
     println!("=== Performance Test Results ===");
 
     // Analyze scheduler metrics
-    if !all_metrics.is_empty() {
-        let total_runs_ms: u128 = all_metrics.iter().map(|m| m.process_pending_runs_ms).sum();
-        let total_tasks_ms: u128 = all_metrics.iter().map(|m| m.process_pending_tasks_ms).sum();
-        let total_status_updates_ms: u128 = all_metrics
-            .iter()
-            .map(|m| m.process_status_updates_ms)
-            .sum();
-        let total_sleep_ms: u128 = all_metrics.iter().map(|m| m.sleep_ms).sum();
-        let total_loop_ms: u128 = all_metrics.iter().map(|m| m.total_loop_ms).sum();
-
+    if let Some(summary) = perf_metrics::summarize_metrics(&all_metrics) {
         println!();
-        println!("Scheduler Time Breakdown:");
-        println!("  Total scheduler loops: {}", all_metrics.len());
-        println!(
-            "  Time processing runs: {:.2}s ({:.1}%)",
-            total_runs_ms as f64 / 1000.0,
-            (total_runs_ms as f64 / total_loop_ms as f64) * 100.0
-        );
-        println!(
-            "  Time processing tasks: {:.2}s ({:.1}%)",
-            total_tasks_ms as f64 / 1000.0,
-            (total_tasks_ms as f64 / total_loop_ms as f64) * 100.0
-        );
-        println!(
-            "  Time processing status updates: {:.2}s ({:.1}%)",
-            total_status_updates_ms as f64 / 1000.0,
-            (total_status_updates_ms as f64 / total_loop_ms as f64) * 100.0
-        );
-        println!(
-            "  Time sleeping: {:.2}s ({:.1}%)",
-            total_sleep_ms as f64 / 1000.0,
-            (total_sleep_ms as f64 / total_loop_ms as f64) * 100.0
-        );
-        println!(
-            "  Total scheduler time: {:.2}s",
-            total_loop_ms as f64 / 1000.0
-        );
+        for line in perf_support::scheduler_breakdown_lines(summary) {
+            println!("{line}");
+        }
     }
 
     // Query latency stats
@@ -372,32 +312,33 @@ async fn main() -> Result<()> {
     .fetch_one(&pool)
     .await?;
 
-    if let (tasks, Some(avg), Some(min), Some(max)) = latency_stats {
+    let latency_lines = perf_support::latency_lines(latency_stats);
+    if !latency_lines.is_empty() {
         println!();
-        println!("Latency Stats:");
-        println!("  Tasks: {}", tasks);
-        println!("  Avg latency: {:.3}s", avg);
-        println!("  Min latency: {:.3}s", min);
-        println!("  Max latency: {:.3}s", max);
+        for line in latency_lines {
+            println!("{line}");
+        }
     }
 
     // Calculate throughput
-    let task_throughput = total_tasks as f64 / total_duration;
-    let run_submission_rate = config.workflows as f64 / trigger_duration;
+    let (run_submission_rate, task_throughput) = perf_support::throughput(
+        config.workflows,
+        total_tasks,
+        trigger_duration,
+        total_duration,
+    );
 
     println!();
-    println!("Throughput:");
-    println!("  Run submission: {:.2} runs/sec", run_submission_rate);
-    println!("  Task completion: {:.2} tasks/sec", task_throughput);
-    println!("  Total duration: {:.2}s", total_duration);
-    println!();
-    println!("Explanation:");
-    println!(
-        "  - {} runs created ({} tasks each = {} total tasks)",
-        config.workflows, config.tasks_per_workflow, total_tasks
-    );
-    println!("  - Run submission measures how fast we enqueue work");
-    println!("  - Task completion measures actual work throughput");
+    for line in perf_support::throughput_lines(
+        run_submission_rate,
+        task_throughput,
+        total_duration,
+        config.workflows,
+        config.tasks_per_workflow,
+        total_tasks,
+    ) {
+        println!("{line}");
+    }
 
     // Final resource stats
     system.refresh_processes(ProcessesToUpdate::Some(&[scheduler_pid]), true);
@@ -422,6 +363,11 @@ async fn main() -> Result<()> {
     let _ = std::fs::remove_file(&scheduler_log_path);
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    run(Args::parse()).await
 }
 
 #[cfg(test)]
