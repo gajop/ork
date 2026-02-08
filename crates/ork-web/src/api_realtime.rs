@@ -6,8 +6,8 @@ use axum::{
     response::Html,
     response::IntoResponse,
 };
-use futures::sink::SinkExt;
 use futures::sink::Sink;
+use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use tokio::sync::broadcast;
 
@@ -153,5 +153,11 @@ mod tests {
             .expect("pump should stop cleanly");
         let sent = sink.sent.lock().expect("sent lock");
         assert!(sent.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_recording_sink_close_calls_poll_close() {
+        let mut sink = RecordingSink::default();
+        sink.close().await.expect("close should succeed");
     }
 }

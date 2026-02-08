@@ -254,7 +254,10 @@ mod tests {
         .await;
 
         assert_eq!(value["status"], "success");
-        assert_eq!(value["output"]["deferred"][0]["service_type"], "custom_http");
+        assert_eq!(
+            value["output"]["deferred"][0]["service_type"],
+            "custom_http"
+        );
         assert_eq!(value["deferred"][0]["job_id"], "job-1");
     }
 

@@ -65,6 +65,11 @@ async fn test_websocket_receives_broadcast_updates() {
         .send(Message::Text("ping".to_string().into()))
         .await
         .expect("send client message");
+    socket
+        .send(Message::Text("second-message".to_string().into()))
+        .await
+        .expect("send second client message");
+    sleep(Duration::from_millis(30)).await;
     socket.close(None).await.expect("close websocket");
 
     server.abort();

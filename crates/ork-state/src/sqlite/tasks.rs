@@ -228,8 +228,8 @@ impl SqliteDatabase {
         let rows = query.fetch_all(&self.pool).await?;
         let mut map = HashMap::new();
         for row in rows {
-            let name: String = row.get("task_name");
-            let output: sqlx::types::Json<serde_json::Value> = row.get("output");
+            let name: String = row.try_get("task_name")?;
+            let output: sqlx::types::Json<serde_json::Value> = row.try_get("output")?;
             map.insert(name, output.0);
         }
         Ok(map)

@@ -9,13 +9,13 @@ use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessesToUpdate, System};
 use tokio::time::sleep;
 
+#[cfg(test)]
+#[path = "perf_test/integration_tests.rs"]
+mod integration_tests;
 #[path = "perf_test/perf_metrics.rs"]
 mod perf_metrics;
 #[path = "perf_test/perf_support.rs"]
 mod perf_support;
-#[cfg(test)]
-#[path = "perf_test/integration_tests.rs"]
-mod integration_tests;
 
 #[derive(Parser)]
 #[command(name = "perf-test")]

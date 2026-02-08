@@ -275,6 +275,7 @@ payload = {
     "module": os.environ.get("ORK_TASK_MODULE"),
     "function": os.environ.get("ORK_TASK_FUNCTION"),
     "workflow": os.environ.get("ORK_WORKFLOW_NAME"),
+    "input": json.loads(os.environ.get("ORK_INPUT_JSON", "{}")),
 }
 print("ORK_OUTPUT:" + json.dumps(payload))
 "#,
@@ -294,6 +295,8 @@ print("ORK_OUTPUT:" + json.dumps(payload))
                 "task_module": "pkg.tasks",
                 "task_function": "run",
                 "runner_path": runner,
+                "python_path": base,
+                "task_input": {"value": 9},
                 "task_name": "demo-task",
                 "workflow_name": "demo-workflow",
                 "run_id": task_id.to_string(),
@@ -310,6 +313,7 @@ print("ORK_OUTPUT:" + json.dumps(payload))
     assert_eq!(output["module"], "pkg.tasks");
     assert_eq!(output["function"], "run");
     assert_eq!(output["workflow"], "demo-workflow");
+    assert_eq!(output["input"], serde_json::json!({"value": 9}));
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -410,6 +414,45 @@ print(
         output["pythonpath"].as_str().unwrap_or(""),
         base.to_string_lossy()
     );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[tokio::test]
+async fn test_execute_process_with_uv_path_sets_cache_env_and_fails_cleanly() {
+    let base = std::env::temp_dir().join(format!("ork-process-test-{}", Uuid::new_v4()));
+    fs::create_dir_all(&base).expect("create temp dir");
+    fs::write(base.join("pyproject.toml"), "[project]\nname='x'\n").expect("write pyproject");
+
+    let task_file = base.join("task.py");
+    fs::write(&task_file, "def run(x: int) -> int:\n    return x\n").expect("write task file");
+    let missing_runner = base.join("missing-runner.py");
+
+    let executor = ProcessExecutor::new(Some(base.to_string_lossy().to_string()));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    executor.set_status_channel(tx).await;
+    let task_id = Uuid::new_v4();
+
+    let execution_id = executor
+        .execute(
+            task_id,
+            "ignored",
+            Some(serde_json::json!({
+                "task_file": task_file,
+                "runner_path": missing_runner,
+                "python_path": base,
+                "task_input": {"value": 1},
+                "task_name": "uv-task",
+            })),
+        )
+        .await
+        .expect("execute process with uv path");
+    assert!(!execution_id.is_empty());
+
+    let updates = collect_updates(&mut rx).await.expect("collect updates");
+    let terminal = updates.last().expect("terminal update");
+    assert_eq!(terminal.status, "failed");
+    assert!(terminal.output.is_none());
 
     let _ = fs::remove_dir_all(&base);
 }

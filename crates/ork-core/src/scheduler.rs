@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::config::OrchestratorConfig;
@@ -81,7 +81,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     }
 
     /// Start the triggerer component for tracking deferred jobs
-    pub async fn start_triggerer(&self) -> Result<tokio::task::JoinHandle<()>> {
+    pub async fn start_triggerer(&self) -> tokio::task::JoinHandle<()> {
         // rustls 0.23 requires explicit process-level provider selection when
         // multiple providers are enabled transitively.
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -92,30 +92,43 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             TriggererConfig::default(),
         );
 
-        // Register job trackers
-        triggerer.register_tracker(Arc::new(BigQueryTracker::new().await?));
-        triggerer.register_tracker(Arc::new(CloudRunTracker::new().await?));
-        triggerer.register_tracker(Arc::new(DataprocTracker::new().await?));
+        // Register trackers opportunistically so one cloud-provider auth failure
+        // does not disable deferred job tracking for all providers.
+        match BigQueryTracker::new().await {
+            Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
+            Err(err) => warn!("BigQuery tracker unavailable: {}", err),
+        }
+        match CloudRunTracker::new().await {
+            Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
+            Err(err) => {
+                let msg = format!("Cloud Run tracker unavailable: {}", err);
+                warn!("{}", msg);
+            }
+        }
+        match DataprocTracker::new().await {
+            Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
+            Err(err) => {
+                let msg = format!("Dataproc tracker unavailable: {}", err);
+                warn!("{}", msg);
+            }
+        }
         triggerer.register_tracker(Arc::new(CustomHttpTracker::new()));
 
-        Ok(triggerer.start())
+        triggerer.start()
     }
 
     pub async fn run(&self) -> Result<()> {
-        info!(
+        let startup_msg = format!(
             "Starting scheduler loop (max_batch={}, max_concurrent_dispatch={}, max_concurrent_status={})",
             self.config.max_tasks_per_batch,
             self.config.max_concurrent_dispatches,
             self.config.max_concurrent_status_checks
         );
+        info!("{}", startup_msg);
 
         // Start triggerer in background if enabled
         let _triggerer_handle = if self.config.enable_triggerer {
-            let handle = self.start_triggerer().await.ok();
-            if handle.is_none() {
-                error!("Triggerer failed to start; continuing with scheduler-only mode");
-            }
-            handle
+            Some(self.start_triggerer().await)
         } else {
             info!("Triggerer disabled by config");
             None

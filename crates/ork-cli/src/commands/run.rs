@@ -84,4 +84,38 @@ mod tests {
         let join = handle.await;
         assert!(join.is_err(), "aborted scheduler loop should cancel task");
     }
+
+    #[tokio::test]
+    async fn test_run_command_uses_config_file_branch() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let path = std::env::temp_dir().join(format!("ork-run-valid-{}.yaml", Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+poll_interval_secs: 0.01
+max_tasks_per_batch: 10
+max_concurrent_dispatches: 2
+max_concurrent_status_checks: 2
+db_pool_size: 2
+enable_triggerer: false
+"#,
+        )
+        .expect("write valid yaml");
+
+        let cfg_path = path.to_string_lossy().to_string();
+        let handle = tokio::spawn(async move {
+            Run {
+                config: Some(cfg_path),
+            }
+            .execute(db)
+            .await
+        });
+        sleep(Duration::from_millis(60)).await;
+        handle.abort();
+        let join = handle.await;
+        let _ = std::fs::remove_file(path);
+        assert!(join.is_err(), "aborted scheduler loop should cancel task");
+    }
 }

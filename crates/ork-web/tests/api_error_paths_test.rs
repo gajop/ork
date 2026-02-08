@@ -373,3 +373,17 @@ async fn test_empty_list_and_invalid_uuid_paths() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn test_list_workflows_search_filter_is_case_insensitive() {
+    let (app, db) = setup().await;
+    let _alpha = create_workflow_with_tasks(&db, "AlphaFlow").await;
+    let _beta = create_workflow_with_tasks(&db, "BetaFlow").await;
+
+    let (status, body) = request_json(&app, Method::GET, "/api/workflows?search=alpha", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["total"], 1);
+    let items = body["items"].as_array().expect("workflow items");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "AlphaFlow");
+}

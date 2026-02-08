@@ -118,4 +118,18 @@ mod tests {
         .await
         .expect("status all should succeed");
     }
+
+    #[tokio::test]
+    async fn test_status_command_prints_no_runs_for_empty_db() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        Status {
+            run_id: None,
+            workflow: None,
+        }
+        .execute(db)
+        .await
+        .expect("status with no runs should succeed");
+    }
 }

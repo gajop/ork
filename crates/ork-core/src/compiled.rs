@@ -68,11 +68,8 @@ impl Workflow {
                     }
                 }
                 ExecutorKind::Library => {
-                    if let Some(file) = task.file.as_ref() {
-                        Some(resolve_file(root, name, file)?)
-                    } else {
-                        None
-                    }
+                    let file = task.file.as_ref().expect("validated library task file");
+                    Some(resolve_file(root, name, file)?)
                 }
                 ExecutorKind::CloudRun => None,
             };
@@ -144,11 +141,10 @@ fn topo_sort(tasks: &[CompiledTask]) -> OrkResult<Vec<usize>> {
     while let Some(node) = queue.pop_front() {
         topo.push(node);
         for &child in &dependents[node] {
-            if let Some(entry) = indegree.get_mut(child) {
-                *entry -= 1;
-                if *entry == 0 {
-                    queue.push_back(child);
-                }
+            let entry = &mut indegree[child];
+            *entry -= 1;
+            if *entry == 0 {
+                queue.push_back(child);
             }
         }
     }
@@ -203,27 +199,31 @@ fn introspect_python_signature(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed = serde_json::from_str::<serde_json::Value>(&stdout);
-    if let Ok(value) = parsed {
-        if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
-            return Err(format!("Task analysis error: {}", err));
-        }
-        if output.status.success() {
-            return Ok(value);
-        }
-    } else if output.status.success() {
-        let parse_err = parsed.expect_err("parse should fail in this branch");
-        return Err(format!("Failed to parse introspection output: {}", parse_err));
+    if let Ok(value) = parsed.as_ref()
+        && let Some(err) = value.get("error").and_then(|v| v.as_str())
+    {
+        return Err(format!("Task analysis error: {}", err));
     }
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "Introspection failed ({}): {}",
-            func_name,
-            stderr.trim()
-        ));
+    if output.status.success() {
+        let value = if let Ok(value) = parsed {
+            value
+        } else {
+            let parse_err = parsed.expect_err("parse should fail in this branch");
+            return Err(format!(
+                "Failed to parse introspection output: {}",
+                parse_err
+            ));
+        };
+        return Ok(value);
     }
-    Err("Unexpected introspection state".to_string())
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!(
+        "Introspection failed ({}): {}",
+        func_name,
+        stderr.trim()
+    ))
 }
 
 #[cfg(test)]

@@ -43,10 +43,11 @@ impl ProcessExecutor {
         let execution_id = Uuid::new_v4().to_string();
         let command = command.to_string();
 
-        info!(
+        let start_msg = format!(
             "Executing process: {} with execution_id: {}",
             command, execution_id
         );
+        info!("{}", start_msg);
 
         let (
             mut env_vars,
@@ -180,10 +181,11 @@ impl ProcessExecutor {
                         "failed to spawn process for task {} (execution {}): {}",
                         task_label_clone, exec_id_clone, e
                     );
-                    warn!(
+                    let warn_msg = format!(
                         "Failed to execute task {} (execution {}): {}",
                         task_label_clone, exec_id_clone, e
                     );
+                    warn!("{}", warn_msg);
                     let mut states = states_clone.write().await;
                     states.insert(exec_id_clone.clone(), ProcessStatus::Failed);
                     drop(states);
@@ -282,18 +284,20 @@ impl ProcessExecutor {
                         info!("Process completed successfully: {}", exec_id_clone);
                         ProcessStatus::Success
                     } else {
-                        warn!(
+                        let warn_msg = format!(
                             "Process failed for task {}: {}",
                             task_label_clone, exec_id_clone
                         );
+                        warn!("{}", warn_msg);
                         ProcessStatus::Failed
                     }
                 }
                 Err(e) => {
-                    warn!(
+                    let warn_msg = format!(
                         "Failed to execute task {} (execution {}): {}",
                         task_label_clone, exec_id_clone, e
                     );
+                    warn!("{}", warn_msg);
                     ProcessStatus::Failed
                 }
             };
@@ -309,10 +313,10 @@ impl ProcessExecutor {
             // Send status update through channel if available
             let tx_guard = status_tx_clone.read().await;
             if let Some(tx) = tx_guard.as_ref() {
-                let status_str = match status {
-                    ProcessStatus::Running => "running",
-                    ProcessStatus::Success => "success",
-                    ProcessStatus::Failed => "failed",
+                let status_str = if matches!(status, ProcessStatus::Success) {
+                    "success"
+                } else {
+                    "failed"
                 }
                 .to_string();
 

@@ -435,7 +435,10 @@ tasks:
         .execute(db)
         .await
         .expect_err("timeout should return error");
-        assert!(err.to_string().contains("Timeout waiting for workflow to complete"));
+        assert!(
+            err.to_string()
+                .contains("Timeout waiting for workflow to complete")
+        );
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

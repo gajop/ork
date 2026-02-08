@@ -45,21 +45,21 @@ async fn ensure_perf_tables(database_url: &str) -> bool {
         }
     };
 
-    if let Err(err) = sqlx::query(
-        "CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, name TEXT UNIQUE)",
-    )
-    .execute(&pool)
-    .await
+    if let Err(err) =
+        sqlx::query("CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, name TEXT UNIQUE)")
+            .execute(&pool)
+            .await
     {
-        eprintln!("skipping perf-test integration path test: failed to ensure workflows table: {err}");
+        eprintln!(
+            "skipping perf-test integration path test: failed to ensure workflows table: {err}"
+        );
         return false;
     }
 
-    if let Err(err) = sqlx::query(
-        "CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, workflow_id TEXT)",
-    )
-    .execute(&pool)
-    .await
+    if let Err(err) =
+        sqlx::query("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, workflow_id TEXT)")
+            .execute(&pool)
+            .await
     {
         eprintln!("skipping perf-test integration path test: failed to ensure runs table: {err}");
         return false;
@@ -133,7 +133,9 @@ async fn run_with_mock(
     emit_metrics: bool,
 ) -> Option<anyhow::Result<()>> {
     let Some(database_url) = resolve_test_database_url().await else {
-        eprintln!("skipping perf-test integration path test: could not resolve a reachable postgres url");
+        eprintln!(
+            "skipping perf-test integration path test: could not resolve a reachable postgres url"
+        );
         return None;
     };
     if !ensure_perf_tables(&database_url).await {
@@ -149,7 +151,10 @@ async fn run_with_mock(
     let previous_db_url = std::env::var("DATABASE_URL").ok();
     let previous_monitor_max = std::env::var("ORK_PERF_MONITOR_MAX_POLLS").ok();
     unsafe {
-        std::env::set_var("ORK_PERF_ORK_BIN", fake_bin_path.to_string_lossy().to_string());
+        std::env::set_var(
+            "ORK_PERF_ORK_BIN",
+            fake_bin_path.to_string_lossy().to_string(),
+        );
         std::env::set_var("ORK_PERF_BOOT_WAIT_SECS", "0");
         std::env::set_var("DATABASE_URL", database_url);
         match monitor_max_polls {
@@ -178,7 +183,10 @@ async fn test_run_with_mock_ork_binary_and_zero_workflows() {
     let Some(result) = run_with_mock(0, 1, None, false).await else {
         return;
     };
-    assert!(result.is_ok(), "expected perf-test run to succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "expected perf-test run to succeed: {result:?}"
+    );
 }
 
 #[tokio::test]
@@ -187,5 +195,8 @@ async fn test_run_with_monitor_cap_exercises_polling_paths() {
     let Some(result) = run_with_mock(1, 1, Some(1), true).await else {
         return;
     };
-    assert!(result.is_ok(), "expected perf-test run to succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "expected perf-test run to succeed: {result:?}"
+    );
 }

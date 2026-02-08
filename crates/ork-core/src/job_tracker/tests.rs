@@ -4,6 +4,8 @@ use axum::{Json, Router, routing::any};
 use serde_json::json;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use tokio::time::{Duration, timeout};
+use uuid::Uuid;
 
 async fn spawn_json_server(status: u16, body: serde_json::Value) -> SocketAddr {
     let app = Router::new().route(
@@ -216,6 +218,37 @@ async fn test_dataproc_tracker_validates_inputs_and_client_presence() {
     );
 }
 
+#[test]
+fn test_map_bigquery_status_transitions_and_default_error_message() {
+    use google_cloud_bigquery::http::job::{JobState, JobStatus as BigQueryJobStatus};
+    use google_cloud_bigquery::http::types::ErrorProto;
+
+    let running = BigQueryJobStatus {
+        state: JobState::Running,
+        ..Default::default()
+    };
+    assert_eq!(map_bigquery_status(&running), JobStatus::Running);
+
+    let completed = BigQueryJobStatus {
+        state: JobState::Done,
+        ..Default::default()
+    };
+    assert_eq!(map_bigquery_status(&completed), JobStatus::Completed);
+
+    let failed_with_missing_message = BigQueryJobStatus {
+        state: JobState::Done,
+        error_result: Some(ErrorProto {
+            message: None,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert!(matches!(
+        map_bigquery_status(&failed_with_missing_message),
+        JobStatus::Failed(msg) if msg.contains("Unknown error")
+    ));
+}
+
 #[tokio::test]
 async fn test_custom_http_validates_url() {
     let tracker = CustomHttpTracker::new();
@@ -409,4 +442,31 @@ async fn test_custom_http_supports_post_put_delete_and_headers() {
         .await
         .expect("delete poll");
     assert_eq!(delete, JobStatus::Completed);
+}
+
+#[tokio::test]
+async fn test_cloud_tracker_constructors_fail_fast_without_credentials() {
+    let prev_creds = std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok();
+    let bad_path = std::env::temp_dir().join(format!("ork-creds-{}.json", Uuid::new_v4()));
+    unsafe {
+        std::env::set_var(
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            bad_path.to_string_lossy().to_string(),
+        );
+    }
+
+    let cloud_run = timeout(Duration::from_secs(5), CloudRunTracker::new())
+        .await
+        .expect("cloud run constructor should not hang");
+    let _ = cloud_run;
+
+    let dataproc = timeout(Duration::from_secs(5), DataprocTracker::new())
+        .await
+        .expect("dataproc constructor should not hang");
+    let _ = dataproc;
+
+    match prev_creds {
+        Some(v) => unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", v) },
+        None => unsafe { std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS") },
+    }
 }

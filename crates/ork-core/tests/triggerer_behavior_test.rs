@@ -10,6 +10,14 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 
+fn init_tracing() -> tracing::dispatcher::DefaultGuard {
+    let subscriber = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::TRACE)
+        .finish();
+    tracing::subscriber::set_default(subscriber)
+}
+
 #[derive(Clone)]
 enum TrackerOutcome {
     Running,
@@ -17,6 +25,7 @@ enum TrackerOutcome {
     Failed(String),
     Error(String),
     SleepThen(Duration, JobStatus),
+    Panic,
 }
 
 struct MockTracker {
@@ -52,6 +61,9 @@ impl JobTracker for MockTracker {
             TrackerOutcome::SleepThen(delay, status) => {
                 sleep(*delay).await;
                 Ok(status.clone())
+            }
+            TrackerOutcome::Panic => {
+                panic!("tracker panicked while polling");
             }
         }
     }
@@ -134,6 +146,7 @@ async fn wait_for_job_status(
 
 #[tokio::test]
 async fn test_triggerer_sets_polling_for_running_jobs() -> Result<()> {
+    let _trace = init_tracing();
     let db = setup_db().await;
     let (task_id, _job_id) =
         create_deferred_job(db.as_ref(), "trigger-running", "mock-running").await?;
@@ -168,6 +181,7 @@ async fn test_triggerer_sets_polling_for_running_jobs() -> Result<()> {
 
 #[tokio::test]
 async fn test_triggerer_completes_job_and_notifies_scheduler() -> Result<()> {
+    let _trace = init_tracing();
     let db = setup_db().await;
     let (task_id, _job_id) =
         create_deferred_job(db.as_ref(), "trigger-complete", "mock-complete").await?;
@@ -204,6 +218,7 @@ async fn test_triggerer_completes_job_and_notifies_scheduler() -> Result<()> {
 
 #[tokio::test]
 async fn test_triggerer_marks_failed_and_notifies_on_tracker_failure() -> Result<()> {
+    let _trace = init_tracing();
     let db = setup_db().await;
     let (task_id, _job_id) =
         create_deferred_job(db.as_ref(), "trigger-failed", "mock-failed").await?;
@@ -240,6 +255,7 @@ async fn test_triggerer_marks_failed_and_notifies_on_tracker_failure() -> Result
 
 #[tokio::test]
 async fn test_triggerer_marks_failed_on_tracker_error() -> Result<()> {
+    let _trace = init_tracing();
     let db = setup_db().await;
     let (task_id, _job_id) =
         create_deferred_job(db.as_ref(), "trigger-error", "mock-error").await?;
@@ -282,6 +298,7 @@ async fn test_triggerer_marks_failed_on_tracker_error() -> Result<()> {
 
 #[tokio::test]
 async fn test_triggerer_timeout_keeps_job_pending() -> Result<()> {
+    let _trace = init_tracing();
     let db = setup_db().await;
     let (task_id, _job_id) =
         create_deferred_job(db.as_ref(), "trigger-timeout", "mock-timeout").await?;
@@ -317,6 +334,7 @@ async fn test_triggerer_timeout_keeps_job_pending() -> Result<()> {
 
 #[tokio::test]
 async fn test_triggerer_missing_tracker_does_not_complete_job() -> Result<()> {
+    let _trace = init_tracing();
     let db = setup_db().await;
     let (task_id, _job_id) =
         create_deferred_job(db.as_ref(), "trigger-missing-tracker", "missing-service").await?;
@@ -345,6 +363,131 @@ async fn test_triggerer_missing_tracker_does_not_complete_job() -> Result<()> {
         "missing tracker should not emit completion"
     );
 
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_triggerer_new_constructor_and_notify_noop_path() -> Result<()> {
+    let _trace = init_tracing();
+    let db = setup_db().await;
+    let (completion_tx, _completion_rx) = mpsc::unbounded_channel();
+    let triggerer = Triggerer::new(db, completion_tx);
+    triggerer.notify_new_job(Uuid::new_v4(), "job-1", "custom_http");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_triggerer_run_logs_poll_cycle_errors_and_keeps_running() -> Result<()> {
+    let _trace = init_tracing();
+    let db = setup_db().await;
+    sqlx::query("DROP TABLE deferred_jobs")
+        .execute(db.pool())
+        .await?;
+
+    let (completion_tx, _completion_rx) = mpsc::unbounded_channel();
+    let triggerer = Triggerer::with_config(
+        db,
+        completion_tx,
+        TriggererConfig {
+            poll_interval: Duration::from_millis(5),
+            max_jobs_per_cycle: 10,
+            poll_timeout: Duration::from_millis(100),
+        },
+    );
+
+    let handle = triggerer.start();
+    sleep(Duration::from_millis(80)).await;
+    assert!(
+        !handle.is_finished(),
+        "triggerer should continue running after poll cycle errors"
+    );
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_triggerer_handles_tracker_panic_join_errors() -> Result<()> {
+    let _trace = init_tracing();
+    let db = setup_db().await;
+    let (_task_id, _job_id) =
+        create_deferred_job(db.as_ref(), "trigger-panic", "mock-panic").await?;
+
+    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+    let mut triggerer = Triggerer::with_config(
+        db.clone(),
+        completion_tx,
+        TriggererConfig {
+            poll_interval: Duration::from_millis(5),
+            max_jobs_per_cycle: 10,
+            poll_timeout: Duration::from_millis(100),
+        },
+    );
+    triggerer.register_tracker(Arc::new(MockTracker::new(
+        "mock-panic",
+        TrackerOutcome::Panic,
+    )));
+
+    let handle = triggerer.start();
+    sleep(Duration::from_millis(120)).await;
+    assert!(
+        !handle.is_finished(),
+        "triggerer should survive panicking poll tasks"
+    );
+    let no_message = timeout(Duration::from_millis(100), completion_rx.recv()).await;
+    assert!(
+        no_message.is_err(),
+        "panic path should not emit completion notifications"
+    );
+    handle.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_triggerer_warns_when_last_polled_update_fails() -> Result<()> {
+    let _trace = init_tracing();
+    let db = setup_db().await;
+    let (task_id, _job_id) =
+        create_deferred_job(db.as_ref(), "trigger-polled-update-fails", "mock-running").await?;
+    sqlx::query(
+        r#"
+        CREATE TRIGGER fail_deferred_polled_update
+        BEFORE UPDATE ON deferred_jobs
+        WHEN NEW.last_polled_at IS NOT NULL
+        BEGIN
+            SELECT RAISE(ABORT, 'cannot update last_polled_at');
+        END;
+        "#,
+    )
+    .execute(db.pool())
+    .await?;
+
+    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+    let mut triggerer = Triggerer::with_config(
+        db.clone(),
+        completion_tx,
+        TriggererConfig {
+            poll_interval: Duration::from_millis(5),
+            max_jobs_per_cycle: 10,
+            poll_timeout: Duration::from_millis(100),
+        },
+    );
+    triggerer.register_tracker(Arc::new(MockTracker::new(
+        "mock-running",
+        TrackerOutcome::Running,
+    )));
+
+    let handle = triggerer.start();
+    sleep(Duration::from_millis(120)).await;
+    let jobs = db.get_deferred_jobs_for_task(task_id).await?;
+    let job = jobs.first().expect("job exists");
+    assert_eq!(job.status_str(), "polling");
+    assert!(job.last_polled_at.is_none());
+    let no_message = timeout(Duration::from_millis(100), completion_rx.recv()).await;
+    assert!(
+        no_message.is_err(),
+        "running job should not emit completion when last_polled update fails"
+    );
     handle.abort();
     Ok(())
 }

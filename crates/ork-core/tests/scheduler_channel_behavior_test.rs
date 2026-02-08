@@ -376,3 +376,40 @@ async fn test_scheduler_select_recv_error_path_when_idle() -> Result<()> {
     handle.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn test_scheduler_select_recv_logs_error_for_terminal_update_when_idle() -> Result<()> {
+    let _trace = init_tracing();
+    let db = setup_db().await;
+    sqlx::query("DROP TABLE tasks").execute(db.pool()).await?;
+
+    let mut config = test_config();
+    config.poll_interval_secs = 5.0;
+
+    let scheduler = Arc::new(Scheduler::new_with_config(
+        db,
+        Arc::new(NoopExecutorManager),
+        config,
+    ));
+    let runner = Arc::clone(&scheduler);
+    let handle = tokio::spawn(async move {
+        let _ = runner.run().await;
+    });
+
+    sleep(Duration::from_millis(80)).await;
+    scheduler.enqueue_status_update(StatusUpdate {
+        task_id: Uuid::new_v4(),
+        status: "success".to_string(),
+        log: None,
+        output: None,
+        error: None,
+    });
+
+    sleep(Duration::from_millis(120)).await;
+    assert!(
+        !handle.is_finished(),
+        "scheduler should survive terminal status-update errors in idle receive path"
+    );
+    handle.abort();
+    Ok(())
+}

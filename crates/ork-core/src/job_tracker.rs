@@ -64,6 +64,24 @@ impl BigQueryTracker {
     }
 }
 
+fn map_bigquery_status(status: &google_cloud_bigquery::http::job::JobStatus) -> JobStatus {
+    use google_cloud_bigquery::http::job::JobState;
+    match status.state {
+        JobState::Done => {
+            if let Some(error_result) = status.error_result.as_ref() {
+                let error_msg = error_result
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                JobStatus::Failed(format!("BigQuery job failed: {}", error_msg))
+            } else {
+                JobStatus::Completed
+            }
+        }
+        JobState::Pending | JobState::Running => JobStatus::Running,
+    }
+}
+
 #[async_trait]
 impl JobTracker for BigQueryTracker {
     fn service_type(&self) -> &str {
@@ -108,24 +126,7 @@ impl JobTracker for BigQueryTracker {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to get BigQuery job: {}", e))?;
 
-        // Check job status
-        use google_cloud_bigquery::http::job::JobState;
-        match job.status.state {
-            JobState::Done => {
-                // Check for errors
-                if let Some(error_result) = job.status.error_result {
-                    let error_msg = error_result
-                        .message
-                        .unwrap_or_else(|| "Unknown error".to_string());
-                    return Ok(JobStatus::Failed(format!(
-                        "BigQuery job failed: {}",
-                        error_msg
-                    )));
-                }
-                Ok(JobStatus::Completed)
-            }
-            JobState::Pending | JobState::Running => Ok(JobStatus::Running),
-        }
+        Ok(map_bigquery_status(&job.status))
     }
 }
 

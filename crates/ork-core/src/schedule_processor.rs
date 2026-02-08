@@ -41,10 +41,11 @@ async fn process_workflow_schedule<D: Database>(
     let schedule = match cron::Schedule::from_str(schedule_str) {
         Ok(s) => s,
         Err(e) => {
-            error!(
+            let msg = format!(
                 "Invalid cron expression '{}' for workflow {}: {}",
                 schedule_str, workflow.name, e
             );
+            error!("{}", msg);
             return 0;
         }
     };
@@ -52,16 +53,18 @@ async fn process_workflow_schedule<D: Database>(
     // Create run for this scheduled trigger
     match db.create_run(workflow.id, "schedule").await {
         Ok(run) => {
-            info!(
+            let msg = format!(
                 "Created scheduled run {} for workflow {}",
                 run.id, workflow.name
             );
+            info!("{}", msg);
         }
         Err(e) => {
-            error!(
+            let msg = format!(
                 "Failed to create scheduled run for workflow {}: {}",
                 workflow.name, e
             );
+            error!("{}", msg);
             return 0;
         }
     }
@@ -74,10 +77,11 @@ async fn process_workflow_schedule<D: Database>(
         .update_workflow_schedule_times(workflow.id, now, next_scheduled_at)
         .await
     {
-        error!(
+        let msg = format!(
             "Failed to update schedule times for workflow {}: {}",
             workflow.name, e
         );
+        error!("{}", msg);
     }
 
     1

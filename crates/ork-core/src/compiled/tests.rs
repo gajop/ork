@@ -61,7 +61,10 @@ fn test_get_inspect_script_recreates_missing_script_file() {
     if path.exists() {
         std::fs::remove_file(&path).expect("remove inspect script");
     }
-    assert!(!path.exists(), "inspect script should be removed for this test");
+    assert!(
+        !path.exists(),
+        "inspect script should be removed for this test"
+    );
 
     let recreated = get_inspect_script().expect("recreate inspect script");
     assert_eq!(recreated, path);
@@ -121,6 +124,25 @@ def main(x: int) -> int:
     let err = introspect_python_signature(&file, "main")
         .expect_err("non-json stdout should fail parsing");
     assert!(err.contains("Failed to parse introspection output"));
+}
+
+#[test]
+fn test_introspect_python_signature_success_path() {
+    let _guard = script_lock().lock().expect("script lock");
+    let dir = TempDir::new().expect("temp dir");
+    let file = write_file(
+        &dir,
+        "task.py",
+        r#"
+def main(x: int, y: str) -> bool:
+    return True
+"#,
+    );
+
+    let value = introspect_python_signature(&file, "main").expect("successful introspection");
+    assert_eq!(value["inputs"]["x"], "int");
+    assert_eq!(value["inputs"]["y"], "str");
+    assert_eq!(value["output"], "bool");
 }
 
 #[test]
@@ -191,8 +213,8 @@ fn test_topo_sort_returns_cycle_error_when_graph_is_cyclic() {
     let err = topo_sort(&tasks).expect_err("cyclic graph should fail topo sort");
     assert!(matches!(
         err,
-        crate::error::OrkError::InvalidWorkflow(crate::error::WorkflowValidationError::Cycle {
-            ..
-        })
+        crate::error::OrkError::InvalidWorkflow(
+            crate::error::WorkflowValidationError::Cycle { .. }
+        )
     ));
 }

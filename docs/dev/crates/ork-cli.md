@@ -59,6 +59,7 @@ The main host process for Ork. It owns the CLI surface and starts the scheduler 
 | [test-local.sh](../../../crates/ork-cli/test-local.sh) | Local walkthrough script for exercising the process executor. | 2026-02-06 | fd8204e |
 | [test-scripts/example-task.sh](../../../crates/ork-cli/test-scripts/example-task.sh) | Example process-executor task script used in tests. | 2026-02-06 | 0f38387 |
 | [test-scripts/perf-task.sh](../../../crates/ork-cli/test-scripts/perf-task.sh) | Lightweight task script used in perf runs. | 2026-02-06 | 487b94d |
+| [tests/main_entrypoint_test.rs](../../../crates/ork-cli/tests/main_entrypoint_test.rs) | Binary-entrypoint smoke tests for `ork --help` and `run-workflow` pre-DB failure behavior. | 2026-02-08 | 0000000 |
 
 ## Notes
 

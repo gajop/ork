@@ -96,7 +96,7 @@ async fn test_scheduler_start_triggerer_initialization_path() {
 
     let scheduler = Scheduler::new_with_config(db, Arc::new(NoopExecutorManager), config);
     let attempt = timeout(Duration::from_secs(5), scheduler.start_triggerer()).await;
-    if let Ok(Ok(handle)) = attempt {
+    if let Ok(handle) = attempt {
         handle.abort();
     }
 }
@@ -106,8 +106,14 @@ async fn test_scheduler_run_tolerates_database_errors_in_loop() {
     let _trace = init_tracing();
     let db = setup_db().await;
     // Force query errors in the main loop to cover recovery branches.
-    query("DROP TABLE tasks").execute(db.pool()).await.expect("drop tasks");
-    query("DROP TABLE runs").execute(db.pool()).await.expect("drop runs");
+    query("DROP TABLE tasks")
+        .execute(db.pool())
+        .await
+        .expect("drop tasks");
+    query("DROP TABLE runs")
+        .execute(db.pool())
+        .await
+        .expect("drop runs");
     query("DROP TABLE workflows")
         .execute(db.pool())
         .await
@@ -122,4 +128,37 @@ async fn test_scheduler_run_tolerates_database_errors_in_loop() {
     handle.abort();
     let result = handle.await;
     assert!(result.is_err(), "aborted scheduler task should error");
+}
+
+#[tokio::test]
+async fn test_scheduler_run_continues_when_triggerer_start_fails() {
+    let _trace = init_tracing();
+    let db = setup_db().await;
+    let mut config = test_config();
+    config.enable_triggerer = true;
+
+    let prev_creds = std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok();
+    unsafe {
+        std::env::set_var(
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "/tmp/ork-definitely-missing-creds.json",
+        );
+    }
+
+    let scheduler = Scheduler::new_with_config(db, Arc::new(NoopExecutorManager), config);
+    let handle = tokio::spawn(async move {
+        let _ = scheduler.run().await;
+    });
+
+    sleep(Duration::from_millis(120)).await;
+    assert!(
+        !handle.is_finished(),
+        "scheduler should keep looping even when triggerer startup fails"
+    );
+    handle.abort();
+
+    match prev_creds {
+        Some(v) => unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", v) },
+        None => unsafe { std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS") },
+    }
 }
