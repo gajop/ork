@@ -70,6 +70,16 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
         }
     }
 
+    /// Enqueue an executor status update for processing in the scheduler loop.
+    pub fn enqueue_status_update(&self, update: StatusUpdate) {
+        let _ = self.status_tx.send(update);
+    }
+
+    /// Enqueue a deferred-job completion event for processing in the scheduler loop.
+    pub fn enqueue_job_completion(&self, completion: JobCompletionNotification) {
+        let _ = self.job_completion_tx.send(completion);
+    }
+
     /// Start the triggerer component for tracking deferred jobs
     pub async fn start_triggerer(&self) -> Result<tokio::task::JoinHandle<()>> {
         // rustls 0.23 requires explicit process-level provider selection when
@@ -101,9 +111,11 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         // Start triggerer in background if enabled
         let _triggerer_handle = if self.config.enable_triggerer {
-            let handle = self.start_triggerer().await?;
-            info!("Triggerer started");
-            Some(handle)
+            let handle = self.start_triggerer().await.ok();
+            if handle.is_none() {
+                error!("Triggerer failed to start; continuing with scheduler-only mode");
+            }
+            handle
         } else {
             info!("Triggerer disabled by config");
             None
@@ -153,10 +165,8 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             while let Ok(completion) = job_completion_rx.try_recv() {
                 job_completions.push(completion);
             }
-            if !job_completions.is_empty()
-                && let Err(e) = self.process_job_completions(job_completions).await
-            {
-                error!("Error processing job completions: {}", e);
+            if !job_completions.is_empty() {
+                self.process_job_completions(job_completions).await;
             }
 
             if let Err(e) = self.enforce_timeouts().await {

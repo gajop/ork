@@ -197,4 +197,59 @@ mod tests {
             Err(error) => assert_eq!(error.0, StatusCode::INTERNAL_SERVER_ERROR),
         }
     }
+
+    #[tokio::test]
+    async fn test_compile_handler_invalid_yaml_returns_bad_request() {
+        let dir = std::env::temp_dir().join(format!("ork-worker-compile-invalid-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let workflow_path = dir.join("workflow.yaml");
+        std::fs::write(&workflow_path, "name: [unterminated")
+            .expect("write invalid workflow yaml");
+
+        let state = std::sync::Arc::new(crate::WorkerState {
+            workflow_path: workflow_path.to_string_lossy().to_string(),
+            working_dir: ".".to_string(),
+        });
+        let result = compile_handler(
+            State(state),
+            Json(CompileRequest {
+                workflow_path: None,
+            }),
+        )
+        .await;
+
+        let _ = std::fs::remove_dir_all(dir);
+        match result {
+            Ok(_) => panic!("invalid yaml should return error"),
+            Err(error) => assert_eq!(error.0, StatusCode::BAD_REQUEST),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compile_handler_missing_tasks_returns_bad_request() {
+        let dir =
+            std::env::temp_dir().join(format!("ork-worker-compile-missing-tasks-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let workflow_path = dir.join("workflow.yaml");
+        std::fs::write(&workflow_path, r#"{"name":"test"}"#)
+            .expect("write workflow yaml without tasks");
+
+        let state = std::sync::Arc::new(crate::WorkerState {
+            workflow_path: workflow_path.to_string_lossy().to_string(),
+            working_dir: ".".to_string(),
+        });
+        let result = compile_handler(
+            State(state),
+            Json(CompileRequest {
+                workflow_path: None,
+            }),
+        )
+        .await;
+
+        let _ = std::fs::remove_dir_all(dir);
+        match result {
+            Ok(_) => panic!("workflow without tasks should return error"),
+            Err(error) => assert_eq!(error.0, StatusCode::BAD_REQUEST),
+        }
+    }
 }

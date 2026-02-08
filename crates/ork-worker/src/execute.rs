@@ -5,10 +5,11 @@
 //! - Returns output or deferred job information
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use ork_core::executor::Executor;
+use ork_core::executor::{Executor, StatusUpdate};
 use ork_executors::process::ProcessExecutor;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -79,36 +80,77 @@ async fn execute_process_task(
     // Create process executor
     let executor = ProcessExecutor::new(Some(state.working_dir.clone()));
 
-    // Set up a dummy status channel (worker doesn't need it)
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    // Set up status channel and wait for terminal updates.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     executor.set_status_channel(tx).await;
 
-    // Execute the task
-    let result = executor
-        .execute(req.task_id, &req.task_name, req.params.clone())
+    let command = req
+        .params
+        .as_ref()
+        .and_then(|p| p.get("command"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(req.task_name.as_str());
+
+    executor
+        .execute(req.task_id, command, req.params.clone())
         .await
         .map_err(|e| format!("Execution failed: {}", e))?;
 
-    // Parse the result as JSON
-    // Process executor returns output with "ORK_OUTPUT:" prefix
-    let output_str = if result.starts_with("ORK_OUTPUT:") {
-        result.trim_start_matches("ORK_OUTPUT:")
-    } else {
-        &result
-    };
+    timeout(
+        Duration::from_secs(30),
+        wait_for_terminal_update(req.task_id, &mut rx),
+    )
+    .await
+    .map_err(|_| "Execution timed out waiting for completion".to_string())?
+}
 
-    let output: serde_json::Value = serde_json::from_str(output_str)
-        .map_err(|e| format!("Failed to parse task output as JSON: {}", e))?;
+async fn wait_for_terminal_update(
+    task_id: Uuid,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<StatusUpdate>,
+) -> Result<serde_json::Value, String> {
+    loop {
+        let Some(update) = rx.recv().await else {
+            return Err("Execution channel closed before completion".to_string());
+        };
 
-    Ok(output)
+        if update.task_id != task_id {
+            continue;
+        }
+
+        match update.status.as_str() {
+            "success" => {
+                return update
+                    .output
+                    .ok_or_else(|| "Execution completed without ORK_OUTPUT JSON".to_string());
+            }
+            "failed" => {
+                return Err(update
+                    .error
+                    .unwrap_or_else(|| "Execution failed".to_string()));
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::to_bytes;
+    use std::sync::Once;
+
+    fn init_tracing() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let _ = tracing_subscriber::fmt()
+                .with_test_writer()
+                .with_max_level(tracing::Level::INFO)
+                .try_init();
+        });
+    }
 
     async fn run_handler(req: ExecuteRequest) -> serde_json::Value {
+        init_tracing();
         let state = std::sync::Arc::new(crate::WorkerState {
             workflow_path: "workflow.yaml".to_string(),
             working_dir: ".".to_string(),
@@ -178,7 +220,93 @@ mod tests {
             value["error"]
                 .as_str()
                 .expect("error should be string")
-                .contains("Failed to parse task output as JSON")
+                .contains("without ORK_OUTPUT JSON")
         );
+    }
+
+    #[tokio::test]
+    async fn test_execute_handler_process_success_json_output() {
+        let value = run_handler(ExecuteRequest {
+            task_id: Uuid::new_v4(),
+            task_name: "task".to_string(),
+            executor_type: "process".to_string(),
+            params: Some(serde_json::json!({
+                "command": "printf 'ORK_OUTPUT:{\"ok\":true}'"
+            })),
+        })
+        .await;
+
+        assert_eq!(value["status"], "success");
+        assert_eq!(value["output"], serde_json::json!({"ok": true}));
+        assert!(value.get("deferred").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_execute_handler_process_success_with_ork_output_prefix_and_deferred() {
+        let value = run_handler(ExecuteRequest {
+            task_id: Uuid::new_v4(),
+            task_name: "task".to_string(),
+            executor_type: "process".to_string(),
+            params: Some(serde_json::json!({
+                "command": "printf 'ORK_OUTPUT:{\"deferred\":[{\"service_type\":\"custom_http\",\"job_id\":\"job-1\",\"url\":\"http://example.com/status\"}]}'"
+            })),
+        })
+        .await;
+
+        assert_eq!(value["status"], "success");
+        assert_eq!(value["output"]["deferred"][0]["service_type"], "custom_http");
+        assert_eq!(value["deferred"][0]["job_id"], "job-1");
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_terminal_update_skips_other_tasks_and_uses_failure_default() {
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(StatusUpdate {
+            task_id: Uuid::new_v4(),
+            status: "success".to_string(),
+            log: None,
+            output: Some(serde_json::json!({"wrong": true})),
+            error: None,
+        })
+        .expect("send update");
+        tx.send(StatusUpdate {
+            task_id,
+            status: "failed".to_string(),
+            log: None,
+            output: None,
+            error: None,
+        })
+        .expect("send update");
+
+        let err = wait_for_terminal_update(task_id, &mut rx)
+            .await
+            .expect_err("should fail");
+        assert!(err.contains("Execution failed"));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_terminal_update_closed_channel_and_explicit_error() {
+        let task_id = Uuid::new_v4();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(StatusUpdate {
+            task_id,
+            status: "failed".to_string(),
+            log: None,
+            output: None,
+            error: Some("boom".to_string()),
+        })
+        .expect("send update");
+        let err = wait_for_terminal_update(task_id, &mut rx)
+            .await
+            .expect_err("should fail with explicit error");
+        assert!(err.contains("boom"));
+
+        let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel::<StatusUpdate>();
+        drop(tx2);
+        let err2 = wait_for_terminal_update(Uuid::new_v4(), &mut rx2)
+            .await
+            .expect_err("closed channel should fail");
+        assert!(err2.contains("channel closed"));
     }
 }

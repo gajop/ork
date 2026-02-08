@@ -416,7 +416,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     pub(super) async fn process_job_completions(
         &self,
         completions: Vec<JobCompletionNotification>,
-    ) -> Result<()> {
+    ) {
         for completion in completions {
             info!(
                 "Processing deferred job completion for task {}: success={}",
@@ -458,7 +458,5 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 error!("Error checking run completion: {}", e);
             }
         }
-
-        Ok(())
     }
 }
