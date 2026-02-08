@@ -5,7 +5,9 @@ use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use ork_core::database::{Database, NewTask, NewWorkflowTask};
+use ork_core::database::{
+    NewTask, NewWorkflowTask, RunRepository, TaskRepository, WorkflowRepository,
+};
 use ork_state::SqliteDatabase;
 use ork_web::api::{ApiServer, build_router};
 
@@ -208,7 +210,7 @@ async fn test_pause_resume_run_internal_error_paths() {
     let (app, db) = setup().await;
     let workflow = create_workflow_with_tasks(&db, "pause_resume_error").await;
     let run_id = create_run_with_tasks(&db, &workflow, 1).await;
-    db.update_run_status(run_id, "paused", None)
+    db.update_run_status(run_id, ork_core::models::RunStatus::Paused, None)
         .await
         .expect("pause run");
 
@@ -306,7 +308,7 @@ async fn test_resume_run_internal_error_paths_for_get_run_and_update() {
     let (app, db) = setup().await;
     let workflow = create_workflow_with_tasks(&db, "resume_run_internal_error").await;
     let run_id = create_run_with_tasks(&db, &workflow, 1).await;
-    db.update_run_status(run_id, "paused", None)
+    db.update_run_status(run_id, ork_core::models::RunStatus::Paused, None)
         .await
         .expect("pause run");
 
@@ -387,7 +389,7 @@ async fn test_pause_resume_task_internal_error_paths() {
         .execute(db.pool())
         .await
         .expect("drop pause trigger");
-    db.update_task_status(task_id, "paused", None, None)
+    db.update_task_status(task_id, ork_core::models::TaskStatus::Paused, None, None)
         .await
         .expect("pause task directly");
     sqlx::query(

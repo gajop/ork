@@ -7,6 +7,9 @@ use tokio::net::TcpListener;
 use tokio::time::{Duration, timeout};
 use uuid::Uuid;
 
+#[cfg(feature = "gcp")]
+use super::gcp::map_bigquery_status;
+
 async fn spawn_json_server(status: u16, body: serde_json::Value) -> SocketAddr {
     let app = Router::new().route(
         "/status",
@@ -73,6 +76,7 @@ fn test_custom_http_tracker_default_constructs_tracker() {
     assert_eq!(tracker.service_type(), "custom_http");
 }
 
+#[cfg(feature = "gcp")]
 #[test]
 fn test_cloud_tracker_service_types() {
     assert_eq!(BigQueryTracker::without_client().service_type(), "bigquery");
@@ -80,6 +84,7 @@ fn test_cloud_tracker_service_types() {
     assert_eq!(DataprocTracker::without_client().service_type(), "dataproc");
 }
 
+#[cfg(feature = "gcp")]
 #[tokio::test]
 async fn test_bigquery_tracker_validates_inputs_and_client_presence() {
     let tracker = BigQueryTracker::without_client();
@@ -114,6 +119,7 @@ async fn test_bigquery_tracker_validates_inputs_and_client_presence() {
 }
 
 #[tokio::test]
+#[cfg(feature = "gcp")]
 async fn test_cloudrun_tracker_validates_inputs_and_client_presence() {
     let tracker = CloudRunTracker::without_client();
 
@@ -165,6 +171,7 @@ async fn test_cloudrun_tracker_validates_inputs_and_client_presence() {
 }
 
 #[tokio::test]
+#[cfg(feature = "gcp")]
 async fn test_dataproc_tracker_validates_inputs_and_client_presence() {
     let tracker = DataprocTracker::without_client();
 
@@ -218,6 +225,7 @@ async fn test_dataproc_tracker_validates_inputs_and_client_presence() {
     );
 }
 
+#[cfg(feature = "gcp")]
 #[test]
 fn test_map_bigquery_status_transitions_and_default_error_message() {
     use google_cloud_bigquery::http::job::{JobState, JobStatus as BigQueryJobStatus};
@@ -259,36 +267,40 @@ async fn test_custom_http_validates_url() {
 }
 
 #[tokio::test]
-async fn test_custom_http_validates_completion_field() {
+async fn test_custom_http_validates_status_field_default() {
     let tracker = CustomHttpTracker::new();
-    let invalid_data = json!({
-        "url": "http://example.com/status"
-    });
-    let result = tracker.poll_job("test-job", &invalid_data).await;
+    let addr = spawn_json_server(200, json!({"state": "done"})).await;
+    let result = tracker
+        .poll_job(
+            "test-job",
+            &json!({
+                "url": format!("http://{}/status", addr)
+            }),
+        )
+        .await;
     assert!(result.is_err());
     assert!(
         result
             .unwrap_err()
             .to_string()
-            .contains("Missing completion_field")
+            .contains("missing expected field 'status'")
     );
 }
 
 #[tokio::test]
-async fn test_custom_http_validates_completion_value() {
+async fn test_custom_http_defaults_success_value() {
     let tracker = CustomHttpTracker::new();
-    let invalid_data = json!({
-        "url": "http://example.com/status",
-        "completion_field": "status"
-    });
-    let result = tracker.poll_job("test-job", &invalid_data).await;
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("Missing completion_value")
-    );
+    let addr = spawn_json_server(200, json!({"status": "done"})).await;
+    let result = tracker
+        .poll_job(
+            "test-job",
+            &json!({
+                "url": format!("http://{}/status", addr)
+            }),
+        )
+        .await
+        .expect("poll should succeed");
+    assert_eq!(result, JobStatus::Running);
 }
 
 #[tokio::test]
@@ -300,8 +312,8 @@ async fn test_custom_http_completed_running_and_failed_statuses() {
             "job",
             &json!({
                 "url": format!("http://{}/status", addr),
-                "completion_field": "state",
-                "completion_value": "done",
+                "status_field": "state",
+                "success_value": "done",
                 "failure_value": "failed"
             }),
         )
@@ -315,8 +327,8 @@ async fn test_custom_http_completed_running_and_failed_statuses() {
             "job",
             &json!({
                 "url": format!("http://{}/status", addr),
-                "completion_field": "state",
-                "completion_value": "done",
+                "status_field": "state",
+                "success_value": "done",
                 "failure_value": "failed"
             }),
         )
@@ -330,8 +342,8 @@ async fn test_custom_http_completed_running_and_failed_statuses() {
             "job",
             &json!({
                 "url": format!("http://{}/status", addr),
-                "completion_field": "state",
-                "completion_value": "done",
+                "status_field": "state",
+                "success_value": "done",
                 "failure_value": "failed"
             }),
         )
@@ -350,8 +362,8 @@ async fn test_custom_http_handles_http_status_method_and_response_shape_errors()
             "job",
             &json!({
                 "url": format!("http://{}/status", bad_status_addr),
-                "completion_field": "state",
-                "completion_value": "done"
+                "status_field": "state",
+                "success_value": "done"
             }),
         )
         .await
@@ -364,8 +376,8 @@ async fn test_custom_http_handles_http_status_method_and_response_shape_errors()
             &json!({
                 "url": "http://127.0.0.1:1/status",
                 "method": "PATCH",
-                "completion_field": "state",
-                "completion_value": "done"
+                "status_field": "state",
+                "success_value": "done"
             }),
         )
         .await
@@ -382,14 +394,14 @@ async fn test_custom_http_handles_http_status_method_and_response_shape_errors()
             "job",
             &json!({
                 "url": format!("http://{}/status", bad_body_addr),
-                "completion_field": "state",
-                "completion_value": "done",
+                "status_field": "state",
+                "success_value": "done",
                 "success_status_codes": [200]
             }),
         )
         .await
-        .expect_err("missing completion field in response should error");
-    assert!(bad_body.to_string().contains("missing completion field"));
+        .expect_err("missing status field in response should error");
+    assert!(bad_body.to_string().contains("missing expected field"));
 }
 
 #[tokio::test]
@@ -405,8 +417,8 @@ async fn test_custom_http_supports_post_put_delete_and_headers() {
                 "url": base,
                 "method": "POST",
                 "headers": {"x-test": "1"},
-                "completion_field": "state",
-                "completion_value": "done"
+                "status_field": "state",
+                "success_value": "done"
             }),
         )
         .await
@@ -420,8 +432,8 @@ async fn test_custom_http_supports_post_put_delete_and_headers() {
                 "url": format!("http://{}/status", addr),
                 "method": "PUT",
                 "headers": {"x-test": "1"},
-                "completion_field": "state",
-                "completion_value": "done"
+                "status_field": "state",
+                "success_value": "done"
             }),
         )
         .await
@@ -435,8 +447,8 @@ async fn test_custom_http_supports_post_put_delete_and_headers() {
                 "url": format!("http://{}/status", addr),
                 "method": "DELETE",
                 "headers": {"x-test": "1"},
-                "completion_field": "state",
-                "completion_value": "done"
+                "status_field": "state",
+                "success_value": "done"
             }),
         )
         .await
@@ -446,6 +458,7 @@ async fn test_custom_http_supports_post_put_delete_and_headers() {
 
 #[tokio::test]
 async fn test_cloud_tracker_constructors_fail_fast_without_credentials() {
+    #[cfg(feature = "gcp")]
     let prev_creds = std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok();
     let bad_path = std::env::temp_dir().join(format!("ork-creds-{}.json", Uuid::new_v4()));
     unsafe {

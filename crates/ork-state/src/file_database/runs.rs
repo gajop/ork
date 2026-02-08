@@ -3,7 +3,7 @@ use chrono::Utc;
 use tokio::fs;
 use uuid::Uuid;
 
-use ork_core::models::Run;
+use ork_core::models::{Run, RunStatus, TaskStatus};
 
 use super::core::FileDatabase;
 
@@ -19,7 +19,7 @@ impl FileDatabase {
         let run: Run = serde_json::from_value(serde_json::json!({
             "id": id,
             "workflow_id": workflow_id,
-            "status": "pending",
+            "status": RunStatus::Pending,
             "triggered_by": triggered_by,
             "started_at": null,
             "finished_at": null,
@@ -33,23 +33,22 @@ impl FileDatabase {
     pub(super) async fn update_run_status_impl(
         &self,
         run_id: Uuid,
-        status: &str,
+        status: RunStatus,
         error: Option<&str>,
     ) -> Result<()> {
         let path = self.run_path(run_id);
         let run: Run = self.read_json(&path).await?;
         let now = Utc::now();
-        let started_at = if status == "running" && run.started_at.is_none() {
+        let started_at = if matches!(status, RunStatus::Running) && run.started_at.is_none() {
             Some(now)
         } else {
             run.started_at
         };
-        let finished_at =
-            if matches!(status, "success" | "failed" | "cancelled") && run.finished_at.is_none() {
-                Some(now)
-            } else {
-                run.finished_at
-            };
+        let finished_at = if status.is_terminal() && run.finished_at.is_none() {
+            Some(now)
+        } else {
+            run.finished_at
+        };
         let updated_run: Run = serde_json::from_value(serde_json::json!({
             "id": run.id,
             "workflow_id": run.workflow_id,
@@ -87,20 +86,23 @@ impl FileDatabase {
         let all_runs = self.list_runs_impl(None).await?;
         Ok(all_runs
             .into_iter()
-            .filter(|r| r.status_str() == "pending")
+            .filter(|r| matches!(r.status(), RunStatus::Pending))
             .collect())
     }
 
     pub(super) async fn cancel_run_impl(&self, run_id: Uuid) -> Result<()> {
         let run = self.get_run_impl(run_id).await?;
-        if !matches!(run.status_str(), "success" | "failed" | "cancelled") {
-            self.update_run_status_impl(run_id, "cancelled", None)
+        if !run.status().is_terminal() {
+            self.update_run_status_impl(run_id, RunStatus::Cancelled, None)
                 .await?;
         }
         let tasks = self.list_tasks_impl(run_id).await?;
         for task in tasks {
-            if matches!(task.status_str(), "pending" | "dispatched" | "running") {
-                self.update_task_status_impl(task.id, "cancelled", None, None)
+            if matches!(
+                task.status(),
+                TaskStatus::Pending | TaskStatus::Dispatched | TaskStatus::Running
+            ) {
+                self.update_task_status_impl(task.id, TaskStatus::Cancelled, None, None)
                     .await?;
             }
         }

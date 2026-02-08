@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use ork_core::database::NewTask;
-use ork_core::models::{Task, TaskWithWorkflow};
+use ork_core::models::{RunStatus, Task, TaskStatus, TaskWithWorkflow};
 
 use super::core::{SqliteDatabase, TaskRow, TaskWithWorkflowRow, encode_depends_on};
 
@@ -25,10 +25,17 @@ impl SqliteDatabase {
             }));
             sqlx::query(
                 r#"INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, params)
-                VALUES (?, ?, ?, ?, ?, '[]', 'pending', ?)"#,
+                VALUES (?, ?, ?, ?, ?, '[]', ?, ?)"#,
             )
-            .bind(task_id).bind(run_id).bind(i).bind(format!("task_{}", i)).bind(executor_type).bind(params_json)
-            .execute(&mut *tx).await?;
+            .bind(task_id)
+            .bind(run_id)
+            .bind(i)
+            .bind(format!("task_{}", i))
+            .bind(executor_type)
+            .bind(TaskStatus::Pending.as_str())
+            .bind(params_json)
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -46,11 +53,20 @@ impl SqliteDatabase {
             let params_json = sqlx::types::Json(&task.params);
             sqlx::query(
                 r#"INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, attempts, max_retries, timeout_seconds, params)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)"#,
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)"#,
             )
-            .bind(task_id).bind(run_id).bind(task.task_index).bind(&task.task_name).bind(&task.executor_type)
-            .bind(&depends_on_json).bind(task.max_retries).bind(task.timeout_seconds).bind(params_json)
-            .execute(&mut *tx).await?;
+            .bind(task_id)
+            .bind(run_id)
+            .bind(task.task_index)
+            .bind(&task.task_name)
+            .bind(&task.executor_type)
+            .bind(&depends_on_json)
+            .bind(TaskStatus::Pending.as_str())
+            .bind(task.max_retries)
+            .bind(task.timeout_seconds)
+            .bind(params_json)
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -59,34 +75,52 @@ impl SqliteDatabase {
     pub(super) async fn update_task_status_impl(
         &self,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<()> {
+        let status_str = status.as_str();
         sqlx::query(
             r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
-            attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
-            retry_at = CASE WHEN ? IN ('pending', 'paused') THEN retry_at ELSE NULL END,
-            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE dispatched_at END,
-            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
+            attempts = CASE WHEN ? = ? THEN attempts + 1 ELSE attempts END,
+            retry_at = CASE WHEN ? IN (?, ?) THEN retry_at ELSE NULL END,
+            dispatched_at = CASE WHEN ? = ? AND dispatched_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE dispatched_at END,
+            started_at = CASE WHEN ? = ? AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
+            finished_at = CASE WHEN ? IN (?, ?, ?) AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
             WHERE id = ?"#,
         )
-        .bind(status).bind(execution_name).bind(error).bind(status).bind(status).bind(status).bind(status).bind(status).bind(task_id)
-        .execute(&self.pool).await?;
+        .bind(status_str)
+        .bind(execution_name)
+        .bind(error)
+        .bind(status_str)
+        .bind(TaskStatus::Failed.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Pending.as_str())
+        .bind(TaskStatus::Paused.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Dispatched.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Running.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Success.as_str())
+        .bind(TaskStatus::Failed.as_str())
+        .bind(TaskStatus::Cancelled.as_str())
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     pub(super) async fn batch_update_task_status_impl(
         &self,
-        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+        updates: &[(Uuid, TaskStatus, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
         }
         let mut tx = self.pool.begin().await?;
         for (task_id, status, execution_name, error) in updates {
-            self.update_task_status_impl_tx(&mut tx, *task_id, status, *execution_name, *error)
+            self.update_task_status_impl_tx(&mut tx, *task_id, *status, *execution_name, *error)
                 .await?;
         }
         tx.commit().await?;
@@ -97,21 +131,39 @@ impl SqliteDatabase {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<()> {
+        let status_str = status.as_str();
         sqlx::query(
             r#"UPDATE tasks SET status = ?, execution_name = COALESCE(?, execution_name), error = COALESCE(?, error),
-            attempts = CASE WHEN ? = 'failed' THEN attempts + 1 ELSE attempts END,
-            retry_at = CASE WHEN ? IN ('pending', 'paused') THEN retry_at ELSE NULL END,
-            dispatched_at = CASE WHEN ? = 'dispatched' AND dispatched_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE dispatched_at END,
-            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('success', 'failed') AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
+            attempts = CASE WHEN ? = ? THEN attempts + 1 ELSE attempts END,
+            retry_at = CASE WHEN ? IN (?, ?) THEN retry_at ELSE NULL END,
+            dispatched_at = CASE WHEN ? = ? AND dispatched_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE dispatched_at END,
+            started_at = CASE WHEN ? = ? AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
+            finished_at = CASE WHEN ? IN (?, ?, ?) AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
             WHERE id = ?"#,
         )
-        .bind(status).bind(execution_name).bind(error).bind(status).bind(status).bind(status).bind(status).bind(status).bind(task_id)
-        .execute(&mut **tx).await?;
+        .bind(status_str)
+        .bind(execution_name)
+        .bind(error)
+        .bind(status_str)
+        .bind(TaskStatus::Failed.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Pending.as_str())
+        .bind(TaskStatus::Paused.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Dispatched.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Running.as_str())
+        .bind(status_str)
+        .bind(TaskStatus::Success.as_str())
+        .bind(TaskStatus::Failed.as_str())
+        .bind(TaskStatus::Cancelled.as_str())
+        .bind(task_id)
+        .execute(&mut **tx)
+        .await?;
         Ok(())
     }
 
@@ -126,18 +178,19 @@ impl SqliteDatabase {
     }
 
     pub(super) async fn get_pending_tasks_impl(&self) -> Result<Vec<Task>> {
-        let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE status = 'pending'")
+        let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE status = ?")
+            .bind(TaskStatus::Pending.as_str())
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.into_iter().map(Self::map_task).collect())
     }
 
     pub(super) async fn get_running_tasks_impl(&self) -> Result<Vec<Task>> {
-        let rows = sqlx::query_as::<_, TaskRow>(
-            "SELECT * FROM tasks WHERE status IN ('running', 'dispatched')",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE status IN (?, ?)")
+            .bind(TaskStatus::Running.as_str())
+            .bind(TaskStatus::Dispatched.as_str())
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().map(Self::map_task).collect())
     }
 
@@ -173,11 +226,16 @@ impl SqliteDatabase {
     ) -> Result<()> {
         let retry_str = retry_at.map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true));
         sqlx::query(
-            r#"UPDATE tasks SET status = 'pending', attempts = attempts + 1, retry_at = ?,
+            r#"UPDATE tasks SET status = ?, attempts = attempts + 1, retry_at = ?,
             error = COALESCE(?, error), execution_name = NULL, output = NULL, dispatched_at = NULL, started_at = NULL, finished_at = NULL
             WHERE id = ?"#,
         )
-        .bind(retry_str).bind(error).bind(task_id).execute(&self.pool).await?;
+        .bind(TaskStatus::Pending.as_str())
+        .bind(retry_str)
+        .bind(error)
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -190,8 +248,8 @@ impl SqliteDatabase {
             t.status as task_status, t.attempts, t.max_retries, t.timeout_seconds, t.retry_at, t.execution_name, t.params,
             w.id as workflow_id, w.job_name, w.project, w.region
             FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
-            WHERE t.status = 'pending'
-            AND r.status = 'running'
+            WHERE t.status = ?
+            AND r.status = ?
             AND (t.retry_at IS NULL OR datetime(t.retry_at) <= datetime('now'))
             AND (t.depends_on = '[]' OR NOT EXISTS (
                 SELECT 1 FROM json_each(t.depends_on) AS dep
@@ -199,12 +257,18 @@ impl SqliteDatabase {
                     SELECT 1 FROM tasks t2
                     WHERE t2.run_id = t.run_id
                     AND t2.task_name = dep.value
-                    AND t2.status IN ('success', 'failed')
+                    AND t2.status IN (?, ?)
                 )
             ))
             ORDER BY t.created_at LIMIT ?"#,
         )
-        .bind(limit).fetch_all(&self.pool).await?;
+        .bind(TaskStatus::Pending.as_str())
+        .bind(RunStatus::Running.as_str())
+        .bind(TaskStatus::Success.as_str())
+        .bind(TaskStatus::Failed.as_str())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows.into_iter().map(Self::map_task_with_workflow).collect())
     }
 
@@ -293,13 +357,18 @@ impl SqliteDatabase {
             .collect::<Vec<_>>()
             .join(",");
         let query_str = format!(
-            r#"UPDATE tasks SET status = 'failed', error = ?, finished_at = CURRENT_TIMESTAMP
-            WHERE run_id = ? AND status IN ('pending', 'paused') AND EXISTS (
+            r#"UPDATE tasks SET status = ?, error = ?, finished_at = CURRENT_TIMESTAMP
+            WHERE run_id = ? AND status IN (?, ?) AND EXISTS (
                 SELECT 1 FROM json_each(depends_on) WHERE value IN ({})
             ) RETURNING task_name"#,
             placeholders
         );
-        let mut query = sqlx::query(&query_str).bind(error).bind(run_id);
+        let mut query = sqlx::query(&query_str)
+            .bind(TaskStatus::Failed.as_str())
+            .bind(error)
+            .bind(run_id)
+            .bind(TaskStatus::Pending.as_str())
+            .bind(TaskStatus::Paused.as_str());
         for name in failed_task_names {
             query = query.bind(name);
         }

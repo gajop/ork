@@ -114,6 +114,7 @@ mod tests {
         RunWorkflow, Status, Tasks, Trigger,
     };
     use axum::{Json, Router, extract::Path, routing::get, routing::post};
+    use ork_core::database::RunRepository;
     use ork_state::SqliteDatabase;
     use std::net::SocketAddr;
     use std::sync::{Mutex, OnceLock};

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ork_core::database::Database;
+use ork_core::database::{RunRepository, ScheduleRepository, WorkflowRepository};
 use ork_core::schedule_processor::process_scheduled_triggers;
 use ork_state::SqliteDatabase;
 

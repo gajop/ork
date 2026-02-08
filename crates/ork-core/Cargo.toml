@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = []
+default = ["gcp"]
+gcp = [
+    "dep:google-cloud-bigquery",
+    "dep:google-cloud-run-v2",
+    "dep:google-cloud-dataproc-v1",
+]
 sqlx = ["dep:sqlx"]
 
 [dependencies]
@@ -30,10 +35,10 @@ rustls = { workspace = true }
 cron = "0.12"
 dirs = "6.0.0"
 
-# Google Cloud API clients for job tracking
-google-cloud-bigquery = { workspace = true }
-google-cloud-run-v2 = { workspace = true }
-google-cloud-dataproc-v1 = { workspace = true }
+# Google Cloud API clients for job tracking (optional, enabled with `gcp` feature)
+google-cloud-bigquery = { workspace = true, optional = true }
+google-cloud-run-v2 = { workspace = true, optional = true }
+google-cloud-dataproc-v1 = { workspace = true, optional = true }
 
 [dev-dependencies]
 ork-state = { path = "../ork-state", features = ["sqlite"] }

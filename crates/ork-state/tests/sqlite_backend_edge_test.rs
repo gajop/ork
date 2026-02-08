@@ -2,7 +2,9 @@
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use ork_core::database::{Database, NewTask, NewWorkflowTask};
+use ork_core::database::{
+    NewTask, NewWorkflowTask, RunRepository, TaskRepository, WorkflowRepository,
+};
 use ork_state::SqliteDatabase;
 use uuid::Uuid;
 
@@ -17,24 +19,23 @@ fn task_id(tasks: &[ork_core::models::Task], name: &str) -> Uuid {
 #[tokio::test]
 async fn test_sqlite_branch_and_edge_paths() -> Result<()> {
     let db = SqliteDatabase::new(":memory:").await?;
-    Database::run_migrations(&db).await?;
+    db.run_migrations().await?;
 
-    let wf = Database::create_workflow(
-        &db,
-        "sqlite-edges",
-        Some("edge cases"),
-        "job",
-        "region",
-        "project",
-        "dag",
-        None,
-        None,
-    )
-    .await?;
+    let wf = db
+        .create_workflow(
+            "sqlite-edges",
+            Some("edge cases"),
+            "job",
+            "region",
+            "project",
+            "dag",
+            None,
+            None,
+        )
+        .await?;
     let workflow_id = wf.id;
 
-    Database::create_workflow_tasks(
-        &db,
+    db.create_workflow_tasks(
         workflow_id,
         &[NewWorkflowTask {
             task_index: 0,
@@ -46,8 +47,7 @@ async fn test_sqlite_branch_and_edge_paths() -> Result<()> {
         }],
     )
     .await?;
-    Database::create_workflow_tasks(
-        &db,
+    db.create_workflow_tasks(
         workflow_id,
         &[
             NewWorkflowTask {
@@ -69,13 +69,12 @@ async fn test_sqlite_branch_and_edge_paths() -> Result<()> {
         ],
     )
     .await?;
-    let workflow_tasks = Database::list_workflow_tasks(&db, workflow_id).await?;
+    let workflow_tasks = db.list_workflow_tasks(workflow_id).await?;
     assert_eq!(workflow_tasks.len(), 2);
 
-    let run = Database::create_run(&db, workflow_id, "tests").await?;
+    let run = db.create_run(workflow_id, "tests").await?;
     let run_id = run.id;
-    Database::batch_create_dag_tasks(
-        &db,
+    db.batch_create_dag_tasks(
         run_id,
         &[
             NewTask {
@@ -100,48 +99,60 @@ async fn test_sqlite_branch_and_edge_paths() -> Result<()> {
     )
     .await?;
 
-    let pending = Database::get_pending_tasks(&db).await?;
+    let pending = db.get_pending_tasks().await?;
     assert!(pending.iter().any(|t| t.task_name == "extract"));
 
-    Database::batch_update_task_status(&db, &[]).await?;
-    let no_failed =
-        Database::mark_tasks_failed_by_dependency(&db, run_id, &[], "should not apply").await?;
+    db.batch_update_task_status(&[]).await?;
+    let no_failed = db
+        .mark_tasks_failed_by_dependency(run_id, &[], "should not apply")
+        .await?;
     assert!(no_failed.is_empty());
 
-    let empty_outputs = Database::get_task_outputs(&db, run_id, &[]).await?;
+    let empty_outputs = db.get_task_outputs(run_id, &[]).await?;
     assert!(empty_outputs.is_empty());
-    let empty_retry = Database::get_task_retry_meta(&db, &[]).await?;
+    let empty_retry = db.get_task_retry_meta(&[]).await?;
     assert!(empty_retry.is_empty());
 
-    let tasks = Database::list_tasks(&db, run_id).await?;
+    let tasks = db.list_tasks(run_id).await?;
     let extract_id = task_id(&tasks, "extract");
     let load_id = task_id(&tasks, "load");
 
-    Database::update_task_output(&db, extract_id, serde_json::json!({"ok": true})).await?;
-    let outputs = Database::get_task_outputs(&db, run_id, &[String::from("extract")]).await?;
+    db.update_task_output(extract_id, serde_json::json!({"ok": true}))
+        .await?;
+    let outputs = db
+        .get_task_outputs(run_id, &[String::from("extract")])
+        .await?;
     assert_eq!(
         outputs.get("extract"),
         Some(&serde_json::json!({"ok": true}))
     );
 
     let retry_at = Utc::now() + Duration::seconds(30);
-    Database::reset_task_for_retry(&db, extract_id, Some("retry"), Some(retry_at)).await?;
-    Database::update_task_status(&db, extract_id, "success", Some("exec-edge"), None).await?;
-    Database::update_run_status(&db, run_id, "running", None).await?;
-    let pending_with_satisfied = Database::get_pending_tasks_with_workflow(&db, 10).await?;
-    assert!(pending_with_satisfied.iter().any(|t| t.task_id == load_id));
-
-    let deferred = Database::create_deferred_job(
-        &db,
+    db.reset_task_for_retry(extract_id, Some("retry"), Some(retry_at))
+        .await?;
+    db.update_task_status(
         extract_id,
-        "custom_http",
-        "edge-job-1",
-        serde_json::json!({"url":"http://example/status"}),
+        ork_core::models::TaskStatus::Success,
+        Some("exec-edge"),
+        None,
     )
     .await?;
-    Database::get_deferred_jobs_for_task(&db, extract_id).await?;
-    Database::cancel_deferred_jobs_for_task(&db, extract_id).await?;
-    let deferred_after = Database::get_deferred_jobs_for_task(&db, extract_id).await?;
+    db.update_run_status(run_id, ork_core::models::RunStatus::Running, None)
+        .await?;
+    let pending_with_satisfied = db.get_pending_tasks_with_workflow(10).await?;
+    assert!(pending_with_satisfied.iter().any(|t| t.task_id == load_id));
+
+    let deferred = db
+        .create_deferred_job(
+            extract_id,
+            "custom_http",
+            "edge-job-1",
+            serde_json::json!({"url":"http://example/status"}),
+        )
+        .await?;
+    db.get_deferred_jobs_for_task(extract_id).await?;
+    db.cancel_deferred_jobs_for_task(extract_id).await?;
+    let deferred_after = db.get_deferred_jobs_for_task(extract_id).await?;
     assert!(
         deferred_after
             .iter()

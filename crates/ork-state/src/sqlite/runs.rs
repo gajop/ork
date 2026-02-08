@@ -1,8 +1,7 @@
 use anyhow::Result;
+use ork_core::models::{Run, RunStatus, TaskStatus};
 use sqlx::Row;
 use uuid::Uuid;
-
-use ork_core::models::Run;
 
 use super::core::SqliteDatabase;
 
@@ -14,25 +13,41 @@ impl SqliteDatabase {
     ) -> Result<Run> {
         let run_id = Uuid::new_v4();
         let run = sqlx::query_as::<_, Run>(
-            r#"INSERT INTO runs (id, workflow_id, status, triggered_by) VALUES (?, ?, 'pending', ?) RETURNING *"#,
+            r#"INSERT INTO runs (id, workflow_id, status, triggered_by) VALUES (?, ?, ?, ?) RETURNING *"#,
         )
-        .bind(run_id).bind(workflow_id).bind(triggered_by).fetch_one(&self.pool).await?;
+        .bind(run_id)
+        .bind(workflow_id)
+        .bind(RunStatus::Pending.as_str())
+        .bind(triggered_by)
+        .fetch_one(&self.pool)
+        .await?;
         Ok(run)
     }
 
     pub(super) async fn update_run_status_impl(
         &self,
         run_id: Uuid,
-        status: &str,
+        status: RunStatus,
         error: Option<&str>,
     ) -> Result<()> {
+        let status_str = status.as_str();
         sqlx::query(
             r#"UPDATE runs SET status = ?, error = ?,
-            started_at = CASE WHEN ? = 'running' AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
-            finished_at = CASE WHEN ? IN ('success', 'failed', 'cancelled') AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
+            started_at = CASE WHEN ? = ? AND started_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE started_at END,
+            finished_at = CASE WHEN ? IN (?, ?, ?) AND finished_at IS NULL THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') ELSE finished_at END
             WHERE id = ?"#,
         )
-        .bind(status).bind(error).bind(status).bind(status).bind(run_id).execute(&self.pool).await?;
+        .bind(status_str)
+        .bind(error)
+        .bind(status_str)
+        .bind(RunStatus::Running.as_str())
+        .bind(status_str)
+        .bind(RunStatus::Success.as_str())
+        .bind(RunStatus::Failed.as_str())
+        .bind(RunStatus::Cancelled.as_str())
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -64,7 +79,8 @@ impl SqliteDatabase {
     }
 
     pub(super) async fn get_pending_runs_impl(&self) -> Result<Vec<Run>> {
-        let runs = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE status = 'pending'")
+        let runs = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE status = ?")
+            .bind(RunStatus::Pending.as_str())
             .fetch_all(&self.pool)
             .await?;
         Ok(runs)
@@ -72,10 +88,22 @@ impl SqliteDatabase {
 
     pub(super) async fn cancel_run_impl(&self, run_id: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("UPDATE runs SET status = 'cancelled', finished_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status NOT IN ('success', 'failed', 'cancelled')")
-            .bind(run_id).execute(&mut *tx).await?;
-        sqlx::query("UPDATE tasks SET status = 'cancelled', finished_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') WHERE run_id = ? AND status IN ('pending', 'dispatched', 'running')")
-            .bind(run_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE runs SET status = ?, finished_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status NOT IN (?, ?, ?)")
+            .bind(RunStatus::Cancelled.as_str())
+            .bind(run_id)
+            .bind(RunStatus::Success.as_str())
+            .bind(RunStatus::Failed.as_str())
+            .bind(RunStatus::Cancelled.as_str())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE tasks SET status = ?, finished_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now') WHERE run_id = ? AND status IN (?, ?, ?)")
+            .bind(TaskStatus::Cancelled.as_str())
+            .bind(run_id)
+            .bind(TaskStatus::Pending.as_str())
+            .bind(TaskStatus::Dispatched.as_str())
+            .bind(TaskStatus::Running.as_str())
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -83,10 +111,13 @@ impl SqliteDatabase {
     pub(super) async fn get_run_task_stats_impl(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
         let row = sqlx::query(
             r#"SELECT COUNT(*) as total,
-            COUNT(CASE WHEN status IN ('success', 'failed') THEN 1 END) as completed,
-            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
+            COUNT(CASE WHEN status IN (?, ?) THEN 1 END) as completed,
+            COUNT(CASE WHEN status = ? THEN 1 END) as failed
             FROM tasks WHERE run_id = ?"#,
         )
+        .bind(TaskStatus::Success.as_str())
+        .bind(TaskStatus::Failed.as_str())
+        .bind(TaskStatus::Failed.as_str())
         .bind(run_id)
         .fetch_one(&self.pool)
         .await?;

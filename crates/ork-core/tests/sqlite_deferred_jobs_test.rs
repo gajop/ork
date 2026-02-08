@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ork_core::database::{Database, NewTask};
+use ork_core::database::{NewTask, RunRepository, TaskRepository, WorkflowRepository};
 use ork_state::SqliteDatabase;
 
 async fn setup_db_with_task() -> Result<(SqliteDatabase, uuid::Uuid)> {
@@ -50,7 +50,7 @@ async fn test_deferred_job_lifecycle_sqlite_backend() -> Result<()> {
     let pending = db.get_pending_deferred_jobs().await?;
     assert_eq!(pending.len(), 1);
 
-    db.update_deferred_job_status(job.id, "polling", None)
+    db.update_deferred_job_status(job.id, ork_core::models::DeferredJobStatus::Polling, None)
         .await?;
     db.update_deferred_job_polled(job.id).await?;
     let task_jobs = db.get_deferred_jobs_for_task(task_id).await?;
@@ -96,7 +96,7 @@ async fn test_cancel_pending_deferred_jobs_for_task() -> Result<()> {
             serde_json::json!({"url":"https://example.com/status/3"}),
         )
         .await?;
-    db.update_deferred_job_status(job.id, "polling", None)
+    db.update_deferred_job_status(job.id, ork_core::models::DeferredJobStatus::Polling, None)
         .await?;
 
     db.cancel_deferred_jobs_for_task(task_id).await?;

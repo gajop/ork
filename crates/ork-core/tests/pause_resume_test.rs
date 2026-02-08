@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::time::{Duration, timeout};
 
 use ork_core::config::OrchestratorConfig;
-use ork_core::database::Database;
+use ork_core::database::{RunRepository, TaskRepository, WorkflowRepository};
 use ork_core::scheduler::Scheduler;
 use ork_executors::manager::ExecutorManager;
 use ork_state::SqliteDatabase;
@@ -42,7 +42,8 @@ async fn test_run_pause_blocks_dispatch_until_resumed() -> Result<()> {
     }];
     db.batch_create_dag_tasks(run.id, &tasks).await?;
 
-    db.update_run_status(run.id, "paused", None).await?;
+    db.update_run_status(run.id, ork_core::models::RunStatus::Paused, None)
+        .await?;
 
     let config = OrchestratorConfig {
         poll_interval_secs: 0.01,
@@ -65,7 +66,8 @@ async fn test_run_pause_blocks_dispatch_until_resumed() -> Result<()> {
     assert!(pending.iter().all(|t| t.started_at.is_none()));
     assert!(pending.iter().all(|t| t.finished_at.is_none()));
 
-    db.update_run_status(run.id, "running", None).await?;
+    db.update_run_status(run.id, ork_core::models::RunStatus::Running, None)
+        .await?;
 
     let result = timeout(Duration::from_millis(300), async {
         loop {
@@ -124,10 +126,12 @@ async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
         timeout_seconds: Some(1),
     }];
     db.batch_create_dag_tasks(run.id, &tasks).await?;
-    db.update_run_status(run.id, "running", None).await?;
+    db.update_run_status(run.id, ork_core::models::RunStatus::Running, None)
+        .await?;
 
     let task = db.list_tasks(run.id).await?.into_iter().next().unwrap();
-    db.update_task_status(task.id, "paused", None, None).await?;
+    db.update_task_status(task.id, ork_core::models::TaskStatus::Paused, None, None)
+        .await?;
 
     let config = OrchestratorConfig {
         poll_interval_secs: 0.01,
@@ -150,7 +154,7 @@ async fn test_task_pause_blocks_dispatch_until_resumed() -> Result<()> {
     assert!(paused.iter().all(|t| t.started_at.is_none()));
     assert!(paused.iter().all(|t| t.finished_at.is_none()));
 
-    db.update_task_status(task.id, "pending", None, None)
+    db.update_task_status(task.id, ork_core::models::TaskStatus::Pending, None, None)
         .await?;
 
     let result = timeout(Duration::from_millis(300), async {

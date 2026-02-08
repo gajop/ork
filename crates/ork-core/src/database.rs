@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-use crate::models::{DeferredJob, Run, Task, TaskWithWorkflow, Workflow};
+use crate::models::{
+    DeferredJob, DeferredJobStatus, Run, RunStatus, Task, TaskStatus, TaskWithWorkflow, Workflow,
+};
 
 #[derive(Debug, Clone)]
 pub struct NewTask {
@@ -30,17 +32,9 @@ pub struct NewWorkflowTask {
     pub signature: Option<serde_json::Value>,
 }
 
-/// Database interface for orchestration state management
-///
-/// This trait abstracts over different database backends (Postgres, SQLite, etc.)
-/// All operations are transactional where appropriate.
-
+/// Repository for workflow CRUD operations
 #[async_trait]
-pub trait Database: Send + Sync {
-    // Migration operations
-    async fn run_migrations(&self) -> anyhow::Result<()>;
-
-    // Workflow operations
+pub trait WorkflowRepository: Send + Sync {
     async fn create_workflow(
         &self,
         name: &str,
@@ -54,36 +48,12 @@ pub trait Database: Send + Sync {
     ) -> anyhow::Result<Workflow>;
 
     async fn get_workflow(&self, name: &str) -> anyhow::Result<Workflow>;
+    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> anyhow::Result<Workflow>;
     async fn list_workflows(&self) -> anyhow::Result<Vec<Workflow>>;
     async fn delete_workflow(&self, name: &str) -> anyhow::Result<()>;
 
-    // Run operations
-    async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> anyhow::Result<Run>;
-
-    async fn update_run_status(
-        &self,
-        run_id: Uuid,
-        status: &str,
-        error: Option<&str>,
-    ) -> anyhow::Result<()>;
-
-    async fn get_run(&self, run_id: Uuid) -> anyhow::Result<Run>;
-    async fn list_runs(&self, workflow_id: Option<Uuid>) -> anyhow::Result<Vec<Run>>;
-    async fn get_pending_runs(&self) -> anyhow::Result<Vec<Run>>;
-
-    /// Cancel a run and all its pending/dispatched/running tasks
-    async fn cancel_run(&self, run_id: Uuid) -> anyhow::Result<()>;
-
-    // Task operations
-    async fn batch_create_tasks(
-        &self,
-        run_id: Uuid,
-        task_count: i32,
-        workflow_name: &str,
-        executor_type: &str,
-    ) -> anyhow::Result<()>;
-
-    async fn batch_create_dag_tasks(&self, run_id: Uuid, tasks: &[NewTask]) -> anyhow::Result<()>;
+    /// Batch fetch workflows by IDs (used by scheduler)
+    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> anyhow::Result<Vec<Workflow>>;
 
     async fn create_workflow_tasks(
         &self,
@@ -95,11 +65,49 @@ pub trait Database: Send + Sync {
         &self,
         workflow_id: Uuid,
     ) -> anyhow::Result<Vec<crate::models::WorkflowTask>>;
+}
+
+/// Repository for run lifecycle operations
+#[async_trait]
+pub trait RunRepository: Send + Sync {
+    async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> anyhow::Result<Run>;
+
+    async fn update_run_status(
+        &self,
+        run_id: Uuid,
+        status: RunStatus,
+        error: Option<&str>,
+    ) -> anyhow::Result<()>;
+
+    async fn get_run(&self, run_id: Uuid) -> anyhow::Result<Run>;
+    async fn list_runs(&self, workflow_id: Option<Uuid>) -> anyhow::Result<Vec<Run>>;
+    async fn get_pending_runs(&self) -> anyhow::Result<Vec<Run>>;
+
+    /// Cancel a run and all its pending/dispatched/running tasks
+    async fn cancel_run(&self, run_id: Uuid) -> anyhow::Result<()>;
+
+    /// Get run completion stats (total, completed, failed counts)
+    /// Used by scheduler to check if a run is complete
+    async fn get_run_task_stats(&self, run_id: Uuid) -> anyhow::Result<(i64, i64, i64)>;
+}
+
+/// Repository for task lifecycle operations
+#[async_trait]
+pub trait TaskRepository: Send + Sync {
+    async fn batch_create_tasks(
+        &self,
+        run_id: Uuid,
+        task_count: i32,
+        workflow_name: &str,
+        executor_type: &str,
+    ) -> anyhow::Result<()>;
+
+    async fn batch_create_dag_tasks(&self, run_id: Uuid, tasks: &[NewTask]) -> anyhow::Result<()>;
 
     async fn update_task_status(
         &self,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> anyhow::Result<()>;
@@ -109,7 +117,7 @@ pub trait Database: Send + Sync {
     /// Format: Vec<(task_id, status, execution_name, error)>
     async fn batch_update_task_status(
         &self,
-        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+        updates: &[(Uuid, TaskStatus, Option<&str>, Option<&str>)],
     ) -> anyhow::Result<()>;
 
     async fn list_tasks(&self, run_id: Uuid) -> anyhow::Result<Vec<Task>>;
@@ -134,12 +142,6 @@ pub trait Database: Send + Sync {
         &self,
         limit: i64,
     ) -> anyhow::Result<Vec<TaskWithWorkflow>>;
-
-    /// Batch fetch workflows by IDs (used by scheduler)
-    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> anyhow::Result<Vec<Workflow>>;
-
-    /// Get workflow by ID (used by scheduler)
-    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> anyhow::Result<Workflow>;
 
     /// Fetch outputs for a set of task names in a run.
     async fn get_task_outputs(
@@ -168,12 +170,11 @@ pub trait Database: Send + Sync {
         failed_task_names: &[String],
         error: &str,
     ) -> anyhow::Result<Vec<String>>;
+}
 
-    /// Get run completion stats (total, completed, failed counts)
-    /// Used by scheduler to check if a run is complete
-    async fn get_run_task_stats(&self, run_id: Uuid) -> anyhow::Result<(i64, i64, i64)>;
-
-    // Schedule operations
+/// Repository for schedule operations
+#[async_trait]
+pub trait ScheduleRepository: Send + Sync {
     /// Get workflows that have schedules enabled and are due for triggering
     async fn get_due_scheduled_workflows(&self) -> anyhow::Result<Vec<Workflow>>;
 
@@ -192,9 +193,11 @@ pub trait Database: Send + Sync {
         schedule: Option<&str>,
         schedule_enabled: bool,
     ) -> anyhow::Result<()>;
+}
 
-    // Deferred job operations (for Triggerer component)
-
+/// Repository for deferred job operations (for Triggerer component)
+#[async_trait]
+pub trait DeferredJobRepository: Send + Sync {
     /// Create a deferred job for tracking
     async fn create_deferred_job(
         &self,
@@ -214,7 +217,7 @@ pub trait Database: Send + Sync {
     async fn update_deferred_job_status(
         &self,
         job_id: Uuid,
-        status: &str,
+        status: DeferredJobStatus,
         error: Option<&str>,
     ) -> anyhow::Result<()>;
 
@@ -229,4 +232,25 @@ pub trait Database: Send + Sync {
 
     /// Cancel all deferred jobs for a task
     async fn cancel_deferred_jobs_for_task(&self, task_id: Uuid) -> anyhow::Result<()>;
+}
+
+/// Database interface for orchestration state management
+///
+/// This trait abstracts over different database backends (Postgres, SQLite, etc.)
+/// All operations are transactional where appropriate.
+///
+/// This is a composite trait that combines all repository traits for backward compatibility.
+/// New code should depend on the specific repository traits needed.
+#[async_trait]
+pub trait Database:
+    WorkflowRepository
+    + RunRepository
+    + TaskRepository
+    + ScheduleRepository
+    + DeferredJobRepository
+    + Send
+    + Sync
+{
+    // Migration operations
+    async fn run_migrations(&self) -> anyhow::Result<()>;
 }

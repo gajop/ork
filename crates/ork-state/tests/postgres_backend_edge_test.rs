@@ -2,7 +2,9 @@
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use ork_core::database::{Database, NewTask, NewWorkflowTask};
+use ork_core::database::{
+    NewTask, NewWorkflowTask, RunRepository, ScheduleRepository, TaskRepository, WorkflowRepository,
+};
 use ork_state::PostgresDatabase;
 use url::Url;
 use uuid::Uuid;
@@ -36,7 +38,7 @@ impl PostgresTestContext {
 
         let db_url = with_database(&base_url, &db_name)?;
         let db = PostgresDatabase::new(&db_url).await?;
-        Database::run_migrations(&db).await?;
+        db.run_migrations().await?;
 
         Ok(Some(Self { admin, db_name, db }))
     }
@@ -85,27 +87,26 @@ async fn test_postgres_branch_and_edge_paths() -> Result<()> {
     };
     let db = &ctx.db;
 
-    let wf = Database::create_workflow(
-        db,
-        "pg-edges",
-        Some("edge cases"),
-        "job",
-        "region",
-        "project",
-        "dag",
-        None,
-        None,
-    )
-    .await?;
+    let wf = db
+        .create_workflow(
+            "pg-edges",
+            Some("edge cases"),
+            "job",
+            "region",
+            "project",
+            "dag",
+            None,
+            None,
+        )
+        .await?;
     let workflow_id = wf.id;
 
-    let by_ids_empty = Database::get_workflows_by_ids(db, &[]).await?;
+    let by_ids_empty = db.get_workflows_by_ids(&[]).await?;
     assert!(by_ids_empty.is_empty());
-    let due_initial = Database::get_due_scheduled_workflows(db).await?;
+    let due_initial = db.get_due_scheduled_workflows().await?;
     assert!(!due_initial.iter().any(|w| w.id == workflow_id));
 
-    Database::create_workflow_tasks(
-        db,
+    db.create_workflow_tasks(
         workflow_id,
         &[NewWorkflowTask {
             task_index: 0,
@@ -117,8 +118,7 @@ async fn test_postgres_branch_and_edge_paths() -> Result<()> {
         }],
     )
     .await?;
-    Database::create_workflow_tasks(
-        db,
+    db.create_workflow_tasks(
         workflow_id,
         &[
             NewWorkflowTask {
@@ -140,18 +140,17 @@ async fn test_postgres_branch_and_edge_paths() -> Result<()> {
         ],
     )
     .await?;
-    let workflow_tasks = Database::list_workflow_tasks(db, workflow_id).await?;
+    let workflow_tasks = db.list_workflow_tasks(workflow_id).await?;
     assert_eq!(workflow_tasks.len(), 2);
 
-    let run = Database::create_run(db, workflow_id, "tests").await?;
+    let run = db.create_run(workflow_id, "tests").await?;
     let run_id = run.id;
-    let pending_runs = Database::get_pending_runs(db).await?;
+    let pending_runs = db.get_pending_runs().await?;
     assert!(pending_runs.iter().any(|r| r.id == run_id));
-    let runs_all = Database::list_runs(db, None).await?;
+    let runs_all = db.list_runs(None).await?;
     assert!(runs_all.iter().any(|r| r.id == run_id));
 
-    Database::batch_create_dag_tasks(
-        db,
+    db.batch_create_dag_tasks(
         run_id,
         &[
             NewTask {
@@ -176,106 +175,132 @@ async fn test_postgres_branch_and_edge_paths() -> Result<()> {
     )
     .await?;
 
-    Database::batch_update_task_status(db, &[]).await?;
-    let no_failed =
-        Database::mark_tasks_failed_by_dependency(db, run_id, &[], "should not apply").await?;
+    db.batch_update_task_status(&[]).await?;
+    let no_failed = db
+        .mark_tasks_failed_by_dependency(run_id, &[], "should not apply")
+        .await?;
     assert!(no_failed.is_empty());
 
-    let empty_outputs = Database::get_task_outputs(db, run_id, &[]).await?;
+    let empty_outputs = db.get_task_outputs(run_id, &[]).await?;
     assert!(empty_outputs.is_empty());
 
-    let tasks = Database::list_tasks(db, run_id).await?;
+    let tasks = db.list_tasks(run_id).await?;
     let extract_id = task_id(&tasks, "extract");
     let load_id = task_id(&tasks, "load");
 
-    let empty_retry = Database::get_task_retry_meta(db, &[]).await?;
+    let empty_retry = db.get_task_retry_meta(&[]).await?;
     assert!(empty_retry.is_empty());
 
     let retry_at = Utc::now() + Duration::seconds(30);
-    Database::reset_task_for_retry(db, extract_id, Some("retry"), Some(retry_at)).await?;
-    let mut tasks = Database::list_tasks(db, run_id).await?;
+    db.reset_task_for_retry(extract_id, Some("retry"), Some(retry_at))
+        .await?;
+    let mut tasks = db.list_tasks(run_id).await?;
     let extract_after_reset = tasks
         .iter()
         .find(|t| t.id == extract_id)
         .expect("extract after reset");
     assert!(extract_after_reset.retry_at.is_some());
 
-    Database::update_task_status(db, extract_id, "paused", None, Some("paused")).await?;
-    tasks = Database::list_tasks(db, run_id).await?;
+    db.update_task_status(
+        extract_id,
+        ork_core::models::TaskStatus::Paused,
+        None,
+        Some("paused"),
+    )
+    .await?;
+    tasks = db.list_tasks(run_id).await?;
     let extract_paused = tasks.iter().find(|t| t.id == extract_id).expect("paused");
     assert_eq!(extract_paused.status_str(), "paused");
     assert!(extract_paused.retry_at.is_some());
 
-    Database::update_task_status(db, extract_id, "running", Some("exec-edge"), None).await?;
-    tasks = Database::list_tasks(db, run_id).await?;
+    db.update_task_status(
+        extract_id,
+        ork_core::models::TaskStatus::Running,
+        Some("exec-edge"),
+        None,
+    )
+    .await?;
+    tasks = db.list_tasks(run_id).await?;
     let extract_running = tasks.iter().find(|t| t.id == extract_id).expect("running");
     assert_eq!(extract_running.status_str(), "running");
     assert!(extract_running.retry_at.is_none());
     assert!(extract_running.started_at.is_some());
 
-    Database::update_run_status(db, run_id, "running", None).await?;
-    let run_running = Database::get_run(db, run_id).await?;
+    db.update_run_status(run_id, ork_core::models::RunStatus::Running, None)
+        .await?;
+    let run_running = db.get_run(run_id).await?;
     assert_eq!(run_running.status_str(), "running");
     assert!(run_running.started_at.is_some());
     assert!(run_running.finished_at.is_none());
 
-    let pending_with_unsatisfied = Database::get_pending_tasks_with_workflow(db, 10).await?;
+    let pending_with_unsatisfied = db.get_pending_tasks_with_workflow(10).await?;
     assert!(
         pending_with_unsatisfied
             .iter()
             .all(|t| t.task_name != "load")
     );
 
-    Database::update_task_status(db, extract_id, "success", Some("exec-edge"), None).await?;
-    let pending_with_satisfied = Database::get_pending_tasks_with_workflow(db, 10).await?;
-    assert!(pending_with_satisfied.iter().any(|t| t.task_id == load_id));
-
-    let deferred = Database::create_deferred_job(
-        db,
+    db.update_task_status(
         extract_id,
-        "custom_http",
-        "edge-job-1",
-        serde_json::json!({"url":"http://example/status"}),
+        ork_core::models::TaskStatus::Success,
+        Some("exec-edge"),
+        None,
     )
     .await?;
+    let pending_with_satisfied = db.get_pending_tasks_with_workflow(10).await?;
+    assert!(pending_with_satisfied.iter().any(|t| t.task_id == load_id));
+
+    let deferred = db
+        .create_deferred_job(
+            extract_id,
+            "custom_http",
+            "edge-job-1",
+            serde_json::json!({"url":"http://example/status"}),
+        )
+        .await?;
     assert!(deferred.started_at.is_none());
-    Database::update_deferred_job_status(db, deferred.id, "polling", None).await?;
-    let deferred_polled = Database::get_deferred_jobs_for_task(db, extract_id).await?;
+    db.update_deferred_job_status(
+        deferred.id,
+        ork_core::models::DeferredJobStatus::Polling,
+        None,
+    )
+    .await?;
+    let deferred_polled = db.get_deferred_jobs_for_task(extract_id).await?;
     assert!(
         deferred_polled
             .iter()
             .any(|j| j.id == deferred.id && j.started_at.is_some())
     );
 
-    let deferred_completed = Database::create_deferred_job(
-        db,
-        extract_id,
-        "custom_http",
-        "edge-job-2",
-        serde_json::json!({"url":"http://example/status"}),
-    )
-    .await?;
-    Database::complete_deferred_job(db, deferred_completed.id).await?;
-    let deferred_failed = Database::create_deferred_job(
-        db,
-        extract_id,
-        "custom_http",
-        "edge-job-3",
-        serde_json::json!({"url":"http://example/status"}),
-    )
-    .await?;
-    Database::fail_deferred_job(db, deferred_failed.id, "failed").await?;
+    let deferred_completed = db
+        .create_deferred_job(
+            extract_id,
+            "custom_http",
+            "edge-job-2",
+            serde_json::json!({"url":"http://example/status"}),
+        )
+        .await?;
+    db.complete_deferred_job(deferred_completed.id).await?;
+    let deferred_failed = db
+        .create_deferred_job(
+            extract_id,
+            "custom_http",
+            "edge-job-3",
+            serde_json::json!({"url":"http://example/status"}),
+        )
+        .await?;
+    db.fail_deferred_job(deferred_failed.id, "failed").await?;
 
-    let deferred_cancelled = Database::create_deferred_job(
-        db,
-        extract_id,
-        "custom_http",
-        "edge-job-4",
-        serde_json::json!({"url":"http://example/status"}),
-    )
-    .await?;
-    Database::cancel_deferred_jobs_for_task(db, extract_id).await?;
-    let deferred_after = Database::get_deferred_jobs_for_task(db, extract_id).await?;
+    let deferred_cancelled = db
+        .create_deferred_job(
+            extract_id,
+            "custom_http",
+            "edge-job-4",
+            serde_json::json!({"url":"http://example/status"}),
+        )
+        .await?;
+    db.cancel_deferred_jobs_for_task(extract_id).await?;
+    let deferred_after = db.get_deferred_jobs_for_task(extract_id).await?;
     assert!(deferred_after.iter().any(|j| j.id == deferred_completed.id
         && j.started_at.is_some()
         && j.finished_at.is_some()));
@@ -290,17 +315,22 @@ async fn test_postgres_branch_and_edge_paths() -> Result<()> {
             .any(|j| j.id == deferred_cancelled.id && j.status_str() == "cancelled")
     );
 
-    let pending_deferred = Database::get_pending_deferred_jobs(db).await?;
+    let pending_deferred = db.get_pending_deferred_jobs().await?;
     assert!(pending_deferred.iter().all(|j| j.task_id != extract_id));
 
-    Database::update_run_status(db, run_id, "failed", Some("edge fail")).await?;
-    let run_failed = Database::get_run(db, run_id).await?;
+    db.update_run_status(
+        run_id,
+        ork_core::models::RunStatus::Failed,
+        Some("edge fail"),
+    )
+    .await?;
+    let run_failed = db.get_run(run_id).await?;
     assert_eq!(run_failed.status_str(), "failed");
     assert!(run_failed.finished_at.is_some());
     assert_eq!(run_failed.error.as_deref(), Some("edge fail"));
 
-    Database::delete_workflow(db, "pg-edges").await?;
-    assert!(Database::get_workflow(db, "pg-edges").await.is_err());
+    db.delete_workflow("pg-edges").await?;
+    assert!(db.get_workflow("pg-edges").await.is_err());
 
     ctx.cleanup().await
 }

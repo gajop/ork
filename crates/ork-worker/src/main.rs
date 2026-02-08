@@ -5,9 +5,20 @@
 //! - tasks.py / Rust task code
 //! - dependencies
 //!
-//! It provides two endpoints:
+//! ## Endpoints
+//!
 //! - POST /compile - Parse and compile DAG from embedded workflow
 //! - POST /execute - Execute a specific task
+//!
+//! ## Supported Executors
+//!
+//! - `process` - Execute shell commands or scripts
+//! - `python` - Execute Python tasks (via process executor)
+//! - `library` - Load and execute native dynamic libraries (.so/.dll/.dylib)
+//!
+//! ## Unsupported Executors
+//!
+//! - `cloudrun` - Cloud Run execution requires cloud infrastructure not available in worker context
 
 use axum::{Json, Router, response::IntoResponse, routing::post};
 use clap::Parser;

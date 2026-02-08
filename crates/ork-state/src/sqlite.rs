@@ -11,16 +11,18 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use ork_core::database::Database as DatabaseTrait;
+use ork_core::database::{
+    Database as DatabaseTrait, DeferredJobRepository, RunRepository, ScheduleRepository,
+    TaskRepository, WorkflowRepository,
+};
 use ork_core::database::{NewTask, NewWorkflowTask};
-use ork_core::models::{DeferredJob, Run, Task, TaskWithWorkflow, Workflow, WorkflowTask};
+use ork_core::models::{
+    DeferredJob, DeferredJobStatus, Run, RunStatus, Task, TaskStatus, TaskWithWorkflow, Workflow,
+    WorkflowTask,
+};
 
 #[async_trait]
-impl DatabaseTrait for SqliteDatabase {
-    async fn run_migrations(&self) -> Result<()> {
-        SqliteDatabase::run_migrations(self).await
-    }
-
+impl WorkflowRepository for SqliteDatabase {
     async fn create_workflow(
         &self,
         name: &str,
@@ -49,6 +51,10 @@ impl DatabaseTrait for SqliteDatabase {
         self.get_workflow_impl(name).await
     }
 
+    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
+        self.get_workflow_by_id_impl(workflow_id).await
+    }
+
     async fn list_workflows(&self) -> Result<Vec<Workflow>> {
         self.list_workflows_impl().await
     }
@@ -57,6 +63,25 @@ impl DatabaseTrait for SqliteDatabase {
         self.delete_workflow_impl(name).await
     }
 
+    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+        self.get_workflows_by_ids_impl(workflow_ids).await
+    }
+
+    async fn create_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> Result<()> {
+        self.create_workflow_tasks_impl(workflow_id, tasks).await
+    }
+
+    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+        self.list_workflow_tasks_impl(workflow_id).await
+    }
+}
+
+#[async_trait]
+impl RunRepository for SqliteDatabase {
     async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> Result<Run> {
         self.create_run_impl(workflow_id, triggered_by).await
     }
@@ -64,7 +89,7 @@ impl DatabaseTrait for SqliteDatabase {
     async fn update_run_status(
         &self,
         run_id: Uuid,
-        status: &str,
+        status: RunStatus,
         error: Option<&str>,
     ) -> Result<()> {
         self.update_run_status_impl(run_id, status, error).await
@@ -86,6 +111,13 @@ impl DatabaseTrait for SqliteDatabase {
         self.cancel_run_impl(run_id).await
     }
 
+    async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
+        self.get_run_task_stats_impl(run_id).await
+    }
+}
+
+#[async_trait]
+impl TaskRepository for SqliteDatabase {
     async fn batch_create_tasks(
         &self,
         run_id: Uuid,
@@ -104,7 +136,7 @@ impl DatabaseTrait for SqliteDatabase {
     async fn update_task_status(
         &self,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<()> {
@@ -114,7 +146,7 @@ impl DatabaseTrait for SqliteDatabase {
 
     async fn batch_update_task_status(
         &self,
-        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+        updates: &[(Uuid, TaskStatus, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         self.batch_update_task_status_impl(updates).await
     }
@@ -153,14 +185,6 @@ impl DatabaseTrait for SqliteDatabase {
         self.get_pending_tasks_with_workflow_impl(limit).await
     }
 
-    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
-        self.get_workflows_by_ids_impl(workflow_ids).await
-    }
-
-    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
-        self.get_workflow_by_id_impl(workflow_id).await
-    }
-
     async fn get_task_outputs(
         &self,
         run_id: Uuid,
@@ -190,23 +214,10 @@ impl DatabaseTrait for SqliteDatabase {
         self.mark_tasks_failed_by_dependency_impl(run_id, failed_task_names, error)
             .await
     }
+}
 
-    async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
-        self.get_run_task_stats_impl(run_id).await
-    }
-
-    async fn create_workflow_tasks(
-        &self,
-        workflow_id: Uuid,
-        tasks: &[NewWorkflowTask],
-    ) -> Result<()> {
-        self.create_workflow_tasks_impl(workflow_id, tasks).await
-    }
-
-    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
-        self.list_workflow_tasks_impl(workflow_id).await
-    }
-
+#[async_trait]
+impl ScheduleRepository for SqliteDatabase {
     async fn get_due_scheduled_workflows(&self) -> Result<Vec<Workflow>> {
         self.get_due_scheduled_workflows_impl().await
     }
@@ -230,8 +241,10 @@ impl DatabaseTrait for SqliteDatabase {
         self.update_workflow_schedule_impl(workflow_id, schedule, schedule_enabled)
             .await
     }
+}
 
-    // Deferred job operations
+#[async_trait]
+impl DeferredJobRepository for SqliteDatabase {
     async fn create_deferred_job(
         &self,
         task_id: Uuid,
@@ -254,7 +267,7 @@ impl DatabaseTrait for SqliteDatabase {
     async fn update_deferred_job_status(
         &self,
         job_id: Uuid,
-        status: &str,
+        status: DeferredJobStatus,
         error: Option<&str>,
     ) -> Result<()> {
         self.update_deferred_job_status(job_id, status, error).await
@@ -274,5 +287,12 @@ impl DatabaseTrait for SqliteDatabase {
 
     async fn cancel_deferred_jobs_for_task(&self, task_id: Uuid) -> Result<()> {
         self.cancel_deferred_jobs_for_task(task_id).await
+    }
+}
+
+#[async_trait]
+impl DatabaseTrait for SqliteDatabase {
+    async fn run_migrations(&self) -> Result<()> {
+        SqliteDatabase::run_migrations(self).await
     }
 }

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 
+use crate::database::NewWorkflowTask;
 use crate::error::{OrkError, OrkResult, WorkflowValidationError};
 use crate::workflow::{ExecutorKind, Workflow};
 
@@ -224,6 +225,130 @@ fn introspect_python_signature(
         func_name,
         stderr.trim()
     ))
+}
+
+/// Build workflow tasks from a compiled workflow
+///
+/// This function converts a `CompiledWorkflow` into a vector of `NewWorkflowTask` rows
+/// that can be inserted into the database. It handles:
+/// - Dependency mapping from indices to task names
+/// - Executor-specific parameter population (process, python, cloudrun, library)
+/// - Relative process command resolution
+/// - Python path propagation
+pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask> {
+    let mut tasks = Vec::with_capacity(compiled.tasks.len());
+    for (idx, task) in compiled.tasks.iter().enumerate() {
+        let depends_on: Vec<String> = task
+            .depends_on
+            .iter()
+            .filter_map(|dep_idx| compiled.tasks.get(*dep_idx).map(|t| t.name.clone()))
+            .collect();
+
+        let executor_type = match task.executor {
+            ExecutorKind::CloudRun => "cloudrun",
+            ExecutorKind::Process => "process",
+            ExecutorKind::Python => "python",
+            ExecutorKind::Library => "library",
+        };
+
+        let mut params = serde_json::Map::new();
+        if !task.input.is_null() {
+            params.insert("task_input".to_string(), task.input.clone());
+        }
+        params.insert(
+            "max_retries".to_string(),
+            serde_json::Value::Number(task.retries.into()),
+        );
+        params.insert(
+            "timeout_seconds".to_string(),
+            serde_json::Value::Number(task.timeout.into()),
+        );
+
+        match task.executor {
+            ExecutorKind::CloudRun => {
+                if let Some(job) = task.job.as_deref() {
+                    params.insert(
+                        "job_name".to_string(),
+                        serde_json::Value::String(job.to_string()),
+                    );
+                }
+            }
+            ExecutorKind::Process => {
+                if let Some(command) = task.command.as_deref() {
+                    params.insert(
+                        "command".to_string(),
+                        serde_json::Value::String(resolve_process_command(command, &compiled.root)),
+                    );
+                } else if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "command".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+            }
+            ExecutorKind::Python => {
+                if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "task_file".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+                if let Some(module) = task.module.as_deref() {
+                    params.insert(
+                        "task_module".to_string(),
+                        serde_json::Value::String(module.to_string()),
+                    );
+                }
+                if let Some(function) = task.function.as_deref() {
+                    params.insert(
+                        "task_function".to_string(),
+                        serde_json::Value::String(function.to_string()),
+                    );
+                }
+                params.insert(
+                    "python_path".to_string(),
+                    serde_json::Value::String(compiled.root.to_string_lossy().to_string()),
+                );
+            }
+            ExecutorKind::Library => {
+                if let Some(file) = task.file.as_ref() {
+                    params.insert(
+                        "library_path".to_string(),
+                        serde_json::Value::String(file.to_string_lossy().to_string()),
+                    );
+                }
+            }
+        }
+
+        tasks.push(NewWorkflowTask {
+            task_index: idx as i32,
+            task_name: task.name.clone(),
+            executor_type: executor_type.to_string(),
+            depends_on,
+            params: serde_json::Value::Object(params),
+            signature: task.signature.clone(),
+        });
+    }
+
+    tasks
+}
+
+/// Resolve relative process commands to absolute paths
+///
+/// If the command contains whitespace, it's assumed to be a shell command and returned as-is.
+/// If the command is an absolute path or doesn't contain '/', it's returned as-is.
+/// Otherwise, it's resolved relative to the workflow root.
+fn resolve_process_command(command: &str, root: &Path) -> String {
+    if command.chars().any(char::is_whitespace) {
+        return command.to_string();
+    }
+
+    let path = Path::new(command);
+    if !path.is_relative() || !command.contains('/') {
+        return command.to_string();
+    }
+
+    root.join(path).to_string_lossy().to_string()
 }
 
 #[cfg(test)]

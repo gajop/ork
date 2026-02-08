@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+#[cfg(feature = "gcp")]
+use tracing::warn;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::config::OrchestratorConfig;
@@ -18,11 +20,13 @@ use crate::executor::StatusUpdate;
 
 use crate::executor_manager::ExecutorManager;
 
-use crate::models::{TaskStatus, Workflow, WorkflowTask, json_inner};
+use crate::models::{Workflow, WorkflowTask, json_inner};
 
 use crate::task_execution::{build_run_tasks, execute_task, retry_backoff_seconds};
 
-use crate::job_tracker::{BigQueryTracker, CloudRunTracker, CustomHttpTracker, DataprocTracker};
+use crate::job_tracker::CustomHttpTracker;
+#[cfg(feature = "gcp")]
+use crate::job_tracker::{BigQueryTracker, CloudRunTracker, DataprocTracker};
 use crate::triggerer::{JobCompletionNotification, Triggerer, TriggererConfig};
 
 mod processing;
@@ -94,24 +98,31 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         // Register trackers opportunistically so one cloud-provider auth failure
         // does not disable deferred job tracking for all providers.
-        match BigQueryTracker::new().await {
-            Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
-            Err(err) => warn!("BigQuery tracker unavailable: {}", err),
-        }
-        match CloudRunTracker::new().await {
-            Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
-            Err(err) => {
-                let msg = format!("Cloud Run tracker unavailable: {}", err);
-                warn!("{}", msg);
+
+        // GCP trackers - only available with the `gcp` feature
+        #[cfg(feature = "gcp")]
+        {
+            match BigQueryTracker::new().await {
+                Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
+                Err(err) => warn!("BigQuery tracker unavailable: {}", err),
+            }
+            match CloudRunTracker::new().await {
+                Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
+                Err(err) => {
+                    let msg = format!("Cloud Run tracker unavailable: {}", err);
+                    warn!("{}", msg);
+                }
+            }
+            match DataprocTracker::new().await {
+                Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
+                Err(err) => {
+                    let msg = format!("Dataproc tracker unavailable: {}", err);
+                    warn!("{}", msg);
+                }
             }
         }
-        match DataprocTracker::new().await {
-            Ok(tracker) => triggerer.register_tracker(Arc::new(tracker)),
-            Err(err) => {
-                let msg = format!("Dataproc tracker unavailable: {}", err);
-                warn!("{}", msg);
-            }
-        }
+
+        // Custom HTTP tracker - always available
         triggerer.register_tracker(Arc::new(CustomHttpTracker::new()));
 
         triggerer.start()

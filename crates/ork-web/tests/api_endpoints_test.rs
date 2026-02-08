@@ -5,7 +5,9 @@ use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use ork_core::database::{Database, NewTask, NewWorkflowTask};
+use ork_core::database::{
+    NewTask, NewWorkflowTask, RunRepository, TaskRepository, WorkflowRepository,
+};
 use ork_state::SqliteDatabase;
 use ork_web::api::{ApiServer, build_router};
 
@@ -165,7 +167,7 @@ async fn test_run_list_and_detail_endpoints() {
     let run_uuid = Uuid::parse_str(&run_id).expect("run id");
 
     create_run_with_tasks(&db, &workflow, 2).await;
-    db.update_run_status(run_uuid, "running", None)
+    db.update_run_status(run_uuid, ork_core::models::RunStatus::Running, None)
         .await
         .expect("run status");
 
@@ -208,14 +210,19 @@ async fn test_run_cancel_pause_resume_endpoints() {
     let (app, db) = setup().await;
     let workflow = create_workflow_with_tasks(&db, "control_workflow").await;
     let run_id = create_run_with_tasks(&db, &workflow, 2).await;
-    db.update_run_status(run_id, "running", None)
+    db.update_run_status(run_id, ork_core::models::RunStatus::Running, None)
         .await
         .expect("run status");
 
     let tasks = db.list_tasks(run_id).await.expect("tasks");
-    db.update_task_status(tasks[0].id, "running", None, None)
-        .await
-        .expect("task status");
+    db.update_task_status(
+        tasks[0].id,
+        ork_core::models::TaskStatus::Running,
+        None,
+        None,
+    )
+    .await
+    .expect("task status");
 
     let (status, _) = request_json(
         &app,
@@ -321,7 +328,7 @@ async fn test_resume_run_with_no_tasks_sets_pending_status() {
         .await
         .expect("workflow");
     let run = db.create_run(workflow.id, "test").await.expect("run");
-    db.update_run_status(run.id, "paused", None)
+    db.update_run_status(run.id, ork_core::models::RunStatus::Paused, None)
         .await
         .expect("pause run");
 
@@ -343,7 +350,7 @@ async fn test_run_detail_includes_task_timestamps_logs_output_and_error() {
     let (app, db) = setup().await;
     let workflow = create_workflow_with_tasks(&db, "detail_fields_workflow").await;
     let run_id = create_run_with_tasks(&db, &workflow, 1).await;
-    db.update_run_status(run_id, "running", None)
+    db.update_run_status(run_id, ork_core::models::RunStatus::Running, None)
         .await
         .expect("set run running");
 
@@ -355,21 +362,36 @@ async fn test_run_detail_includes_task_timestamps_logs_output_and_error() {
         .next()
         .expect("task exists");
 
-    db.update_task_status(task.id, "dispatched", Some("exec-1"), None)
-        .await
-        .expect("set dispatched");
-    db.update_task_status(task.id, "running", Some("exec-1"), None)
-        .await
-        .expect("set running");
+    db.update_task_status(
+        task.id,
+        ork_core::models::TaskStatus::Dispatched,
+        Some("exec-1"),
+        None,
+    )
+    .await
+    .expect("set dispatched");
+    db.update_task_status(
+        task.id,
+        ork_core::models::TaskStatus::Running,
+        Some("exec-1"),
+        None,
+    )
+    .await
+    .expect("set running");
     db.append_task_log(task.id, "line one\n")
         .await
         .expect("append log");
     db.update_task_output(task.id, json!({"value": 42}))
         .await
         .expect("set output");
-    db.update_task_status(task.id, "failed", Some("exec-1"), Some("boom"))
-        .await
-        .expect("set failed");
+    db.update_task_status(
+        task.id,
+        ork_core::models::TaskStatus::Failed,
+        Some("exec-1"),
+        Some("boom"),
+    )
+    .await
+    .expect("set failed");
 
     let (status, body) =
         request_json(&app, Method::GET, &format!("/api/runs/{}", run_id), None).await;

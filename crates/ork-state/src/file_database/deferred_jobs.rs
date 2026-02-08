@@ -31,7 +31,7 @@ impl FileDatabase {
             service_type: service_type.to_string(),
             job_id: job_id.to_string(),
             job_data: sqlx::types::Json(job_data),
-            status: "pending".to_string(),
+            status: DeferredJobStatus::Pending,
             error: None,
             created_at: now,
             started_at: None,
@@ -98,7 +98,7 @@ impl FileDatabase {
     pub async fn update_deferred_job_status(
         &self,
         job_id: Uuid,
-        status: &str,
+        status: DeferredJobStatus,
         error: Option<&str>,
     ) -> Result<()> {
         let path = self.deferred_job_path(job_id);
@@ -109,11 +109,11 @@ impl FileDatabase {
         let content = tokio::fs::read_to_string(&path).await?;
         let mut job: DeferredJob = serde_json::from_str(&content)?;
 
-        job.status = status.to_string();
+        job.status = status;
         job.error = error.map(|s| s.to_string());
 
         // Set started_at if transitioning to polling
-        if status == "polling" && job.started_at.is_none() {
+        if matches!(status, DeferredJobStatus::Polling) && job.started_at.is_none() {
             job.started_at = Some(chrono::Utc::now());
         }
 
@@ -149,7 +149,7 @@ impl FileDatabase {
         let content = tokio::fs::read_to_string(&path).await?;
         let mut job: DeferredJob = serde_json::from_str(&content)?;
 
-        job.status = "completed".to_string();
+        job.status = DeferredJobStatus::Completed;
         job.finished_at = Some(chrono::Utc::now());
 
         // Set started_at if not already set
@@ -172,7 +172,7 @@ impl FileDatabase {
         let content = tokio::fs::read_to_string(&path).await?;
         let mut job: DeferredJob = serde_json::from_str(&content)?;
 
-        job.status = "failed".to_string();
+        job.status = DeferredJobStatus::Failed;
         job.error = Some(error.to_string());
         job.finished_at = Some(chrono::Utc::now());
 
@@ -204,7 +204,7 @@ impl FileDatabase {
                         if status == DeferredJobStatus::Pending
                             || status == DeferredJobStatus::Polling
                         {
-                            job.status = "cancelled".to_string();
+                            job.status = DeferredJobStatus::Cancelled;
                             job.finished_at = Some(now);
 
                             let json = serde_json::to_string_pretty(&job)?;

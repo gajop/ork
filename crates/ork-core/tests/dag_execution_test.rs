@@ -4,7 +4,7 @@ use std::time::Instant;
 use tokio::time::{Duration, timeout};
 
 use ork_core::config::OrchestratorConfig;
-use ork_core::database::Database;
+use ork_core::database::{RunRepository, TaskRepository, WorkflowRepository};
 use ork_core::scheduler::Scheduler;
 use ork_executors::manager::ExecutorManager;
 use ork_state::SqliteDatabase;
@@ -65,7 +65,8 @@ async fn test_dag_execution_order_and_performance() -> Result<()> {
     ];
 
     db.batch_create_dag_tasks(run.id, &tasks).await?;
-    db.update_run_status(run.id, "running", None).await?;
+    db.update_run_status(run.id, ork_core::models::RunStatus::Running, None)
+        .await?;
 
     // Start scheduler with very fast polling for tests
     let config = OrchestratorConfig {

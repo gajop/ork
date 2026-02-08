@@ -11,7 +11,7 @@
 
 use crate::database::Database;
 use crate::job_tracker::{JobStatus, JobTracker};
-use crate::models::DeferredJob;
+use crate::models::{DeferredJob, DeferredJobStatus};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -196,8 +196,8 @@ impl<D: Database> Triggerer<D> {
         match poll_result {
             Ok(Ok(JobStatus::Running)) => {
                 // Job still running, update status to polling if needed
-                if job.status() != crate::models::DeferredJobStatus::Polling {
-                    db.update_deferred_job_status(job.id, "polling", None)
+                if job.status() != DeferredJobStatus::Polling {
+                    db.update_deferred_job_status(job.id, DeferredJobStatus::Polling, None)
                         .await?;
                 }
                 tracing::trace!("Job {} still running", job.job_id);

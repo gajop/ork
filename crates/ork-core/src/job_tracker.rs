@@ -1,11 +1,25 @@
 //! Job tracking for deferrables
 //!
 //! This module defines the JobTracker trait and implementations for polling
-//! external APIs to track long-running jobs (BigQuery, Cloud Run, Dataproc, etc.)
+//! external APIs to track long-running jobs.
+//!
+//! ## Available Trackers
+//!
+//! - `CustomHttpTracker` - Always available, polls custom HTTP endpoints
+//! - `BigQueryTracker` - Available with `gcp` feature, polls BigQuery jobs
+//! - `CloudRunTracker` - Available with `gcp` feature, polls Cloud Run executions
+//! - `DataprocTracker` - Available with `gcp` feature, polls Dataproc jobs
 
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
+
+// GCP trackers - only available with the `gcp` feature
+#[cfg(feature = "gcp")]
+pub mod gcp;
+
+#[cfg(feature = "gcp")]
+pub use gcp::{BigQueryTracker, CloudRunTracker, DataprocTracker};
 
 /// Status of an external job being tracked
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,322 +50,6 @@ pub trait JobTracker: Send + Sync {
     /// # Returns
     /// Current job status
     async fn poll_job(&self, job_id: &str, job_data: &Value) -> anyhow::Result<JobStatus>;
-}
-
-/// BigQuery job tracker
-///
-/// Polls BigQuery API to check query job status.
-pub struct BigQueryTracker {
-    client: Option<google_cloud_bigquery::client::Client>,
-}
-
-impl BigQueryTracker {
-    pub async fn new() -> anyhow::Result<Self> {
-        let (config, _project) = google_cloud_bigquery::client::ClientConfig::new_with_auth()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create BigQuery client config: {}", e))?;
-        let client = google_cloud_bigquery::client::Client::new(config)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create BigQuery client: {}", e))?;
-        Ok(Self {
-            client: Some(client),
-        })
-    }
-
-    #[cfg(test)]
-    fn without_client() -> Self {
-        Self { client: None }
-    }
-}
-
-fn map_bigquery_status(status: &google_cloud_bigquery::http::job::JobStatus) -> JobStatus {
-    use google_cloud_bigquery::http::job::JobState;
-    match status.state {
-        JobState::Done => {
-            if let Some(error_result) = status.error_result.as_ref() {
-                let error_msg = error_result
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "Unknown error".to_string());
-                JobStatus::Failed(format!("BigQuery job failed: {}", error_msg))
-            } else {
-                JobStatus::Completed
-            }
-        }
-        JobState::Pending | JobState::Running => JobStatus::Running,
-    }
-}
-
-#[async_trait]
-impl JobTracker for BigQueryTracker {
-    fn service_type(&self) -> &str {
-        "bigquery"
-    }
-
-    async fn poll_job(&self, _job_id: &str, job_data: &Value) -> anyhow::Result<JobStatus> {
-        // Extract BigQuery job info
-        let project = job_data
-            .get("project")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing project in job_data"))?;
-        let location = job_data
-            .get("location")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing location in job_data"))?;
-        let bq_job_id = job_data
-            .get("job_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing job_id in job_data"))?;
-
-        tracing::debug!(
-            "Polling BigQuery job: project={}, location={}, job_id={}",
-            project,
-            location,
-            bq_job_id
-        );
-
-        // Call BigQuery API to get job status
-        let get_request = google_cloud_bigquery::http::job::get::GetJobRequest {
-            location: Some(location.to_string()),
-        };
-
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("BigQuery client not initialized"))?;
-
-        let job = client
-            .job()
-            .get(project, bq_job_id, &get_request)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get BigQuery job: {}", e))?;
-
-        Ok(map_bigquery_status(&job.status))
-    }
-}
-
-/// Cloud Run job tracker
-///
-/// Polls Cloud Run API to check job execution status.
-pub struct CloudRunTracker {
-    client: Option<google_cloud_run_v2::client::Executions>,
-}
-
-impl CloudRunTracker {
-    pub async fn new() -> anyhow::Result<Self> {
-        let client = google_cloud_run_v2::client::Executions::builder()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create Cloud Run client: {}", e))?;
-        Ok(Self {
-            client: Some(client),
-        })
-    }
-
-    #[cfg(test)]
-    fn without_client() -> Self {
-        Self { client: None }
-    }
-}
-
-#[async_trait]
-impl JobTracker for CloudRunTracker {
-    fn service_type(&self) -> &str {
-        "cloudrun"
-    }
-
-    async fn poll_job(&self, _job_id: &str, job_data: &Value) -> anyhow::Result<JobStatus> {
-        let project = job_data
-            .get("project")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing project in job_data"))?;
-        let region = job_data
-            .get("region")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing region in job_data"))?;
-        let job_name = job_data
-            .get("job_name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing job_name in job_data"))?;
-        let execution_id = job_data
-            .get("execution_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing execution_id in job_data"))?;
-
-        tracing::debug!(
-            "Polling Cloud Run job: project={}, region={}, job={}, execution={}",
-            project,
-            region,
-            job_name,
-            execution_id
-        );
-
-        // Build execution resource name
-        let execution_name = format!(
-            "projects/{}/locations/{}/jobs/{}/executions/{}",
-            project, region, job_name, execution_id
-        );
-
-        // Call Cloud Run API to get execution status
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Cloud Run client not initialized"))?;
-
-        let execution = client
-            .get_execution()
-            .set_name(execution_name)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get Cloud Run execution: {}", e))?;
-
-        // Check execution conditions for completion
-        use google_cloud_run_v2::model::condition::State;
-        for condition in &execution.conditions {
-            // Look for the "Ready" or "Completed" condition
-            if condition.r#type == "Ready" || condition.r#type == "Completed" {
-                match condition.state {
-                    State::ConditionSucceeded => {
-                        return Ok(JobStatus::Completed);
-                    }
-                    State::ConditionFailed => {
-                        let error_msg = if condition.message.is_empty() {
-                            "Execution failed".to_string()
-                        } else {
-                            condition.message.clone()
-                        };
-                        return Ok(JobStatus::Failed(format!(
-                            "Cloud Run execution failed: {}",
-                            error_msg
-                        )));
-                    }
-                    State::ConditionPending | State::ConditionReconciling => {
-                        // Still in progress
-                    }
-                    _ => {
-                        // Unknown or unspecified state, continue checking
-                    }
-                }
-            }
-        }
-
-        // If no definitive completion condition found, job is still running
-        Ok(JobStatus::Running)
-    }
-}
-
-/// Dataproc job tracker
-///
-/// Polls Dataproc API to check Spark/Hadoop job status.
-pub struct DataprocTracker {
-    client: Option<google_cloud_dataproc_v1::client::JobController>,
-}
-
-impl DataprocTracker {
-    pub async fn new() -> anyhow::Result<Self> {
-        let client = google_cloud_dataproc_v1::client::JobController::builder()
-            .build()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create Dataproc client: {}", e))?;
-        Ok(Self {
-            client: Some(client),
-        })
-    }
-
-    #[cfg(test)]
-    fn without_client() -> Self {
-        Self { client: None }
-    }
-}
-
-#[async_trait]
-impl JobTracker for DataprocTracker {
-    fn service_type(&self) -> &str {
-        "dataproc"
-    }
-
-    async fn poll_job(&self, _job_id: &str, job_data: &Value) -> anyhow::Result<JobStatus> {
-        let project = job_data
-            .get("project")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing project in job_data"))?;
-        let region = job_data
-            .get("region")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing region in job_data"))?;
-        let _cluster_name = job_data
-            .get("cluster_name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing cluster_name in job_data"))?;
-        let dp_job_id = job_data
-            .get("job_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing job_id in job_data"))?;
-
-        tracing::debug!(
-            "Polling Dataproc job: project={}, region={}, job_id={}",
-            project,
-            region,
-            dp_job_id
-        );
-
-        // Call Dataproc API to get job status
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Dataproc client not initialized"))?;
-
-        let job = client
-            .get_job()
-            .set_project_id(project)
-            .set_region(region)
-            .set_job_id(dp_job_id)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to get Dataproc job: {}", e))?;
-
-        // Check job status state
-        if let Some(status) = job.status {
-            use google_cloud_dataproc_v1::model::job_status::State;
-            match status.state {
-                State::Done => {
-                    // Job completed - check for errors in details
-                    if !status.details.is_empty() && status.details.to_lowercase().contains("error")
-                    {
-                        return Ok(JobStatus::Failed(format!(
-                            "Dataproc job completed with errors: {}",
-                            status.details
-                        )));
-                    }
-                    Ok(JobStatus::Completed)
-                }
-                State::Error => {
-                    let error_msg = if status.details.is_empty() {
-                        "Job error".to_string()
-                    } else {
-                        status.details
-                    };
-                    Ok(JobStatus::Failed(format!(
-                        "Dataproc job error: {}",
-                        error_msg
-                    )))
-                }
-                State::Cancelled => Ok(JobStatus::Failed("Job was cancelled".to_string())),
-                State::Pending
-                | State::SetupDone
-                | State::Running
-                | State::CancelPending
-                | State::CancelStarted => Ok(JobStatus::Running),
-                _ => {
-                    // Unknown state, assume running
-                    Ok(JobStatus::Running)
-                }
-            }
-        } else {
-            // No status yet, assume running
-            Ok(JobStatus::Running)
-        }
-    }
 }
 
 /// Custom HTTP job tracker
@@ -402,35 +100,20 @@ impl JobTracker for CustomHttpTracker {
             })
             .unwrap_or_default();
 
-        let success_status_codes = job_data
-            .get("success_status_codes")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u16))
-                    .collect::<Vec<u16>>()
-            })
-            .unwrap_or_else(|| vec![200]);
+        tracing::debug!("Polling custom HTTP endpoint: {} {}", method, url);
 
-        let completion_field = job_data
-            .get("completion_field")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing completion_field in job_data"))?;
-
-        let completion_value = job_data
-            .get("completion_value")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing completion_value in job_data"))?;
-
-        let failure_value = job_data.get("failure_value").and_then(|v| v.as_str());
-
-        // Build HTTP request
-        let mut request = match method.to_uppercase().as_str() {
+        // Build request
+        let mut request = match method {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
             "PUT" => self.client.put(url),
             "DELETE" => self.client.delete(url),
-            _ => return Err(anyhow::anyhow!("Unsupported HTTP method: {}", method)),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unsupported HTTP method: {}. Use GET, POST, PUT, or DELETE.",
+                    method
+                ));
+            }
         };
 
         // Add headers
@@ -439,37 +122,60 @@ impl JobTracker for CustomHttpTracker {
         }
 
         // Send request
-        let response = request.send().await?;
-        let status_code = response.status().as_u16();
+        let response = request
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
 
-        // Check if status code is successful
-        if !success_status_codes.contains(&status_code) {
+        // Get response body as JSON
+        let status_code = response.status();
+        let response_body: Value = response
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse response as JSON: {}", e))?;
+
+        // Check if request failed
+        if !status_code.is_success() {
             return Ok(JobStatus::Failed(format!(
-                "HTTP request failed with status {}",
-                status_code
+                "HTTP request failed with status {}: {}",
+                status_code,
+                response_body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error")
             )));
         }
 
-        // Parse response JSON
-        let body: Value = response.json().await?;
+        // Extract status field from response
+        let status_field = job_data
+            .get("status_field")
+            .and_then(|v| v.as_str())
+            .unwrap_or("status");
 
-        // Check completion field
-        let field_value = body
-            .get(completion_field)
+        let field_value = response_body
+            .get(status_field)
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Response missing completion field '{}' or not a string",
-                    completion_field
+                    "Response missing expected field '{}'. Response: {}",
+                    status_field,
+                    response_body
                 )
             })?;
 
-        // Check if job is completed
-        if field_value == completion_value {
+        // Check if job completed successfully
+        let success_value = job_data
+            .get("success_value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("success");
+
+        if field_value == success_value {
             return Ok(JobStatus::Completed);
         }
 
         // Check if job failed
+        let failure_value = job_data.get("failure_value").and_then(|v| v.as_str());
+
         if let Some(fail_val) = failure_value
             && field_value == fail_val
         {

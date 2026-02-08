@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ork_core::models::DeferredJob;
+use ork_core::models::{DeferredJob, DeferredJobStatus};
 use sqlx::types::Json;
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ impl PostgresDatabase {
         let job = sqlx::query_as::<_, DeferredJob>(
             r#"
             INSERT INTO deferred_jobs (task_id, service_type, job_id, job_data, status)
-            VALUES ($1, $2, $3, $4, 'pending')
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
             "#,
         )
@@ -24,6 +24,7 @@ impl PostgresDatabase {
         .bind(service_type)
         .bind(job_id)
         .bind(Json(job_data))
+        .bind(DeferredJobStatus::Pending.as_str())
         .fetch_one(&self.pool)
         .await?;
 
@@ -34,10 +35,12 @@ impl PostgresDatabase {
         let jobs = sqlx::query_as::<_, DeferredJob>(
             r#"
             SELECT * FROM deferred_jobs
-            WHERE status IN ('pending', 'polling')
+            WHERE status IN ($1, $2)
             ORDER BY created_at ASC
             "#,
         )
+        .bind(DeferredJobStatus::Pending.as_str())
+        .bind(DeferredJobStatus::Polling.as_str())
         .fetch_all(&self.pool)
         .await?;
 
@@ -62,20 +65,22 @@ impl PostgresDatabase {
     pub async fn update_deferred_job_status(
         &self,
         job_id: Uuid,
-        status: &str,
+        status: DeferredJobStatus,
         error: Option<&str>,
     ) -> Result<()> {
+        let status_str = status.as_str();
         sqlx::query(
             r#"
             UPDATE deferred_jobs
             SET status = $1,
                 error = $2,
-                started_at = CASE WHEN started_at IS NULL AND $1 = 'polling' THEN NOW() ELSE started_at END
-            WHERE id = $3
+                started_at = CASE WHEN started_at IS NULL AND $1 = $3 THEN NOW() ELSE started_at END
+            WHERE id = $4
             "#,
         )
-        .bind(status)
+        .bind(status_str)
         .bind(error)
+        .bind(DeferredJobStatus::Polling.as_str())
         .bind(job_id)
         .execute(&self.pool)
         .await?;
@@ -102,12 +107,13 @@ impl PostgresDatabase {
         sqlx::query(
             r#"
             UPDATE deferred_jobs
-            SET status = 'completed',
+            SET status = $1,
                 finished_at = NOW(),
                 started_at = CASE WHEN started_at IS NULL THEN NOW() ELSE started_at END
-            WHERE id = $1
+            WHERE id = $2
             "#,
         )
+        .bind(DeferredJobStatus::Completed.as_str())
         .bind(job_id)
         .execute(&self.pool)
         .await?;
@@ -119,13 +125,14 @@ impl PostgresDatabase {
         sqlx::query(
             r#"
             UPDATE deferred_jobs
-            SET status = 'failed',
-                error = $1,
+            SET status = $1,
+                error = $2,
                 finished_at = NOW(),
                 started_at = CASE WHEN started_at IS NULL THEN NOW() ELSE started_at END
-            WHERE id = $2
+            WHERE id = $3
             "#,
         )
+        .bind(DeferredJobStatus::Failed.as_str())
         .bind(error)
         .bind(job_id)
         .execute(&self.pool)
@@ -138,13 +145,16 @@ impl PostgresDatabase {
         sqlx::query(
             r#"
             UPDATE deferred_jobs
-            SET status = 'cancelled',
+            SET status = $1,
                 finished_at = NOW()
-            WHERE task_id = $1
-              AND status IN ('pending', 'polling')
+            WHERE task_id = $2
+              AND status IN ($3, $4)
             "#,
         )
+        .bind(DeferredJobStatus::Cancelled.as_str())
         .bind(task_id)
+        .bind(DeferredJobStatus::Pending.as_str())
+        .bind(DeferredJobStatus::Polling.as_str())
         .execute(&self.pool)
         .await?;
 

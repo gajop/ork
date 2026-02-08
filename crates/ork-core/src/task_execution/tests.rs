@@ -15,7 +15,7 @@ fn sample_task_with_workflow(params: Option<serde_json::Value>) -> TaskWithWorkf
         task_name: "task".to_string(),
         executor_type: "process".to_string(),
         depends_on: Vec::new(),
-        task_status: "pending".to_string(),
+        task_status: TaskStatus::Pending,
         attempts: 0,
         max_retries: 0,
         timeout_seconds: None,
@@ -137,7 +137,7 @@ fn test_retry_backoff_seconds_caps() {
 #[tokio::test]
 async fn test_execute_task_rejects_non_pending_status() {
     let mut task = sample_task_with_workflow(None);
-    task.task_status = "running".to_string();
+    task.task_status = TaskStatus::Running;
 
     let workflow_map = Arc::new(HashMap::from([(
         task.workflow_id,

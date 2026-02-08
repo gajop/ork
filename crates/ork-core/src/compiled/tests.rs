@@ -1,5 +1,6 @@
 use super::*;
-use crate::workflow::Workflow;
+use crate::workflow::{ExecutorKind, Workflow};
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tempfile::TempDir;
 
@@ -217,4 +218,225 @@ fn test_topo_sort_returns_cycle_error_when_graph_is_cyclic() {
             crate::error::WorkflowValidationError::Cycle { .. }
         )
     ));
+}
+
+// Tests for build_workflow_tasks
+
+fn compiled_fixture() -> CompiledWorkflow {
+    CompiledWorkflow {
+        name: "fixture".to_string(),
+        tasks: vec![
+            CompiledTask {
+                name: "process_task".to_string(),
+                executor: ExecutorKind::Process,
+                file: None,
+                command: Some("echo hello".to_string()),
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![],
+                timeout: 30,
+                retries: 2,
+                signature: None,
+            },
+            CompiledTask {
+                name: "python_task".to_string(),
+                executor: ExecutorKind::Python,
+                file: Some(PathBuf::from("tasks/example.py")),
+                command: None,
+                job: None,
+                module: Some("tasks.example".to_string()),
+                function: Some("run".to_string()),
+                input: serde_json::json!({"k": "v"}),
+                depends_on: vec![0],
+                timeout: 45,
+                retries: 1,
+                signature: Some(serde_json::json!({"args": []})),
+            },
+            CompiledTask {
+                name: "cloud_task".to_string(),
+                executor: ExecutorKind::CloudRun,
+                file: None,
+                command: None,
+                job: Some("cloud-job".to_string()),
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![0, 1],
+                timeout: 60,
+                retries: 0,
+                signature: None,
+            },
+            CompiledTask {
+                name: "library_task".to_string(),
+                executor: ExecutorKind::Library,
+                file: Some(PathBuf::from("target/libtask.so")),
+                command: None,
+                job: None,
+                module: None,
+                function: None,
+                input: serde_json::Value::Null,
+                depends_on: vec![2],
+                timeout: 15,
+                retries: 0,
+                signature: None,
+            },
+        ],
+        name_index: Default::default(),
+        topo: vec![0, 1, 2, 3],
+        root: PathBuf::from("/tmp/ork-workflow"),
+    }
+}
+
+#[test]
+fn test_build_workflow_tasks_maps_dependencies_and_executor_types() {
+    let compiled = compiled_fixture();
+    let tasks = build_workflow_tasks(&compiled);
+
+    assert_eq!(tasks.len(), 4);
+    assert_eq!(tasks[0].executor_type, "process");
+    assert_eq!(tasks[1].executor_type, "python");
+    assert_eq!(tasks[2].executor_type, "cloudrun");
+    assert_eq!(tasks[3].executor_type, "library");
+
+    assert_eq!(tasks[0].depends_on, Vec::<String>::new());
+    assert_eq!(tasks[1].depends_on, vec!["process_task".to_string()]);
+    assert_eq!(
+        tasks[2].depends_on,
+        vec!["process_task".to_string(), "python_task".to_string()]
+    );
+    assert_eq!(tasks[3].depends_on, vec!["cloud_task".to_string()]);
+}
+
+#[test]
+fn test_build_workflow_tasks_populates_executor_specific_params() {
+    let compiled = compiled_fixture();
+    let tasks = build_workflow_tasks(&compiled);
+
+    let process_params = &tasks[0].params;
+    assert_eq!(
+        process_params.get("command"),
+        Some(&serde_json::json!("echo hello"))
+    );
+    assert_eq!(
+        process_params.get("max_retries"),
+        Some(&serde_json::json!(2))
+    );
+    assert_eq!(
+        process_params.get("timeout_seconds"),
+        Some(&serde_json::json!(30))
+    );
+
+    let python_params = &tasks[1].params;
+    assert_eq!(
+        python_params.get("task_file"),
+        Some(&serde_json::json!("tasks/example.py"))
+    );
+    assert_eq!(
+        python_params.get("task_module"),
+        Some(&serde_json::json!("tasks.example"))
+    );
+    assert_eq!(
+        python_params.get("task_function"),
+        Some(&serde_json::json!("run"))
+    );
+    assert_eq!(
+        python_params.get("python_path"),
+        Some(&serde_json::json!("/tmp/ork-workflow"))
+    );
+    assert_eq!(
+        python_params.get("task_input"),
+        Some(&serde_json::json!({"k": "v"}))
+    );
+
+    let cloud_params = &tasks[2].params;
+    assert_eq!(
+        cloud_params.get("job_name"),
+        Some(&serde_json::json!("cloud-job"))
+    );
+
+    let library_params = &tasks[3].params;
+    assert_eq!(
+        library_params.get("library_path"),
+        Some(&serde_json::json!("target/libtask.so"))
+    );
+}
+
+#[test]
+fn test_build_workflow_tasks_resolves_relative_process_command_from_workflow_root() {
+    let mut compiled = compiled_fixture();
+    compiled.tasks[0].command = Some("bin/process-task".to_string());
+    compiled.root = PathBuf::from("/tmp/ork-workflow");
+
+    let tasks = build_workflow_tasks(&compiled);
+
+    assert_eq!(
+        tasks[0].params.get("command"),
+        Some(&serde_json::json!("/tmp/ork-workflow/bin/process-task"))
+    );
+}
+
+#[test]
+fn test_build_workflow_tasks_maps_process_file_into_command() {
+    let compiled = CompiledWorkflow {
+        name: "wf".to_string(),
+        tasks: vec![CompiledTask {
+            name: "from-file".to_string(),
+            executor: ExecutorKind::Process,
+            file: Some(PathBuf::from("/tmp/task.py")),
+            command: None,
+            job: None,
+            module: None,
+            function: None,
+            input: serde_json::Value::Null,
+            depends_on: vec![],
+            timeout: 5,
+            retries: 0,
+            signature: None,
+        }],
+        name_index: indexmap::IndexMap::new(),
+        topo: vec![0],
+        root: PathBuf::from("/tmp"),
+    };
+
+    let tasks = build_workflow_tasks(&compiled);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].params["command"],
+        serde_json::json!("/tmp/task.py")
+    );
+}
+
+#[test]
+fn test_resolve_process_command_keeps_commands_with_whitespace() {
+    let root = Path::new("/tmp");
+    assert_eq!(
+        resolve_process_command("echo hello world", root),
+        "echo hello world"
+    );
+}
+
+#[test]
+fn test_resolve_process_command_keeps_absolute_paths() {
+    let root = Path::new("/tmp");
+    assert_eq!(
+        resolve_process_command("/usr/bin/python", root),
+        "/usr/bin/python"
+    );
+}
+
+#[test]
+fn test_resolve_process_command_keeps_commands_without_slash() {
+    let root = Path::new("/tmp");
+    assert_eq!(resolve_process_command("python", root), "python");
+}
+
+#[test]
+fn test_resolve_process_command_resolves_relative_path() {
+    let root = Path::new("/tmp/workflow");
+    assert_eq!(
+        resolve_process_command("bin/task", root),
+        "/tmp/workflow/bin/task"
+    );
 }

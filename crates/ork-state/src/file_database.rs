@@ -18,16 +18,18 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use ork_core::database::{Database, NewTask, NewWorkflowTask};
-use ork_core::models::{DeferredJob, Run, Task, TaskWithWorkflow, Workflow, WorkflowTask};
+use ork_core::database::{
+    Database, DeferredJobRepository, NewTask, NewWorkflowTask, RunRepository, ScheduleRepository,
+    TaskRepository, WorkflowRepository,
+};
+use ork_core::models::{
+    DeferredJob, DeferredJobStatus, Run, RunStatus, Task, TaskStatus, TaskWithWorkflow, Workflow,
+    WorkflowTask,
+};
 
+// Implement individual repository traits
 #[async_trait]
-impl Database for FileDatabase {
-    async fn run_migrations(&self) -> Result<()> {
-        self.ensure_dirs().await?;
-        Ok(())
-    }
-
+impl WorkflowRepository for FileDatabase {
     async fn create_workflow(
         &self,
         name: &str,
@@ -56,6 +58,10 @@ impl Database for FileDatabase {
         self.get_workflow_impl(name).await
     }
 
+    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
+        self.get_workflow_by_id_impl(workflow_id).await
+    }
+
     async fn list_workflows(&self) -> Result<Vec<Workflow>> {
         self.list_workflows_impl().await
     }
@@ -64,6 +70,25 @@ impl Database for FileDatabase {
         self.delete_workflow_impl(name).await
     }
 
+    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
+        self.get_workflows_by_ids_impl(workflow_ids).await
+    }
+
+    async fn create_workflow_tasks(
+        &self,
+        workflow_id: Uuid,
+        tasks: &[NewWorkflowTask],
+    ) -> Result<()> {
+        self.create_workflow_tasks_impl(workflow_id, tasks).await
+    }
+
+    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
+        self.list_workflow_tasks_impl(workflow_id).await
+    }
+}
+
+#[async_trait]
+impl RunRepository for FileDatabase {
     async fn create_run(&self, workflow_id: Uuid, triggered_by: &str) -> Result<Run> {
         self.create_run_impl(workflow_id, triggered_by).await
     }
@@ -71,7 +96,7 @@ impl Database for FileDatabase {
     async fn update_run_status(
         &self,
         run_id: Uuid,
-        status: &str,
+        status: RunStatus,
         error: Option<&str>,
     ) -> Result<()> {
         self.update_run_status_impl(run_id, status, error).await
@@ -93,6 +118,13 @@ impl Database for FileDatabase {
         self.cancel_run_impl(run_id).await
     }
 
+    async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
+        self.get_run_task_stats_impl(run_id).await
+    }
+}
+
+#[async_trait]
+impl TaskRepository for FileDatabase {
     async fn batch_create_tasks(
         &self,
         run_id: Uuid,
@@ -111,7 +143,7 @@ impl Database for FileDatabase {
     async fn update_task_status(
         &self,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<()> {
@@ -121,7 +153,7 @@ impl Database for FileDatabase {
 
     async fn batch_update_task_status(
         &self,
-        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+        updates: &[(Uuid, TaskStatus, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         self.batch_update_task_status_impl(updates).await
     }
@@ -162,14 +194,6 @@ impl Database for FileDatabase {
         );
     }
 
-    async fn get_workflows_by_ids(&self, workflow_ids: &[Uuid]) -> Result<Vec<Workflow>> {
-        self.get_workflows_by_ids_impl(workflow_ids).await
-    }
-
-    async fn get_workflow_by_id(&self, workflow_id: Uuid) -> Result<Workflow> {
-        self.get_workflow_by_id_impl(workflow_id).await
-    }
-
     async fn get_task_outputs(
         &self,
         run_id: Uuid,
@@ -199,23 +223,10 @@ impl Database for FileDatabase {
         self.mark_tasks_failed_by_dependency_impl(run_id, failed_task_names, error)
             .await
     }
+}
 
-    async fn get_run_task_stats(&self, run_id: Uuid) -> Result<(i64, i64, i64)> {
-        self.get_run_task_stats_impl(run_id).await
-    }
-
-    async fn create_workflow_tasks(
-        &self,
-        workflow_id: Uuid,
-        tasks: &[NewWorkflowTask],
-    ) -> Result<()> {
-        self.create_workflow_tasks_impl(workflow_id, tasks).await
-    }
-
-    async fn list_workflow_tasks(&self, workflow_id: Uuid) -> Result<Vec<WorkflowTask>> {
-        self.list_workflow_tasks_impl(workflow_id).await
-    }
-
+#[async_trait]
+impl ScheduleRepository for FileDatabase {
     async fn get_due_scheduled_workflows(&self) -> Result<Vec<Workflow>> {
         self.get_due_scheduled_workflows_impl().await
     }
@@ -239,8 +250,10 @@ impl Database for FileDatabase {
         self.update_workflow_schedule_impl(workflow_id, schedule, schedule_enabled)
             .await
     }
+}
 
-    // Deferred job operations
+#[async_trait]
+impl DeferredJobRepository for FileDatabase {
     async fn create_deferred_job(
         &self,
         task_id: Uuid,
@@ -263,7 +276,7 @@ impl Database for FileDatabase {
     async fn update_deferred_job_status(
         &self,
         job_id: Uuid,
-        status: &str,
+        status: DeferredJobStatus,
         error: Option<&str>,
     ) -> Result<()> {
         self.update_deferred_job_status(job_id, status, error).await
@@ -283,5 +296,13 @@ impl Database for FileDatabase {
 
     async fn cancel_deferred_jobs_for_task(&self, task_id: Uuid) -> Result<()> {
         self.cancel_deferred_jobs_for_task(task_id).await
+    }
+}
+
+#[async_trait]
+impl Database for FileDatabase {
+    async fn run_migrations(&self) -> Result<()> {
+        self.ensure_dirs().await?;
+        Ok(())
     }
 }

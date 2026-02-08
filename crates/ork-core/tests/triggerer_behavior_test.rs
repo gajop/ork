@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use ork_core::database::{Database, NewTask};
+use ork_core::database::{NewTask, RunRepository, TaskRepository, WorkflowRepository};
 use ork_core::job_tracker::{JobStatus, JobTracker};
 use ork_core::triggerer::{Triggerer, TriggererConfig};
 use ork_state::SqliteDatabase;
@@ -93,7 +93,8 @@ async fn create_deferred_job(
         )
         .await?;
     let run = db.create_run(workflow.id, "test").await?;
-    db.update_run_status(run.id, "running", None).await?;
+    db.update_run_status(run.id, ork_core::models::RunStatus::Running, None)
+        .await?;
     db.batch_create_dag_tasks(
         run.id,
         &[NewTask {

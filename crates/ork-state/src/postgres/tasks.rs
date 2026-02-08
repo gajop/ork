@@ -2,7 +2,7 @@ use super::core::PostgresDatabase;
 use anyhow::Result;
 use chrono::Utc;
 use ork_core::database::NewTask;
-use ork_core::models::{Task, TaskWithWorkflow};
+use ork_core::models::{RunStatus, Task, TaskStatus, TaskWithWorkflow};
 use sqlx::Row;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -18,8 +18,16 @@ impl PostgresDatabase {
         let mut tx = self.pool.begin().await?;
         for i in 0..task_count {
             let params = serde_json::json!({"task_index": i, "run_id": run_id, "workflow_name": workflow_name});
-            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params) VALUES ($1, $2, $3, $4, $5, 'pending', $6)")
-                .bind(run_id).bind(i).bind(format!("task_{}", i)).bind(executor_type).bind(Vec::<String>::new()).bind(params).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+                .bind(run_id)
+                .bind(i)
+                .bind(format!("task_{}", i))
+                .bind(executor_type)
+                .bind(Vec::<String>::new())
+                .bind(TaskStatus::Pending.as_str())
+                .bind(params)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -31,8 +39,18 @@ impl PostgresDatabase {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         for task in tasks {
-            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, attempts, max_retries, timeout_seconds, params) VALUES ($1, $2, $3, $4, $5, 'pending', 0, $6, $7, $8)")
-                .bind(run_id).bind(task.task_index).bind(&task.task_name).bind(&task.executor_type).bind(&task.depends_on).bind(task.max_retries).bind(task.timeout_seconds).bind(&task.params).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, attempts, max_retries, timeout_seconds, params) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9)")
+                .bind(run_id)
+                .bind(task.task_index)
+                .bind(&task.task_name)
+                .bind(&task.executor_type)
+                .bind(&task.depends_on)
+                .bind(TaskStatus::Pending.as_str())
+                .bind(task.max_retries)
+                .bind(task.timeout_seconds)
+                .bind(&task.params)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -40,39 +58,67 @@ impl PostgresDatabase {
     pub(super) async fn update_task_status_impl(
         &self,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<()> {
+        let status_str = status.as_str();
         sqlx::query(
             r#"UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = $3,
-            attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
-            retry_at = CASE WHEN $1 IN ('pending', 'paused') THEN retry_at ELSE NULL END,
-            dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
-            started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
-            finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
+            attempts = CASE WHEN $1 = $5 THEN attempts + 1 ELSE attempts END,
+            retry_at = CASE WHEN $1 IN ($6, $7) THEN retry_at ELSE NULL END,
+            dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = $8 THEN NOW() ELSE NULL END),
+            started_at = COALESCE(started_at, CASE WHEN $1 = $9 THEN NOW() ELSE NULL END),
+            finished_at = CASE WHEN $1 IN ($10, $5, $11) THEN NOW() ELSE NULL END
             WHERE id = $4"#
-        ).bind(status).bind(execution_name).bind(error).bind(task_id).execute(&self.pool).await?;
+        )
+        .bind(status_str)
+        .bind(execution_name)
+        .bind(error)
+        .bind(task_id)
+        .bind(TaskStatus::Failed.as_str())
+        .bind(TaskStatus::Pending.as_str())
+        .bind(TaskStatus::Paused.as_str())
+        .bind(TaskStatus::Dispatched.as_str())
+        .bind(TaskStatus::Running.as_str())
+        .bind(TaskStatus::Success.as_str())
+        .bind(TaskStatus::Cancelled.as_str())
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
     pub(super) async fn batch_update_task_status_impl(
         &self,
-        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+        updates: &[(Uuid, TaskStatus, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
         }
         let mut tx = self.pool.begin().await?;
         for (task_id, status, execution_name, error) in updates {
+            let status_str = status.as_str();
             sqlx::query(
                 r#"UPDATE tasks SET status = $1, execution_name = COALESCE($2, execution_name), error = $3,
-                attempts = CASE WHEN $1 = 'failed' THEN attempts + 1 ELSE attempts END,
-                retry_at = CASE WHEN $1 IN ('pending', 'paused') THEN retry_at ELSE NULL END,
-                dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = 'dispatched' THEN NOW() ELSE NULL END),
-                started_at = COALESCE(started_at, CASE WHEN $1 = 'running' THEN NOW() ELSE NULL END),
-                finished_at = CASE WHEN $1 IN ('success', 'failed', 'cancelled') THEN NOW() ELSE NULL END
-                WHERE id = $4 AND (status NOT IN ('success', 'failed') OR $1 IN ('success', 'failed'))"#
-            ).bind(status).bind(execution_name).bind(error).bind(task_id).execute(&mut *tx).await?;
+                attempts = CASE WHEN $1 = $5 THEN attempts + 1 ELSE attempts END,
+                retry_at = CASE WHEN $1 IN ($6, $7) THEN retry_at ELSE NULL END,
+                dispatched_at = COALESCE(dispatched_at, CASE WHEN $1 = $8 THEN NOW() ELSE NULL END),
+                started_at = COALESCE(started_at, CASE WHEN $1 = $9 THEN NOW() ELSE NULL END),
+                finished_at = CASE WHEN $1 IN ($10, $5, $11) THEN NOW() ELSE NULL END
+                WHERE id = $4 AND (status NOT IN ($10, $5) OR $1 IN ($10, $5))"#
+            )
+            .bind(status_str)
+            .bind(execution_name)
+            .bind(error)
+            .bind(task_id)
+            .bind(TaskStatus::Failed.as_str())
+            .bind(TaskStatus::Pending.as_str())
+            .bind(TaskStatus::Paused.as_str())
+            .bind(TaskStatus::Dispatched.as_str())
+            .bind(TaskStatus::Running.as_str())
+            .bind(TaskStatus::Success.as_str())
+            .bind(TaskStatus::Cancelled.as_str())
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -86,17 +132,18 @@ impl PostgresDatabase {
         Ok(tasks)
     }
     pub(super) async fn get_pending_tasks_impl(&self) -> Result<Vec<Task>> {
-        let tasks = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE status = 'pending'")
+        let tasks = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE status = $1")
+            .bind(TaskStatus::Pending.as_str())
             .fetch_all(&self.pool)
             .await?;
         Ok(tasks)
     }
     pub(super) async fn get_running_tasks_impl(&self) -> Result<Vec<Task>> {
-        let tasks = sqlx::query_as::<_, Task>(
-            "SELECT * FROM tasks WHERE status IN ('running', 'dispatched')",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let tasks = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE status IN ($1, $2)")
+            .bind(TaskStatus::Running.as_str())
+            .bind(TaskStatus::Dispatched.as_str())
+            .fetch_all(&self.pool)
+            .await?;
         Ok(tasks)
     }
     pub(super) async fn append_task_log_impl(&self, task_id: Uuid, chunk: &str) -> Result<()> {
@@ -121,8 +168,13 @@ impl PostgresDatabase {
         error: Option<&str>,
         retry_at: Option<chrono::DateTime<Utc>>,
     ) -> Result<()> {
-        sqlx::query("UPDATE tasks SET status = 'pending', attempts = attempts + 1, retry_at = $1, error = COALESCE($2, error), execution_name = NULL, output = NULL, dispatched_at = NULL, started_at = NULL, finished_at = NULL WHERE id = $3")
-            .bind(retry_at).bind(error).bind(task_id).execute(&self.pool).await?;
+        sqlx::query("UPDATE tasks SET status = $1, attempts = attempts + 1, retry_at = $2, error = COALESCE($3, error), execution_name = NULL, output = NULL, dispatched_at = NULL, started_at = NULL, finished_at = NULL WHERE id = $4")
+            .bind(TaskStatus::Pending.as_str())
+            .bind(retry_at)
+            .bind(error)
+            .bind(task_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
     pub(super) async fn get_pending_tasks_with_workflow_impl(
@@ -134,8 +186,8 @@ impl PostgresDatabase {
             t.status as task_status, t.attempts, t.max_retries, t.timeout_seconds, t.retry_at, t.execution_name, t.params,
             w.id as workflow_id, w.job_name, w.project, w.region
             FROM tasks t JOIN runs r ON t.run_id = r.id JOIN workflows w ON r.workflow_id = w.id
-            WHERE t.status = 'pending'
-            AND r.status = 'running'
+            WHERE t.status = $2
+            AND r.status = $3
             AND (t.retry_at IS NULL OR t.retry_at <= NOW())
             AND (cardinality(t.depends_on) = 0 OR NOT EXISTS (
                 SELECT 1 FROM unnest(t.depends_on) AS dep_name
@@ -143,11 +195,18 @@ impl PostgresDatabase {
                     SELECT 1 FROM tasks t2
                     WHERE t2.run_id = t.run_id
                     AND t2.task_name = dep_name
-                    AND t2.status IN ('success', 'failed')
+                    AND t2.status IN ($4, $5)
                 )
             ))
             ORDER BY t.created_at LIMIT $1"#
-        ).bind(limit).fetch_all(&self.pool).await?;
+        )
+        .bind(limit)
+        .bind(TaskStatus::Pending.as_str())
+        .bind(RunStatus::Running.as_str())
+        .bind(TaskStatus::Success.as_str())
+        .bind(TaskStatus::Failed.as_str())
+        .fetch_all(&self.pool)
+        .await?;
         Ok(tasks)
     }
     pub(super) async fn get_task_outputs_impl(
@@ -211,8 +270,15 @@ impl PostgresDatabase {
         if failed_task_names.is_empty() {
             return Ok(Vec::new());
         }
-        let rows = sqlx::query("UPDATE tasks SET status = 'failed', error = $1, finished_at = NOW() WHERE run_id = $2 AND status IN ('pending', 'paused') AND depends_on && $3 RETURNING task_name")
-            .bind(error).bind(run_id).bind(failed_task_names).fetch_all(&self.pool).await?;
+        let rows = sqlx::query("UPDATE tasks SET status = $1, error = $2, finished_at = NOW() WHERE run_id = $3 AND status IN ($4, $5) AND depends_on && $6 RETURNING task_name")
+            .bind(TaskStatus::Failed.as_str())
+            .bind(error)
+            .bind(run_id)
+            .bind(TaskStatus::Pending.as_str())
+            .bind(TaskStatus::Paused.as_str())
+            .bind(failed_task_names)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().map(|row| row.get("task_name")).collect())
     }
 }

@@ -12,7 +12,7 @@ Worker process binary for compile/execute paths used by isolated execution deplo
 
 | File | Purpose | Updated | File SHA |
 |------|---------|---------|----------|
-| [Cargo.toml](../../../crates/ork-worker/Cargo.toml) | Crate manifest and worker feature/runtime dependencies. | 2026-02-07 | ef5c10a |
-| [src/compile.rs](../../../crates/ork-worker/src/compile.rs) | Worker-side workflow/task compilation handlers. | 2026-02-07 | e4d6154 |
-| [src/execute.rs](../../../crates/ork-worker/src/execute.rs) | Worker-side task execution handlers and status reporting. | 2026-02-07 | 5d32726 |
-| [src/main.rs](../../../crates/ork-worker/src/main.rs) | Worker process entrypoint and HTTP/IPC wiring. | 2026-02-07 | 8478d26 |
+| [Cargo.toml](../../../crates/ork-worker/Cargo.toml) | Crate manifest and worker feature/runtime dependencies. | 2026-02-08 | a0a02a3 |
+| [src/compile.rs](../../../crates/ork-worker/src/compile.rs) | Worker-side workflow/task compilation handlers. | 2026-02-08 | d7242f2 |
+| [src/execute.rs](../../../crates/ork-worker/src/execute.rs) | Worker-side task execution handlers and status reporting. | 2026-02-08 | e630819 |
+| [src/main.rs](../../../crates/ork-worker/src/main.rs) | Worker process entrypoint and HTTP/IPC wiring. | 2026-02-08 | ef5b768 |

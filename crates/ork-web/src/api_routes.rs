@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use ork_core::database::Database;
+use ork_core::models::{RunStatus, TaskStatus};
 
 use crate::handlers::{WorkflowInfo, WorkflowTaskInfo};
 
@@ -62,7 +63,8 @@ pub(crate) async fn list_runs(
     };
 
     if let Some(ref status_filter) = params.status {
-        runs.retain(|r| r.status_str() == status_filter);
+        let parsed = RunStatus::parse(status_filter);
+        runs.retain(|r| parsed.is_some_and(|want| r.status() == want));
     }
     if let Some(ref workflow_filter) = params.workflow {
         runs.retain(|r| {
@@ -87,7 +89,7 @@ pub(crate) async fn list_runs(
                 .get(&r.workflow_id)
                 .cloned()
                 .unwrap_or_else(|| r.workflow_id.to_string()),
-            status: r.status_str().to_string(),
+            status: r.status().as_str().to_string(),
             created_at: fmt_time(r.created_at),
             started_at: r.started_at.map(fmt_time),
             finished_at: r.finished_at.map(fmt_time),
@@ -207,7 +209,7 @@ pub(crate) async fn start_run(
         Ok(run) => {
             let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
                 run_id: run.id.to_string(),
-                status: run.status_str().to_string(),
+                status: run.status().as_str().to_string(),
             });
             #[derive(Serialize)]
             struct Resp {
@@ -270,7 +272,7 @@ pub(crate) async fn cancel_run(
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
                 run_id: id.clone(),
-                status: "cancelled".to_string(),
+                status: RunStatus::Cancelled.as_str().to_string(),
             });
             StatusCode::OK.into_response()
         }
@@ -292,16 +294,22 @@ pub(crate) async fn pause_run(
         Err(err) if is_not_found(&err) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    match run.status_str() {
-        "success" | "failed" | "cancelled" => return StatusCode::CONFLICT.into_response(),
-        "paused" => return StatusCode::OK.into_response(),
+    match run.status() {
+        RunStatus::Success | RunStatus::Failed | RunStatus::Cancelled => {
+            return StatusCode::CONFLICT.into_response();
+        }
+        RunStatus::Paused => return StatusCode::OK.into_response(),
         _ => {}
     }
-    match api.db.update_run_status(run_id, "paused", None).await {
+    match api
+        .db
+        .update_run_status(run_id, RunStatus::Paused, None)
+        .await
+    {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
                 run_id: id.clone(),
-                status: "paused".to_string(),
+                status: RunStatus::Paused.as_str().to_string(),
             });
             StatusCode::OK.into_response()
         }
@@ -323,9 +331,11 @@ pub(crate) async fn resume_run(
         Err(err) if is_not_found(&err) => return StatusCode::NOT_FOUND.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    match run.status_str() {
-        "paused" => {}
-        "success" | "failed" | "cancelled" => return StatusCode::CONFLICT.into_response(),
+    match run.status() {
+        RunStatus::Paused => {}
+        RunStatus::Success | RunStatus::Failed | RunStatus::Cancelled => {
+            return StatusCode::CONFLICT.into_response();
+        }
         _ => return StatusCode::CONFLICT.into_response(),
     }
     let tasks = match api.db.list_tasks(run_id).await {
@@ -333,15 +343,15 @@ pub(crate) async fn resume_run(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let new_status = if tasks.is_empty() {
-        "pending"
+        RunStatus::Pending
     } else {
-        "running"
+        RunStatus::Running
     };
     match api.db.update_run_status(run_id, new_status, None).await {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::RunUpdated {
                 run_id: id.clone(),
-                status: new_status.to_string(),
+                status: new_status.as_str().to_string(),
             });
             StatusCode::OK.into_response()
         }
@@ -371,22 +381,24 @@ pub(crate) async fn pause_task(
         Some(task) => task,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    match task.status_str() {
-        "pending" => {}
-        "paused" => return StatusCode::OK.into_response(),
-        "dispatched" | "running" => return StatusCode::CONFLICT.into_response(),
+    match task.status() {
+        TaskStatus::Pending => {}
+        TaskStatus::Paused => return StatusCode::OK.into_response(),
+        TaskStatus::Dispatched | TaskStatus::Running => {
+            return StatusCode::CONFLICT.into_response();
+        }
         _ => return StatusCode::CONFLICT.into_response(),
     }
     match api
         .db
-        .update_task_status(task_id, "paused", None, None)
+        .update_task_status(task_id, TaskStatus::Paused, None, None)
         .await
     {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::TaskUpdated {
                 run_id: run_id.to_string(),
                 task_id: id.clone(),
-                status: "paused".to_string(),
+                status: TaskStatus::Paused.as_str().to_string(),
             });
             StatusCode::OK.into_response()
         }
@@ -416,20 +428,20 @@ pub(crate) async fn resume_task(
         Some(task) => task,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
-    match task.status_str() {
-        "paused" => {}
+    match task.status() {
+        TaskStatus::Paused => {}
         _ => return StatusCode::CONFLICT.into_response(),
     }
     match api
         .db
-        .update_task_status(task_id, "pending", None, None)
+        .update_task_status(task_id, TaskStatus::Pending, None, None)
         .await
     {
         Ok(_) => {
             let _ = api.broadcast_tx.send(StateUpdate::TaskUpdated {
                 run_id: run_id.to_string(),
                 task_id: id.clone(),
-                status: "pending".to_string(),
+                status: TaskStatus::Pending.as_str().to_string(),
             });
             StatusCode::OK.into_response()
         }

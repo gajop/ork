@@ -3,9 +3,25 @@
 //! POST /execute
 //! - Executes a specific task from the workflow
 //! - Returns output or deferred job information
+//!
+//! ## Supported Executor Types
+//!
+//! - `process` - Executes shell commands or executable files
+//! - `python` - Executes Python tasks (via process executor with Python runtime)
+//! - `library` - Loads and executes native dynamic libraries via C ABI
+//!
+//! ## Unsupported Executor Types
+//!
+//! - `cloudrun` - Cloud Run tasks require cloud infrastructure and are not supported in worker context
+//!
+//! ## Error Handling
+//!
+//! Unsupported executor types return a deterministic `ExecuteResponse::Failed` with a clear error message.
+//! Library tasks without required `library_path` parameter also return `ExecuteResponse::Failed`.
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use ork_core::executor::{Executor, StatusUpdate};
+use ork_executors::library::LibraryExecutor;
 use ork_executors::process::ProcessExecutor;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -48,10 +64,8 @@ pub async fn execute_handler(
     // Execute based on executor type
     let result = match req.executor_type.as_str() {
         "process" | "python" => execute_process_task(&state, &req).await,
-        "library" => {
-            // Library executor would require loading dynamic libraries
-            Err("Library executor not yet supported in worker".to_string())
-        }
+        "library" => execute_library_task(&state, &req).await,
+        "cloudrun" => Err("CloudRun executor not supported in worker".to_string()),
         _ => Err(format!("Unsupported executor type: {}", req.executor_type)),
     };
 
@@ -102,6 +116,38 @@ async fn execute_process_task(
     )
     .await
     .map_err(|_| "Execution timed out waiting for completion".to_string())?
+}
+
+async fn execute_library_task(
+    _state: &WorkerState,
+    req: &ExecuteRequest,
+) -> Result<serde_json::Value, String> {
+    // Create library executor
+    let executor = LibraryExecutor::new();
+
+    // Set up status channel and wait for terminal updates.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    executor.set_status_channel(tx).await;
+
+    // Library path should be in params
+    let library_path = req
+        .params
+        .as_ref()
+        .and_then(|p| p.get("library_path"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing library_path in task parameters".to_string())?;
+
+    executor
+        .execute(req.task_id, library_path, req.params.clone())
+        .await
+        .map_err(|e| format!("Library execution failed: {}", e))?;
+
+    timeout(
+        Duration::from_secs(30),
+        wait_for_terminal_update(req.task_id, &mut rx),
+    )
+    .await
+    .map_err(|_| "Library execution timed out waiting for completion".to_string())?
 }
 
 async fn wait_for_terminal_update(
@@ -185,7 +231,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_execute_handler_rejects_library_executor() {
+    async fn test_execute_handler_rejects_cloudrun_executor() {
+        let value = run_handler(ExecuteRequest {
+            task_id: Uuid::new_v4(),
+            task_name: "task".to_string(),
+            executor_type: "cloudrun".to_string(),
+            params: None,
+        })
+        .await;
+
+        assert_eq!(value["status"], "failed");
+        assert!(
+            value["error"]
+                .as_str()
+                .expect("error should be string")
+                .contains("CloudRun executor not supported")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_handler_library_requires_library_path() {
         let value = run_handler(ExecuteRequest {
             task_id: Uuid::new_v4(),
             task_name: "task".to_string(),
@@ -199,7 +264,7 @@ mod tests {
             value["error"]
                 .as_str()
                 .expect("error should be string")
-                .contains("not yet supported")
+                .contains("Missing library_path")
         );
     }
 

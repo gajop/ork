@@ -2,11 +2,13 @@
 //!
 //! POST /compile
 //! - Loads embedded workflow.yaml
-//! - Parses and validates the DAG
+//! - Parses and validates the DAG using core workflow pipeline
 //! - Returns compiled workflow structure
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use ork_core::workflow::Workflow;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -50,8 +52,8 @@ pub async fn compile_handler(
             )
         })?;
 
-    // Parse YAML
-    let workflow: serde_json::Value = serde_yaml::from_str(&workflow_content).map_err(|e| {
+    // Parse YAML into core Workflow type
+    let workflow: Workflow = serde_yaml::from_str(&workflow_content).map_err(|e| {
         error!("Failed to parse workflow YAML: {}", e);
         (
             StatusCode::BAD_REQUEST,
@@ -59,50 +61,65 @@ pub async fn compile_handler(
         )
     })?;
 
-    // Extract task definitions
-    let tasks = extract_task_definitions(&workflow).map_err(|e| {
-        error!("Failed to extract task definitions: {}", e);
-        (StatusCode::BAD_REQUEST, e)
+    // Validate workflow
+    workflow.validate().map_err(|e| {
+        error!("Workflow validation failed: {}", e);
+        (StatusCode::BAD_REQUEST, format!("Invalid workflow: {}", e))
     })?;
+
+    // Determine root path for compilation
+    let root = Path::new(workflow_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+    let root = root.canonicalize().unwrap_or(root);
+
+    // Compile workflow
+    let compiled = workflow.compile(&root).map_err(|e| {
+        error!("Workflow compilation failed: {}", e);
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Failed to compile workflow: {}", e),
+        )
+    })?;
+
+    // Extract task definitions from compiled workflow
+    let tasks: Vec<TaskDefinition> = compiled
+        .tasks
+        .iter()
+        .map(|task| TaskDefinition {
+            name: task.name.clone(),
+            executor: match task.executor {
+                ork_core::workflow::ExecutorKind::Process => "process".to_string(),
+                ork_core::workflow::ExecutorKind::Python => "python".to_string(),
+                ork_core::workflow::ExecutorKind::CloudRun => "cloudrun".to_string(),
+                ork_core::workflow::ExecutorKind::Library => "library".to_string(),
+            },
+            depends_on: task
+                .depends_on
+                .iter()
+                .filter_map(|&idx| compiled.tasks.get(idx).map(|t| t.name.clone()))
+                .collect(),
+        })
+        .collect();
 
     info!("Successfully compiled workflow with {} tasks", tasks.len());
 
-    Ok(Json(CompileResponse { workflow, tasks }))
-}
+    // Convert workflow to JSON for response
+    let workflow_json = serde_json::to_value(&workflow).map_err(|e| {
+        error!("Failed to serialize workflow: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize workflow: {}", e),
+        )
+    })?;
 
-fn extract_task_definitions(workflow: &serde_json::Value) -> Result<Vec<TaskDefinition>, String> {
-    let tasks_obj = workflow
-        .get("tasks")
-        .and_then(|v| v.as_object())
-        .ok_or_else(|| "Missing 'tasks' field in workflow".to_string())?;
-
-    let mut tasks = Vec::new();
-
-    for (name, task_def) in tasks_obj {
-        let executor = task_def
-            .get("executor")
-            .and_then(|v| v.as_str())
-            .unwrap_or("process")
-            .to_string();
-
-        let depends_on = task_def
-            .get("depends_on")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        tasks.push(TaskDefinition {
-            name: name.clone(),
-            executor,
-            depends_on,
-        });
-    }
-
-    Ok(tasks)
+    Ok(Json(CompileResponse {
+        workflow: workflow_json,
+        tasks,
+    }))
 }
 
 #[cfg(test)]
@@ -111,45 +128,24 @@ mod tests {
     use axum::body::to_bytes;
     use uuid::Uuid;
 
-    #[test]
-    fn test_extract_task_definitions_success() {
-        let workflow = serde_json::json!({
-            "name": "wf",
-            "tasks": {
-                "a": { "executor": "process" },
-                "b": { "executor": "python", "depends_on": ["a"] }
-            }
-        });
-
-        let tasks = extract_task_definitions(&workflow).expect("task extraction should succeed");
-        assert_eq!(tasks.len(), 2);
-        assert!(
-            tasks
-                .iter()
-                .any(|t| t.name == "a" && t.executor == "process")
-        );
-        assert!(
-            tasks
-                .iter()
-                .any(|t| t.name == "b" && t.depends_on == vec!["a".to_string()])
-        );
-    }
-
-    #[test]
-    fn test_extract_task_definitions_missing_tasks_field() {
-        let workflow = serde_json::json!({ "name": "wf" });
-        let err = extract_task_definitions(&workflow).expect_err("missing tasks should error");
-        assert!(err.contains("Missing 'tasks' field"));
-    }
-
     #[tokio::test]
-    async fn test_compile_handler_success() {
+    async fn test_compile_handler_valid_workflow_succeeds() {
         let dir = std::env::temp_dir().join(format!("ork-worker-compile-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let workflow_path = dir.join("workflow.yaml");
         std::fs::write(
             &workflow_path,
-            r#"{"name":"test","tasks":{"t1":{"executor":"process","command":"echo hi"}}}"#,
+            r#"
+name: test
+tasks:
+  t1:
+    executor: process
+    command: "echo hi"
+  t2:
+    executor: python
+    module: "tasks"
+    depends_on: ["t1"]
+"#,
         )
         .expect("write workflow yaml");
 
@@ -173,7 +169,19 @@ mod tests {
             .expect("read response body");
         let value: serde_json::Value =
             serde_json::from_slice(&body).expect("response should be valid json");
-        assert_eq!(value["tasks"][0]["name"], "t1");
+
+        // Verify task definitions are correct
+        assert_eq!(value["tasks"].as_array().unwrap().len(), 2);
+        let t1 = &value["tasks"][0];
+        let t2 = &value["tasks"][1];
+
+        assert_eq!(t1["name"], "t1");
+        assert_eq!(t1["executor"], "process");
+        assert_eq!(t1["depends_on"].as_array().unwrap().len(), 0);
+
+        assert_eq!(t2["name"], "t2");
+        assert_eq!(t2["executor"], "python");
+        assert_eq!(t2["depends_on"], serde_json::json!(["t1"]));
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -233,8 +241,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let workflow_path = dir.join("workflow.yaml");
-        std::fs::write(&workflow_path, r#"{"name":"test"}"#)
-            .expect("write workflow yaml without tasks");
+        std::fs::write(&workflow_path, r#"name: test"#).expect("write workflow yaml without tasks");
 
         let state = std::sync::Arc::new(crate::WorkerState {
             workflow_path: workflow_path.to_string_lossy().to_string(),
@@ -251,7 +258,140 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
         match result {
             Ok(_) => panic!("workflow without tasks should return error"),
-            Err(error) => assert_eq!(error.0, StatusCode::BAD_REQUEST),
+            Err(error) => {
+                assert_eq!(error.0, StatusCode::BAD_REQUEST);
+                assert!(error.1.contains("Invalid workflow"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compile_handler_rejects_invalid_dependency() {
+        let dir =
+            std::env::temp_dir().join(format!("ork-worker-compile-bad-dep-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let workflow_path = dir.join("workflow.yaml");
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: test
+tasks:
+  task1:
+    executor: process
+    command: "echo hi"
+    depends_on: ["nonexistent"]
+"#,
+        )
+        .expect("write workflow yaml with bad dependency");
+
+        let state = std::sync::Arc::new(crate::WorkerState {
+            workflow_path: workflow_path.to_string_lossy().to_string(),
+            working_dir: ".".to_string(),
+        });
+        let result = compile_handler(
+            State(state),
+            Json(CompileRequest {
+                workflow_path: None,
+            }),
+        )
+        .await;
+
+        let _ = std::fs::remove_dir_all(dir);
+        match result {
+            Ok(_) => panic!("workflow with invalid dependency should return error"),
+            Err(error) => {
+                assert_eq!(error.0, StatusCode::BAD_REQUEST);
+                assert!(error.1.contains("Invalid workflow"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compile_handler_rejects_missing_required_field() {
+        let dir = std::env::temp_dir().join(format!(
+            "ork-worker-compile-missing-field-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let workflow_path = dir.join("workflow.yaml");
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: test
+tasks:
+  task1:
+    executor: library
+"#,
+        )
+        .expect("write workflow yaml with missing required field");
+
+        let state = std::sync::Arc::new(crate::WorkerState {
+            workflow_path: workflow_path.to_string_lossy().to_string(),
+            working_dir: ".".to_string(),
+        });
+        let result = compile_handler(
+            State(state),
+            Json(CompileRequest {
+                workflow_path: None,
+            }),
+        )
+        .await;
+
+        let _ = std::fs::remove_dir_all(dir);
+        match result {
+            Ok(_) => panic!("workflow with missing required field should return error"),
+            Err(error) => {
+                assert_eq!(error.0, StatusCode::BAD_REQUEST);
+                assert!(error.1.contains("Invalid workflow"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compile_handler_rejects_cycle() {
+        let dir = std::env::temp_dir().join(format!("ork-worker-compile-cycle-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let workflow_path = dir.join("workflow.yaml");
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: test
+tasks:
+  a:
+    executor: process
+    command: "echo a"
+    depends_on: ["b"]
+  b:
+    executor: process
+    command: "echo b"
+    depends_on: ["a"]
+"#,
+        )
+        .expect("write workflow yaml with cycle");
+
+        let state = std::sync::Arc::new(crate::WorkerState {
+            workflow_path: workflow_path.to_string_lossy().to_string(),
+            working_dir: ".".to_string(),
+        });
+        let result = compile_handler(
+            State(state),
+            Json(CompileRequest {
+                workflow_path: None,
+            }),
+        )
+        .await;
+
+        let _ = std::fs::remove_dir_all(dir);
+        match result {
+            Ok(_) => panic!("workflow with cycle should return error"),
+            Err(error) => {
+                assert_eq!(error.0, StatusCode::BAD_REQUEST);
+                assert!(
+                    error.1.contains("Failed to compile workflow")
+                        || error.1.contains("cycle")
+                        || error.1.contains("Cycle")
+                );
+            }
         }
     }
 }

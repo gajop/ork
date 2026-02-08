@@ -65,6 +65,7 @@ impl Status {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ork_core::database::{RunRepository, WorkflowRepository};
     use ork_state::SqliteDatabase;
 
     async fn setup_db() -> (Arc<SqliteDatabase>, uuid::Uuid) {

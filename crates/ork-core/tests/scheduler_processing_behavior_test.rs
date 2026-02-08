@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use ork_core::config::OrchestratorConfig;
-use ork_core::database::{Database, NewTask};
+use ork_core::database::{NewTask, RunRepository, TaskRepository, WorkflowRepository};
 use ork_core::executor::{Executor, StatusUpdate};
 use ork_core::executor_manager::ExecutorManager as ExecutorManagerTrait;
 use ork_core::models::Workflow;
@@ -169,7 +169,7 @@ async fn create_running_run_with_task(
     )
     .await
     .expect("create task");
-    db.update_run_status(run.id, "running", None)
+    db.update_run_status(run.id, ork_core::models::RunStatus::Running, None)
         .await
         .expect("run running");
     let task_id = db
@@ -447,8 +447,13 @@ async fn test_scheduler_enforces_timeout_for_stuck_task() -> Result<()> {
     let (run_id, task_id) =
         create_running_run_with_task(db.as_ref(), "timeout-task", 0, Some(1)).await;
 
-    db.update_task_status(task_id, "running", Some("exec"), None)
-        .await?;
+    db.update_task_status(
+        task_id,
+        ork_core::models::TaskStatus::Running,
+        Some("exec"),
+        None,
+    )
+    .await?;
     sqlx::query("UPDATE tasks SET started_at = '2000-01-01T00:00:00Z' WHERE id = ?")
         .bind(task_id)
         .execute(db.pool())

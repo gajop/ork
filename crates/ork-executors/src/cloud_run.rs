@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use ork_core::executor::{Executor, StatusUpdate};
+use ork_core::models::TaskStatus;
 
 #[derive(Debug, Serialize)]
 pub struct CloudRunJobRequest {
@@ -45,7 +46,7 @@ pub struct CloudRunExecution {
 struct ExecutionState {
     task_id: Uuid,
     execution_name: String,
-    last_status: String,
+    last_status: TaskStatus,
 }
 
 pub struct CloudRunClient {
@@ -194,7 +195,7 @@ impl CloudRunClient {
                 ExecutionState {
                     task_id,
                     execution_name: execution.name.clone(),
-                    last_status: "running".to_string(),
+                    last_status: TaskStatus::Running,
                 },
             );
         }
@@ -253,30 +254,30 @@ impl CloudRunClient {
             match self.get_execution_status(&exec_state.execution_name).await {
                 Ok(status) => {
                     let normalized_status = match status.as_str() {
-                        "completed" | "succeeded" => "success",
-                        "failed" | "error" => "failed",
-                        _ => "running",
+                        "completed" | "succeeded" => TaskStatus::Success,
+                        "failed" | "error" => TaskStatus::Failed,
+                        _ => TaskStatus::Running,
                     };
 
                     if normalized_status != exec_state.last_status {
                         let mut executions = self.active_executions.write().await;
 
                         if let Some(state) = executions.get_mut(&exec_state.execution_name) {
-                            state.last_status = normalized_status.to_string();
+                            state.last_status = normalized_status;
                         }
 
                         let tx_guard = self.status_tx.read().await;
                         if let Some(tx) = tx_guard.as_ref() {
                             let _ = tx.send(StatusUpdate {
                                 task_id: exec_state.task_id,
-                                status: normalized_status.to_string(),
+                                status: normalized_status.as_str().to_string(),
                                 log: None,
                                 output: None,
                                 error: None,
                             });
                         }
 
-                        if normalized_status == "success" || normalized_status == "failed" {
+                        if matches!(normalized_status, TaskStatus::Success | TaskStatus::Failed) {
                             let mut executions = self.active_executions.write().await;
                             executions.remove(&exec_state.execution_name);
                         }

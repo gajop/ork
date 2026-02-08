@@ -5,7 +5,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use ork_core::database::NewTask;
-use ork_core::models::{Task, json_inner};
+use ork_core::models::{Task, TaskStatus, json_inner};
 
 use super::core::FileDatabase;
 
@@ -33,7 +33,7 @@ impl FileDatabase {
                 "task_name": format!("task_{}", i),
                 "executor_type": executor_type,
                 "depends_on": [],
-                "status": "pending",
+                "status": TaskStatus::Pending,
                 "attempts": 0,
                 "max_retries": 0,
                 "timeout_seconds": null,
@@ -68,7 +68,7 @@ impl FileDatabase {
                 "task_name": task.task_name,
                 "executor_type": task.executor_type,
                 "depends_on": task.depends_on,
-                "status": "pending",
+                "status": TaskStatus::Pending,
                 "attempts": 0,
                 "max_retries": task.max_retries,
                 "timeout_seconds": task.timeout_seconds,
@@ -92,34 +92,39 @@ impl FileDatabase {
     pub(super) async fn update_task_status_impl(
         &self,
         task_id: Uuid,
-        status: &str,
+        status: TaskStatus,
         execution_name: Option<&str>,
         error: Option<&str>,
     ) -> Result<()> {
         let path = self.task_path(task_id);
         let task: Task = self.read_json(&path).await?;
         let now = Utc::now();
-        let dispatched_at = if status == "dispatched" && task.dispatched_at.is_none() {
-            Some(now)
-        } else {
-            task.dispatched_at
-        };
-        let started_at = if status == "running" && task.started_at.is_none() {
+        let dispatched_at =
+            if matches!(status, TaskStatus::Dispatched) && task.dispatched_at.is_none() {
+                Some(now)
+            } else {
+                task.dispatched_at
+            };
+        let started_at = if matches!(status, TaskStatus::Running) && task.started_at.is_none() {
             Some(now)
         } else {
             task.started_at
         };
-        let finished_at = if matches!(status, "success" | "failed") && task.finished_at.is_none() {
+        let finished_at = if matches!(
+            status,
+            TaskStatus::Success | TaskStatus::Failed | TaskStatus::Cancelled
+        ) && task.finished_at.is_none()
+        {
             Some(now)
         } else {
             task.finished_at
         };
-        let attempts = if status == "failed" {
+        let attempts = if matches!(status, TaskStatus::Failed) {
             task.attempts + 1
         } else {
             task.attempts
         };
-        let retry_at = if matches!(status, "pending" | "paused") {
+        let retry_at = if matches!(status, TaskStatus::Pending | TaskStatus::Paused) {
             task.retry_at
         } else {
             None
@@ -152,10 +157,10 @@ impl FileDatabase {
 
     pub(super) async fn batch_update_task_status_impl(
         &self,
-        updates: &[(Uuid, &str, Option<&str>, Option<&str>)],
+        updates: &[(Uuid, TaskStatus, Option<&str>, Option<&str>)],
     ) -> Result<()> {
         for (task_id, status, execution_name, error) in updates {
-            self.update_task_status_impl(*task_id, status, *execution_name, *error)
+            self.update_task_status_impl(*task_id, *status, *execution_name, *error)
                 .await?;
         }
         Ok(())
@@ -194,7 +199,7 @@ impl FileDatabase {
         let mut entries = fs::read_dir(self.tasks_dir()).await?;
         while let Some(entry) = entries.next_entry().await? {
             if let Ok(task) = self.read_json::<Task>(&entry.path()).await {
-                if task.status_str() == "pending" {
+                if matches!(task.status(), TaskStatus::Pending) {
                     tasks.push(task);
                 }
             }
@@ -208,7 +213,7 @@ impl FileDatabase {
         let mut entries = fs::read_dir(self.tasks_dir()).await?;
         while let Some(entry) = entries.next_entry().await? {
             if let Ok(task) = self.read_json::<Task>(&entry.path()).await {
-                if matches!(task.status_str(), "running" | "dispatched") {
+                if matches!(task.status(), TaskStatus::Running | TaskStatus::Dispatched) {
                     tasks.push(task);
                 }
             }
@@ -268,7 +273,7 @@ impl FileDatabase {
         let task: Task = self.read_json(&path).await?;
         let updated_task: Task = serde_json::from_value(serde_json::json!({
             "id": task.id, "run_id": task.run_id, "task_index": task.task_index, "task_name": task.task_name,
-            "executor_type": task.executor_type, "depends_on": task.depends_on, "status": "pending",
+            "executor_type": task.executor_type, "depends_on": task.depends_on, "status": TaskStatus::Pending,
             "attempts": task.attempts + 1, "max_retries": task.max_retries, "timeout_seconds": task.timeout_seconds,
             "retry_at": retry_at, "execution_name": null, "params": task.params,
             "output": null, "logs": task.logs, "error": error.or(task.error.as_deref()),
@@ -345,7 +350,9 @@ impl FileDatabase {
                 Ok(t) => t,
                 Err(_) => continue,
             };
-            if task.run_id != run_id || !matches!(task.status_str(), "pending" | "paused") {
+            if task.run_id != run_id
+                || !matches!(task.status(), TaskStatus::Pending | TaskStatus::Paused)
+            {
                 continue;
             }
             if task
@@ -355,7 +362,7 @@ impl FileDatabase {
             {
                 let updated_task: Task = serde_json::from_value(serde_json::json!({
                     "id": task.id, "run_id": task.run_id, "task_index": task.task_index, "task_name": task.task_name,
-                    "executor_type": task.executor_type, "depends_on": task.depends_on, "status": "failed",
+                    "executor_type": task.executor_type, "depends_on": task.depends_on, "status": TaskStatus::Failed,
                     "execution_name": task.execution_name, "params": task.params, "output": task.output,
                     "logs": task.logs, "error": error, "dispatched_at": task.dispatched_at,
                     "started_at": task.started_at, "finished_at": Utc::now(), "created_at": task.created_at,
@@ -372,9 +379,12 @@ impl FileDatabase {
         let total = tasks.len() as i64;
         let completed = tasks
             .iter()
-            .filter(|t| matches!(t.status_str(), "success" | "failed"))
+            .filter(|t| matches!(t.status(), TaskStatus::Success | TaskStatus::Failed))
             .count() as i64;
-        let failed = tasks.iter().filter(|t| t.status_str() == "failed").count() as i64;
+        let failed = tasks
+            .iter()
+            .filter(|t| matches!(t.status(), TaskStatus::Failed))
+            .count() as i64;
         Ok((total, completed, failed))
     }
 }

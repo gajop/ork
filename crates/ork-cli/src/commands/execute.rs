@@ -7,6 +7,7 @@ use tracing::info;
 
 use ork_core::config::OrchestratorConfig;
 use ork_core::database::Database;
+use ork_core::models::{RunStatus, TaskStatus};
 use ork_core::scheduler::Scheduler;
 use ork_executors::ExecutorManager;
 
@@ -116,20 +117,26 @@ impl Execute {
                 let elapsed = start_time.elapsed();
                 let tasks = db.list_tasks(run.id).await?;
 
-                let success_count = tasks.iter().filter(|t| t.status_str() == "success").count();
-                let failed_count = tasks.iter().filter(|t| t.status_str() == "failed").count();
+                let success_count = tasks
+                    .iter()
+                    .filter(|t| matches!(t.status(), TaskStatus::Success))
+                    .count();
+                let failed_count = tasks
+                    .iter()
+                    .filter(|t| matches!(t.status(), TaskStatus::Failed))
+                    .count();
                 let run_status = if failed_count > 0 {
-                    "failed"
+                    RunStatus::Failed
                 } else {
-                    "success"
+                    RunStatus::Success
                 };
 
                 let run_info = db.get_run(run.id).await?;
-                if run_info.status_str() != "success" && run_info.status_str() != "failed" {
+                if !matches!(run_info.status(), RunStatus::Success | RunStatus::Failed) {
                     let _ = db.update_run_status(run.id, run_status, None).await;
                 }
 
-                if run_status == "success" {
+                if matches!(run_status, RunStatus::Success) {
                     println!(
                         "✓ Run completed successfully in {:.2}s",
                         elapsed.as_secs_f64()
@@ -169,10 +176,12 @@ impl Execute {
                     } else {
                         "-".to_string()
                     };
-                    let status_str = task.status_str();
-                    let attempt_count = match status_str {
-                        "success" | "running" | "dispatched" => task.attempts + 1,
-                        "failed" => task.attempts,
+                    let status = task.status();
+                    let attempt_count = match status {
+                        TaskStatus::Success | TaskStatus::Running | TaskStatus::Dispatched => {
+                            task.attempts + 1
+                        }
+                        TaskStatus::Failed => task.attempts,
                         _ => task.attempts,
                     };
                     let attempts_display = if attempt_count > 0 {
@@ -191,11 +200,16 @@ impl Execute {
 
                     println!(
                         "{:<20} {:<15} {:<10} {:<8} {:<24} {:<24}",
-                        task.task_name, status_str, duration, attempts_display, started, finished
+                        task.task_name,
+                        status.as_str(),
+                        duration,
+                        attempts_display,
+                        started,
+                        finished
                     );
                 }
 
-                if run_status != "success" {
+                if !matches!(run_status, RunStatus::Success) {
                     return Err(anyhow!("Run completed with failed status"));
                 }
 
@@ -220,7 +234,7 @@ impl Execute {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ork_core::database::Database;
+    use ork_core::database::{RunRepository, WorkflowRepository};
     use ork_state::SqliteDatabase;
     use uuid::Uuid;
 

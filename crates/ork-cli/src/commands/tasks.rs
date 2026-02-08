@@ -52,7 +52,7 @@ impl Tasks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ork_core::database::NewTask;
+    use ork_core::database::{NewTask, RunRepository, TaskRepository, WorkflowRepository};
     use ork_state::SqliteDatabase;
 
     #[tokio::test]

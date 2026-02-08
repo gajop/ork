@@ -26,6 +26,7 @@ impl Trigger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ork_core::database::{RunRepository, WorkflowRepository};
     use ork_state::SqliteDatabase;
 
     #[tokio::test]

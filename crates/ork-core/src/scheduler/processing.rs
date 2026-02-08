@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::{RunStatus, TaskStatus};
 
 impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     pub(super) async fn process_pending_runs(&self) -> Result<usize> {
@@ -60,12 +61,16 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 error!("Failed to create tasks for run {}: {}", run.id, e);
                 let _ = self
                     .db
-                    .update_run_status(run.id, "failed", Some(&e.to_string()))
+                    .update_run_status(run.id, RunStatus::Failed, Some(&e.to_string()))
                     .await;
                 continue;
             }
 
-            if let Err(e) = self.db.update_run_status(run.id, "running", None).await {
+            if let Err(e) = self
+                .db
+                .update_run_status(run.id, RunStatus::Running, None)
+                .await
+            {
                 error!("Failed to update run {} to running: {}", run.id, e);
             }
         }
@@ -169,9 +174,11 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         let db_update_start = Instant::now();
         if !dispatch_updates.is_empty() {
-            let updates_ref: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = dispatch_updates
+            let updates_ref: Vec<(Uuid, TaskStatus, Option<&str>, Option<&str>)> = dispatch_updates
                 .iter()
-                .map(|(id, execution)| (*id, "dispatched", Some(execution.as_str()), None))
+                .map(|(id, execution)| {
+                    (*id, TaskStatus::Dispatched, Some(execution.as_str()), None)
+                })
                 .collect();
             self.db.batch_update_task_status(&updates_ref).await?;
         }
@@ -190,12 +197,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
     }
 
     pub(super) async fn process_status_updates(&self, updates: Vec<StatusUpdate>) -> Result<()> {
-        let mut task_updates: Vec<(Uuid, &str, Option<&str>, Option<&str>)> = Vec::new();
+        let mut task_updates: Vec<(Uuid, TaskStatus, Option<&str>, Option<&str>)> = Vec::new();
         let mut runs_to_check = std::collections::HashSet::new();
         let mut failed_by_run: HashMap<Uuid, Vec<String>> = HashMap::new();
         let failed_ids: Vec<Uuid> = updates
             .iter()
-            .filter(|u| u.status == "failed")
+            .filter(|u| matches!(TaskStatus::parse(&u.status), Some(TaskStatus::Failed)))
             .map(|u| u.task_id)
             .collect();
         let retry_meta = if failed_ids.is_empty() {
@@ -266,12 +273,15 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 }
             }
 
-            let new_status = match update.status.as_str() {
-                "success" => TaskStatus::Success,
-                "failed" => TaskStatus::Failed,
-                "running" => TaskStatus::Running,
-                _ => continue,
+            let Some(new_status) = TaskStatus::parse(&update.status) else {
+                continue;
             };
+            if !matches!(
+                new_status,
+                TaskStatus::Success | TaskStatus::Failed | TaskStatus::Running
+            ) {
+                continue;
+            }
 
             if matches!(new_status, TaskStatus::Failed) {
                 let (attempts, max_retries) =
@@ -289,7 +299,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                         error!("Failed to reset task {} for retry: {}", update.task_id, e);
                         task_updates.push((
                             update.task_id,
-                            new_status.as_str(),
+                            new_status,
                             None,
                             update.error.as_deref(),
                         ));
@@ -299,12 +309,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 }
             }
 
-            task_updates.push((
-                update.task_id,
-                new_status.as_str(),
-                None,
-                update.error.as_deref(),
-            ));
+            task_updates.push((update.task_id, new_status, None, update.error.as_deref()));
 
             if matches!(new_status, TaskStatus::Success | TaskStatus::Failed) {
                 let (run_id, task_name) = self.db.get_task_identity(update.task_id).await?;
@@ -387,14 +392,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
 
         if completed == total {
             let new_status = if failed > 0 {
-                TaskStatus::Failed
+                RunStatus::Failed
             } else {
-                TaskStatus::Success
+                RunStatus::Success
             };
 
-            self.db
-                .update_run_status(run_id, new_status.as_str(), None)
-                .await?;
+            self.db.update_run_status(run_id, new_status, None).await?;
             info!(
                 "Run {} completed with status: {} ({}/{} tasks)",
                 run_id,
@@ -424,7 +427,7 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
             if completion.success {
                 if let Err(e) = self
                     .db
-                    .update_task_status(completion.task_id, "success", None, None)
+                    .update_task_status(completion.task_id, TaskStatus::Success, None, None)
                     .await
                 {
                     error!(
@@ -439,7 +442,12 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                     .unwrap_or_else(|| "Deferred job failed".to_string());
                 if let Err(e) = self
                     .db
-                    .update_task_status(completion.task_id, "failed", None, Some(&error_msg))
+                    .update_task_status(
+                        completion.task_id,
+                        TaskStatus::Failed,
+                        None,
+                        Some(&error_msg),
+                    )
                     .await
                 {
                     error!(

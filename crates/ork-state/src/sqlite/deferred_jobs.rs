@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ork_core::models::DeferredJob;
+use ork_core::models::{DeferredJob, DeferredJobStatus};
 use sqlx::types::Json;
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ impl SqliteDatabase {
         let job = sqlx::query_as::<_, DeferredJob>(
             r#"
             INSERT INTO deferred_jobs (task_id, service_type, job_id, job_data, status)
-            VALUES (?, ?, ?, ?, 'pending')
+            VALUES (?, ?, ?, ?, ?)
             RETURNING *
             "#,
         )
@@ -24,6 +24,7 @@ impl SqliteDatabase {
         .bind(service_type)
         .bind(job_id)
         .bind(Json(job_data))
+        .bind(DeferredJobStatus::Pending.as_str())
         .fetch_one(&self.pool)
         .await?;
 
@@ -34,10 +35,12 @@ impl SqliteDatabase {
         let jobs = sqlx::query_as::<_, DeferredJob>(
             r#"
             SELECT * FROM deferred_jobs
-            WHERE status IN ('pending', 'polling')
+            WHERE status IN (?, ?)
             ORDER BY created_at ASC
             "#,
         )
+        .bind(DeferredJobStatus::Pending.as_str())
+        .bind(DeferredJobStatus::Polling.as_str())
         .fetch_all(&self.pool)
         .await?;
 
@@ -62,21 +65,23 @@ impl SqliteDatabase {
     pub async fn update_deferred_job_status(
         &self,
         job_id: Uuid,
-        status: &str,
+        status: DeferredJobStatus,
         error: Option<&str>,
     ) -> Result<()> {
+        let status_str = status.as_str();
         sqlx::query(
             r#"
             UPDATE deferred_jobs
             SET status = ?,
                 error = ?,
-                started_at = CASE WHEN started_at IS NULL AND ? = 'polling' THEN CURRENT_TIMESTAMP ELSE started_at END
+                started_at = CASE WHEN started_at IS NULL AND ? = ? THEN CURRENT_TIMESTAMP ELSE started_at END
             WHERE id = ?
             "#,
         )
-        .bind(status)
+        .bind(status_str)
         .bind(error)
-        .bind(status)
+        .bind(status_str)
+        .bind(DeferredJobStatus::Polling.as_str())
         .bind(job_id)
         .execute(&self.pool)
         .await?;
@@ -103,12 +108,13 @@ impl SqliteDatabase {
         sqlx::query(
             r#"
             UPDATE deferred_jobs
-            SET status = 'completed',
+            SET status = ?,
                 finished_at = CURRENT_TIMESTAMP,
                 started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END
             WHERE id = ?
             "#,
         )
+        .bind(DeferredJobStatus::Completed.as_str())
         .bind(job_id)
         .execute(&self.pool)
         .await?;
@@ -120,13 +126,14 @@ impl SqliteDatabase {
         sqlx::query(
             r#"
             UPDATE deferred_jobs
-            SET status = 'failed',
+            SET status = ?,
                 error = ?,
                 finished_at = CURRENT_TIMESTAMP,
                 started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END
             WHERE id = ?
             "#,
         )
+        .bind(DeferredJobStatus::Failed.as_str())
         .bind(error)
         .bind(job_id)
         .execute(&self.pool)
@@ -139,13 +146,16 @@ impl SqliteDatabase {
         sqlx::query(
             r#"
             UPDATE deferred_jobs
-            SET status = 'cancelled',
+            SET status = ?,
                 finished_at = CURRENT_TIMESTAMP
             WHERE task_id = ?
-              AND status IN ('pending', 'polling')
+              AND status IN (?, ?)
             "#,
         )
+        .bind(DeferredJobStatus::Cancelled.as_str())
         .bind(task_id)
+        .bind(DeferredJobStatus::Pending.as_str())
+        .bind(DeferredJobStatus::Polling.as_str())
         .execute(&self.pool)
         .await?;
 

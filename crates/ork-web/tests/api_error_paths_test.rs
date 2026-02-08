@@ -5,7 +5,9 @@ use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use ork_core::database::{Database, NewTask, NewWorkflowTask};
+use ork_core::database::{
+    NewTask, NewWorkflowTask, RunRepository, TaskRepository, WorkflowRepository,
+};
 use ork_state::SqliteDatabase;
 use ork_web::api::{ApiServer, build_router};
 
@@ -277,7 +279,7 @@ async fn test_run_and_task_control_conflict_paths() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    db.update_run_status(run_id, "success", None)
+    db.update_run_status(run_id, ork_core::models::RunStatus::Success, None)
         .await
         .expect("mark success");
     let (status, _) = request_raw(
@@ -313,7 +315,7 @@ async fn test_run_and_task_control_conflict_paths() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    db.update_task_status(task_id, "running", None, None)
+    db.update_task_status(task_id, ork_core::models::TaskStatus::Running, None, None)
         .await
         .expect("set running");
     let (status, _) = request_raw(
@@ -325,7 +327,7 @@ async fn test_run_and_task_control_conflict_paths() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
 
-    db.update_task_status(task_id, "pending", None, None)
+    db.update_task_status(task_id, ork_core::models::TaskStatus::Pending, None, None)
         .await
         .expect("set pending");
     let (status, _) = request_raw(

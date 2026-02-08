@@ -21,6 +21,7 @@ impl DeleteWorkflow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ork_core::database::WorkflowRepository;
     use ork_state::SqliteDatabase;
 
     #[tokio::test]

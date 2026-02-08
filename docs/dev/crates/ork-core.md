@@ -20,37 +20,41 @@ The base crate: models, traits, and the scheduler loop. Everything else builds o
 
 | File | Purpose | Updated | File SHA |
 |------|---------|---------|----------|
-| [Cargo.toml](../../../crates/ork-core/Cargo.toml) | Crate manifest and feature flags for core logic. | 2026-02-07 | 0464602 |
-| [src/compiled.rs](../../../crates/ork-core/src/compiled.rs) | Compiles workflows into resolved tasks and a topo order. | 2026-02-07 | 7f52e04 |
-| [src/compiled/tests.rs](../../../crates/ork-core/src/compiled/tests.rs) | Unit tests for workflow compilation helpers and Python signature introspection error paths. | 2026-02-08 | 0000000 |
-| [src/config.rs](../../../crates/ork-core/src/config.rs) | Scheduler configuration defaults and tuning knobs. | 2026-02-06 | a4d0e63 |
-| [src/database.rs](../../../crates/ork-core/src/database.rs) | Storage contract consumed by the scheduler. | 2026-02-07 | eeef5b2 |
+| [Cargo.toml](../../../crates/ork-core/Cargo.toml) | Crate manifest and feature flags for core logic. | 2026-02-08 | 811b6bb |
+| [src/compiled.rs](../../../crates/ork-core/src/compiled.rs) | Compiles workflows into resolved tasks and a topo order. | 2026-02-08 | 4a19299 |
+| [src/compiled/tests.rs](../../../crates/ork-core/src/compiled/tests.rs) | Unit tests for workflow compilation helpers and Python signature introspection error paths. | 2026-02-08 | 78090f8 |
+| [src/config.rs](../../../crates/ork-core/src/config.rs) | Scheduler configuration defaults and tuning knobs. | 2026-02-08 | ffa0ab4 |
+| [src/database.rs](../../../crates/ork-core/src/database.rs) | Storage contract consumed by the scheduler. | 2026-02-08 | aaeafa7 |
 | [src/error.rs](../../../crates/ork-core/src/error.rs) | Error types for workflow loading and execution. | 2026-02-06 | 1ed0edd |
 | [src/executor.rs](../../../crates/ork-core/src/executor.rs) | Executor interface and the `StatusUpdate` message. | 2026-02-06 | 567d8ec |
 | [src/executor_manager.rs](../../../crates/ork-core/src/executor_manager.rs) | Executor manager trait for per-task executors. | 2026-02-06 | d1d5a9a |
-| [src/job_tracker.rs](../../../crates/ork-core/src/job_tracker.rs) | Deferrable job tracker implementations for external systems and custom HTTP polling. | 2026-02-07 | a296fea |
-| [src/job_tracker/tests.rs](../../../crates/ork-core/src/job_tracker/tests.rs) | Unit tests for custom HTTP tracker validation behavior. | 2026-02-07 | e3549df |
+| [src/job_tracker.rs](../../../crates/ork-core/src/job_tracker.rs) | Deferrable job tracker implementations for external systems and custom HTTP polling. | 2026-02-08 | 7902a05 |
+| [src/job_tracker/gcp/bigquery.rs](../../../crates/ork-core/src/job_tracker/gcp/bigquery.rs) | BigQuery tracker implementation and job-state mapping for deferred polling. | 2026-02-08 | - |
+| [src/job_tracker/gcp/cloudrun.rs](../../../crates/ork-core/src/job_tracker/gcp/cloudrun.rs) | Cloud Run deferred-job tracker that polls executions and maps terminal states. | 2026-02-08 | - |
+| [src/job_tracker/gcp/dataproc.rs](../../../crates/ork-core/src/job_tracker/gcp/dataproc.rs) | Dataproc deferred-job tracker for cluster job completion/failure detection. | 2026-02-08 | - |
+| [src/job_tracker/gcp/mod.rs](../../../crates/ork-core/src/job_tracker/gcp/mod.rs) | GCP tracker module wiring and exports. | 2026-02-08 | - |
+| [src/job_tracker/tests.rs](../../../crates/ork-core/src/job_tracker/tests.rs) | Unit tests for custom HTTP tracker validation behavior. | 2026-02-08 | b4c4208 |
 | [src/lib.rs](../../../crates/ork-core/src/lib.rs) | Module wiring and public exports for ork-core. | 2026-02-07 | 6c75c9d |
-| [src/models.rs](../../../crates/ork-core/src/models.rs) | Database-backed models for workflows, runs, and tasks. | 2026-02-07 | c3035d6 |
-| [src/schedule_processor.rs](../../../crates/ork-core/src/schedule_processor.rs) | Cron schedule processing and run triggering. | 2026-02-06 | 4f3f5a2 |
-| [src/scheduler.rs](../../../crates/ork-core/src/scheduler.rs) | Main scheduler loop and status update handling. | 2026-02-07 | b10017f |
-| [src/scheduler/processing.rs](../../../crates/ork-core/src/scheduler/processing.rs) | Scheduler processing internals for runs, tasks, statuses, and deferred completions. | 2026-02-07 | 2590dc4 |
-| [src/task_execution.rs](../../../crates/ork-core/src/task_execution.rs) | Task dispatch preparation and executor invocation. | 2026-02-07 | 01212ad |
-| [src/task_execution/tests.rs](../../../crates/ork-core/src/task_execution/tests.rs) | Unit tests for task execution parameter shaping, retry behavior, and executor-manager errors. | 2026-02-08 | 0000000 |
-| [src/triggerer.rs](../../../crates/ork-core/src/triggerer.rs) | Triggerer loop that polls deferred jobs and reports completion back to the scheduler. | 2026-02-07 | b44bbd3 |
-| [src/types.rs](../../../crates/ork-core/src/types.rs) | In-memory run/task types and status enums for legacy flows. | 2026-02-06 | a83f970 |
-| [src/worker_client.rs](../../../crates/ork-core/src/worker_client.rs) | Client for submitting tasks to external worker processes. | 2026-02-07 | 181eb0f |
-| [src/workflow.rs](../../../crates/ork-core/src/workflow.rs) | Workflow definition loading and validation. | 2026-02-07 | 51d5121 |
-| [tests/compiled_workflow_test.rs](../../../crates/ork-core/tests/compiled_workflow_test.rs) | Integration tests for workflow compilation success and missing-file error behavior. | 2026-02-08 | 0000000 |
-| [tests/dag_execution_test.rs](../../../crates/ork-core/tests/dag_execution_test.rs) | DAG execution order/performance integration test. | 2026-02-07 | e57a0cb |
+| [src/models.rs](../../../crates/ork-core/src/models.rs) | Database-backed models for workflows, runs, and tasks. | 2026-02-08 | 9cbe135 |
+| [src/schedule_processor.rs](../../../crates/ork-core/src/schedule_processor.rs) | Cron schedule processing and run triggering. | 2026-02-08 | e15adf1 |
+| [src/scheduler.rs](../../../crates/ork-core/src/scheduler.rs) | Main scheduler loop and status update handling. | 2026-02-08 | d2dc112 |
+| [src/scheduler/processing.rs](../../../crates/ork-core/src/scheduler/processing.rs) | Scheduler processing internals for runs, tasks, statuses, and deferred completions. | 2026-02-08 | a7311b2 |
+| [src/task_execution.rs](../../../crates/ork-core/src/task_execution.rs) | Task dispatch preparation and executor invocation. | 2026-02-08 | bb514ce |
+| [src/task_execution/tests.rs](../../../crates/ork-core/src/task_execution/tests.rs) | Unit tests for task execution parameter shaping, retry behavior, and executor-manager errors. | 2026-02-08 | 3e12ade |
+| [src/triggerer.rs](../../../crates/ork-core/src/triggerer.rs) | Triggerer loop that polls deferred jobs and reports completion back to the scheduler. | 2026-02-08 | 2baf32c |
+| [src/types.rs](../../../crates/ork-core/src/types.rs) | In-memory run/task types and status enums for legacy flows. | 2026-02-08 | 82a4e5e |
+| [src/worker_client.rs](../../../crates/ork-core/src/worker_client.rs) | Client for submitting tasks to external worker processes. | 2026-02-08 | e2627ca |
+| [src/workflow.rs](../../../crates/ork-core/src/workflow.rs) | Workflow definition loading and validation. | 2026-02-07 | 71ba793 |
+| [tests/compiled_workflow_test.rs](../../../crates/ork-core/tests/compiled_workflow_test.rs) | Integration tests for workflow compilation success and missing-file error behavior. | 2026-02-08 | f5f12c6 |
+| [tests/dag_execution_test.rs](../../../crates/ork-core/tests/dag_execution_test.rs) | DAG execution order/performance integration test. | 2026-02-08 | a698d06 |
 | [tests/deferrables_test.rs](../../../crates/ork-core/tests/deferrables_test.rs) | Integration tests for deferrable task lifecycle handling. | 2026-02-07 | e13ff26 |
-| [tests/pause_resume_test.rs](../../../crates/ork-core/tests/pause_resume_test.rs) | Pause/resume scheduler integration tests. | 2026-02-07 | a0b6a39 |
-| [tests/schedule_processor_test.rs](../../../crates/ork-core/tests/schedule_processor_test.rs) | Integration tests for scheduled workflow processing and trigger time updates. | 2026-02-07 | 4b0a3f8 |
-| [tests/scheduler_channel_behavior_test.rs](../../../crates/ork-core/tests/scheduler_channel_behavior_test.rs) | Integration tests for scheduler channel ingestion paths (status updates and deferred completion events). | 2026-02-08 | 0000000 |
-| [tests/scheduler_processing_behavior_test.rs](../../../crates/ork-core/tests/scheduler_processing_behavior_test.rs) | Integration tests for scheduler processing behavior: dispatch failures, retries, deferrals, and timeout enforcement. | 2026-02-07 | bfa650e |
-| [tests/scheduler_retry_fallback_test.rs](../../../crates/ork-core/tests/scheduler_retry_fallback_test.rs) | Integration test for the retry-reset failure fallback path that still marks tasks/runs as failed. | 2026-02-08 | 0000000 |
-| [tests/scheduler_startup_test.rs](../../../crates/ork-core/tests/scheduler_startup_test.rs) | Integration tests for scheduler startup behavior and triggerer initialization path. | 2026-02-08 | 0000000 |
-| [tests/scheduler_upstream_output_error_test.rs](../../../crates/ork-core/tests/scheduler_upstream_output_error_test.rs) | Integration test for scheduler behavior when upstream task output decoding fails. | 2026-02-08 | 0000000 |
-| [tests/sqlite_deferred_jobs_test.rs](../../../crates/ork-core/tests/sqlite_deferred_jobs_test.rs) | SQLite integration tests for deferred job lifecycle and cancellation behavior. | 2026-02-07 | 7756af0 |
-| [tests/triggerer_behavior_test.rs](../../../crates/ork-core/tests/triggerer_behavior_test.rs) | Integration tests for triggerer polling outcomes: running, completion, failure, timeout, and missing tracker behavior. | 2026-02-07 | 0000000 |
+| [tests/pause_resume_test.rs](../../../crates/ork-core/tests/pause_resume_test.rs) | Pause/resume scheduler integration tests. | 2026-02-08 | ff70fc0 |
+| [tests/schedule_processor_test.rs](../../../crates/ork-core/tests/schedule_processor_test.rs) | Integration tests for scheduled workflow processing and trigger time updates. | 2026-02-08 | afe4504 |
+| [tests/scheduler_channel_behavior_test.rs](../../../crates/ork-core/tests/scheduler_channel_behavior_test.rs) | Integration tests for scheduler channel ingestion paths (status updates and deferred completion events). | 2026-02-08 | 81fade4 |
+| [tests/scheduler_processing_behavior_test.rs](../../../crates/ork-core/tests/scheduler_processing_behavior_test.rs) | Integration tests for scheduler processing behavior: dispatch failures, retries, deferrals, and timeout enforcement. | 2026-02-08 | 0b34bd5 |
+| [tests/scheduler_retry_fallback_test.rs](../../../crates/ork-core/tests/scheduler_retry_fallback_test.rs) | Integration test for the retry-reset failure fallback path that still marks tasks/runs as failed. | 2026-02-08 | 3d8e448 |
+| [tests/scheduler_startup_test.rs](../../../crates/ork-core/tests/scheduler_startup_test.rs) | Integration tests for scheduler startup behavior and triggerer initialization path. | 2026-02-08 | 19ffd91 |
+| [tests/scheduler_upstream_output_error_test.rs](../../../crates/ork-core/tests/scheduler_upstream_output_error_test.rs) | Integration test for scheduler behavior when upstream task output decoding fails. | 2026-02-08 | a203a8c |
+| [tests/sqlite_deferred_jobs_test.rs](../../../crates/ork-core/tests/sqlite_deferred_jobs_test.rs) | SQLite integration tests for deferred job lifecycle and cancellation behavior. | 2026-02-08 | 725838d |
+| [tests/triggerer_behavior_test.rs](../../../crates/ork-core/tests/triggerer_behavior_test.rs) | Integration tests for triggerer polling outcomes: running, completion, failure, timeout, and missing tracker behavior. | 2026-02-08 | a697303 |
 | [tests/type_extraction_test.rs](../../../crates/ork-core/tests/type_extraction_test.rs) | Tests for workflow/task type extraction and signature metadata behavior. | 2026-02-07 | 1c4ab3e |

@@ -84,32 +84,70 @@ impl std::str::FromStr for ExecutorType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "TEXT", rename_all = "lowercase"))]
 pub enum TaskStatus {
+    Pending,
+    Dispatched,
     Running,
     Paused,
     Success,
     Failed,
+    Cancelled,
 }
 
 impl TaskStatus {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "pending" => Some(Self::Pending),
+            "dispatched" => Some(Self::Dispatched),
+            "running" => Some(Self::Running),
+            "paused" => Some(Self::Paused),
+            "success" => Some(Self::Success),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Pending => "pending",
+            Self::Dispatched => "dispatched",
             Self::Running => "running",
             Self::Paused => "paused",
             Self::Success => "success",
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
         }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Success | Self::Failed | Self::Cancelled)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl std::str::FromStr for TaskStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "TEXT", rename_all = "lowercase"))]
 pub enum RunStatus {
     Pending,
     Running,
     Paused,
     Success,
     Failed,
+    Cancelled,
 }
 
 impl RunStatus {
@@ -120,6 +158,7 @@ impl RunStatus {
             "paused" => Some(Self::Paused),
             "success" => Some(Self::Success),
             "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
             _ => None,
         }
     }
@@ -131,7 +170,12 @@ impl RunStatus {
             Self::Paused => "paused",
             Self::Success => "success",
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
         }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Success | Self::Failed | Self::Cancelled)
     }
 }
 
@@ -148,7 +192,7 @@ impl std::str::FromStr for RunStatus {
 pub struct Run {
     pub id: Uuid,
     pub workflow_id: Uuid,
-    status: String,
+    pub status: RunStatus,
     pub triggered_by: String,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
@@ -158,11 +202,11 @@ pub struct Run {
 
 impl Run {
     pub fn status(&self) -> RunStatus {
-        RunStatus::parse(&self.status).unwrap_or(RunStatus::Pending)
+        self.status
     }
 
     pub fn status_str(&self) -> &str {
-        &self.status
+        self.status.as_str()
     }
 }
 
@@ -175,7 +219,7 @@ pub struct Task {
     pub task_name: String,
     pub executor_type: String,
     pub depends_on: Vec<String>,
-    pub status: String,
+    pub status: TaskStatus,
     #[serde(default)]
     pub attempts: i32,
     #[serde(default)]
@@ -196,8 +240,12 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn status(&self) -> TaskStatus {
+        self.status
+    }
+
     pub fn status_str(&self) -> &str {
-        &self.status
+        self.status.as_str()
     }
 }
 
@@ -213,7 +261,7 @@ pub struct TaskWithWorkflow {
     pub task_name: String,
     pub executor_type: String,
     pub depends_on: Vec<String>,
-    pub task_status: String,
+    pub task_status: TaskStatus,
     pub attempts: i32,
     pub max_retries: i32,
     pub timeout_seconds: Option<i32>,
@@ -241,7 +289,10 @@ pub struct WorkflowTask {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "TEXT", rename_all = "lowercase"))]
 pub enum DeferredJobStatus {
     Pending,
     Polling,
@@ -291,7 +342,7 @@ pub struct DeferredJob {
     pub service_type: String,
     pub job_id: String,
     pub job_data: JsonValue,
-    status: String,
+    pub status: DeferredJobStatus,
     pub error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -301,11 +352,11 @@ pub struct DeferredJob {
 
 impl DeferredJob {
     pub fn status(&self) -> DeferredJobStatus {
-        DeferredJobStatus::parse(&self.status).unwrap_or(DeferredJobStatus::Pending)
+        self.status
     }
 
     pub fn status_str(&self) -> &str {
-        &self.status
+        self.status.as_str()
     }
 }
 
@@ -346,13 +397,14 @@ mod tests {
         assert_eq!(RunStatus::Paused.as_str(), "paused");
         assert_eq!(RunStatus::Success.as_str(), "success");
         assert_eq!(RunStatus::Failed.as_str(), "failed");
+        assert_eq!(RunStatus::Cancelled.as_str(), "cancelled");
         assert_eq!("running".parse::<RunStatus>(), Ok(RunStatus::Running));
         assert!("invalid".parse::<RunStatus>().is_err());
 
         let run = Run {
             id: Uuid::new_v4(),
             workflow_id: Uuid::new_v4(),
-            status: "running".to_string(),
+            status: RunStatus::Running,
             triggered_by: "test".to_string(),
             started_at: Some(Utc::now()),
             finished_at: None,
@@ -361,20 +413,17 @@ mod tests {
         };
         assert_eq!(run.status(), RunStatus::Running);
         assert_eq!(run.status_str(), "running");
-
-        let fallback = Run {
-            status: "not-a-status".to_string(),
-            ..run
-        };
-        assert_eq!(fallback.status(), RunStatus::Pending);
     }
 
     #[test]
     fn test_task_and_deferred_status_accessors() {
+        assert_eq!(TaskStatus::Pending.as_str(), "pending");
+        assert_eq!(TaskStatus::Dispatched.as_str(), "dispatched");
         assert_eq!(TaskStatus::Running.as_str(), "running");
         assert_eq!(TaskStatus::Paused.as_str(), "paused");
         assert_eq!(TaskStatus::Success.as_str(), "success");
         assert_eq!(TaskStatus::Failed.as_str(), "failed");
+        assert_eq!(TaskStatus::Cancelled.as_str(), "cancelled");
 
         assert_eq!(
             DeferredJobStatus::parse("completed"),
@@ -402,7 +451,7 @@ mod tests {
             service_type: "cloud_run".to_string(),
             job_id: "job-1".to_string(),
             job_data: serde_json::json!({"k": "v"}).into(),
-            status: "completed".to_string(),
+            status: DeferredJobStatus::Completed,
             error: None,
             created_at: Utc::now(),
             started_at: Some(Utc::now()),
@@ -411,12 +460,6 @@ mod tests {
         };
         assert_eq!(deferred.status(), DeferredJobStatus::Completed);
         assert_eq!(deferred.status_str(), "completed");
-
-        let fallback = DeferredJob {
-            status: "unknown".to_string(),
-            ..deferred
-        };
-        assert_eq!(fallback.status(), DeferredJobStatus::Pending);
     }
 
     #[test]

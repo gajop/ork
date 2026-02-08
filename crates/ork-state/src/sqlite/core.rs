@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 use uuid::Uuid;
 
-use ork_core::models::{Task, TaskWithWorkflow, WorkflowTask};
+use ork_core::models::{Task, TaskStatus, TaskWithWorkflow, WorkflowTask};
 
 pub(super) fn parse_depends_on(raw: Option<String>) -> Vec<String> {
     match raw {
@@ -33,7 +33,7 @@ pub(super) struct TaskRow {
     pub task_name: String,
     pub executor_type: String,
     pub depends_on: String,
-    pub status: String,
+    pub status: TaskStatus,
     pub attempts: i32,
     pub max_retries: i32,
     pub timeout_seconds: Option<i32>,
@@ -69,7 +69,7 @@ pub(super) struct TaskWithWorkflowRow {
     pub task_name: String,
     pub executor_type: String,
     pub depends_on: String,
-    pub task_status: String,
+    pub task_status: TaskStatus,
     pub attempts: i32,
     pub max_retries: i32,
     pub timeout_seconds: Option<i32>,

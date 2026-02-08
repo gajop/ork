@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use ork_core::config::OrchestratorConfig;
-use ork_core::database::{Database, NewTask};
+use ork_core::database::{NewTask, RunRepository, TaskRepository, WorkflowRepository};
 use ork_core::executor::{Executor, StatusUpdate};
 use ork_core::executor_manager::ExecutorManager as ExecutorManagerTrait;
 use ork_core::models::Workflow;
@@ -92,7 +92,8 @@ async fn create_running_run_with_retry_task(db: &SqliteDatabase) -> Result<Uuid>
         }],
     )
     .await?;
-    db.update_run_status(run.id, "running", None).await?;
+    db.update_run_status(run.id, ork_core::models::RunStatus::Running, None)
+        .await?;
     Ok(run.id)
 }
 

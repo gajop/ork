@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::database::NewTask;
 use crate::executor::StatusUpdate;
 use crate::executor_manager::ExecutorManager;
-use crate::models::{TaskWithWorkflow, Workflow, WorkflowTask, json_inner};
+use crate::models::{TaskStatus, TaskWithWorkflow, Workflow, WorkflowTask, json_inner};
 
 pub async fn execute_task<E: ExecutorManager>(
     task_with_workflow: TaskWithWorkflow,
@@ -15,11 +15,11 @@ pub async fn execute_task<E: ExecutorManager>(
     executor_manager: &E,
     status_tx: tokio::sync::mpsc::UnboundedSender<StatusUpdate>,
 ) -> (Uuid, Result<String>) {
-    if task_with_workflow.task_status != "pending" {
+    if !matches!(task_with_workflow.task_status, TaskStatus::Pending) {
         let err = anyhow::anyhow!(
             "refusing to dispatch task {} in non-pending status {}",
             task_with_workflow.task_id,
-            task_with_workflow.task_status
+            task_with_workflow.task_status.as_str()
         );
         return (task_with_workflow.task_id, Err(err));
     }
