@@ -11,6 +11,8 @@ tasks:
     function: generate_numbers
     input:
       count: 5
+    output_type:
+      numbers: [integer]
 
   # METHOD 2: Rust Library Executor (High Performance, Zero Overhead)
   # - Uses cdylib and C ABI
@@ -20,6 +22,13 @@ tasks:
     executor: library
     file: rust_tasks/target/debug/libpolyglot_rust_lib.so
     depends_on: [py_generate]
+    input_type:
+      upstream:
+        py_generate:
+          numbers: [integer]
+    output_type:
+      tripled: [integer]
+      sum: integer
 
   # METHOD 3: Rust Process with SDK (Clean, Minimal Boilerplate)
   # - Uses ork-sdk-rust helpers
@@ -29,6 +38,14 @@ tasks:
     executor: process
     command: rust_tasks/target/debug/process_sdk
     depends_on: [rust_library]
+    input_type:
+      upstream:
+        rust_library:
+          tripled: [integer]
+          sum: integer
+    output_type:
+      total: integer
+      tripled: [integer]
 
   # METHOD 4: Rust Process Raw (Maximum Control)
   # - Manual env var parsing and JSON handling
@@ -38,6 +55,13 @@ tasks:
     executor: process
     command: rust_tasks/target/debug/process_raw
     depends_on: [py_generate]
+    input_type:
+      upstream:
+        py_generate:
+          numbers: [integer]
+    output_type:
+      sum: integer
+      count: integer
 
   # Back to Python for final formatting
   py_format:
@@ -47,3 +71,13 @@ tasks:
     depends_on: [rust_process_sdk]
     input:
       multiplier: 10
+    input_type:
+      upstream:
+        rust_process_sdk:
+          total: integer
+          tripled: [integer]
+    output_type:
+      summary: string
+      total: integer
+      final_value: integer
+      tripled_numbers: [integer]

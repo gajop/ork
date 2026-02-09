@@ -29,6 +29,8 @@ pub struct CompiledTask {
     pub timeout: u64,
     pub retries: u32,
     pub signature: Option<serde_json::Value>,
+    pub input_type: Option<serde_json::Value>,
+    pub output_type: Option<serde_json::Value>,
 }
 
 impl Workflow {
@@ -92,6 +94,8 @@ impl Workflow {
                 timeout: task.timeout,
                 retries: task.retries,
                 signature,
+                input_type: task.input_type.clone(),
+                output_type: task.output_type.clone(),
             });
         }
 
@@ -320,13 +324,27 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
             }
         }
 
+        // Merge type info into the signature
+        let mut signature = task.signature.clone().unwrap_or(serde_json::json!({}));
+        if let Some(ref input_type) = task.input_type {
+            signature["input_type"] = input_type.clone();
+        }
+        if let Some(ref output_type) = task.output_type {
+            signature["output_type"] = output_type.clone();
+        }
+        let signature = if signature == serde_json::json!({}) {
+            None
+        } else {
+            Some(signature)
+        };
+
         tasks.push(NewWorkflowTask {
             task_index: idx as i32,
             task_name: task.name.clone(),
             executor_type: executor_type.to_string(),
             depends_on,
             params: serde_json::Value::Object(params),
-            signature: task.signature.clone(),
+            signature,
         });
     }
 

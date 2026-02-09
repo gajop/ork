@@ -5,10 +5,9 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use ork_core::database::Database;
+use ork_core::database::{RunListQuery, WorkflowListQuery};
 use ork_core::models::{RunStatus, TaskStatus};
 
 use crate::handlers::{WorkflowInfo, WorkflowTaskInfo};
@@ -50,57 +49,55 @@ pub(crate) async fn list_runs(
     State(api): State<ApiServer>,
     Query(params): Query<RunQueryParams>,
 ) -> impl IntoResponse {
-    let mut runs = match api.db.list_runs(None).await {
-        Ok(r) => r,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-    runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    let workflow_ids: HashSet<Uuid> = runs.iter().map(|r| r.workflow_id).collect();
-    let workflow_map = match load_workflow_names(&*api.db, &workflow_ids).await {
-        Ok(map) => map,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    if let Some(ref status_filter) = params.status {
-        let parsed = RunStatus::parse(status_filter);
-        runs.retain(|r| parsed.is_some_and(|want| r.status() == want));
-    }
-    if let Some(ref workflow_filter) = params.workflow {
-        runs.retain(|r| {
-            workflow_map
-                .get(&r.workflow_id)
-                .map(|name| name == workflow_filter)
-                .unwrap_or(false)
-        });
-    }
-
-    let total = runs.len();
     let limit = params.limit.unwrap_or(50).min(200);
     let offset = params.offset.unwrap_or(0);
+    let status_filter = match params.status.as_deref() {
+        Some(raw) => match RunStatus::parse(raw) {
+            Some(status) => Some(status),
+            None => {
+                return Json(PaginatedRuns {
+                    items: Vec::new(),
+                    total: 0,
+                    limit,
+                    offset,
+                    has_more: false,
+                })
+                .into_response();
+            }
+        },
+        None => None,
+    };
+    let query = RunListQuery {
+        limit,
+        offset,
+        status: status_filter,
+        workflow_name: params.workflow,
+    };
+    let page = match api.db.list_runs_page(&query).await {
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
-    let items: Vec<RunListItem> = runs
+    let items: Vec<RunListItem> = page
+        .items
         .into_iter()
-        .skip(offset)
-        .take(limit)
-        .map(|r| RunListItem {
-            id: r.id.to_string(),
-            workflow: workflow_map
-                .get(&r.workflow_id)
-                .cloned()
-                .unwrap_or_else(|| r.workflow_id.to_string()),
-            status: r.status().as_str().to_string(),
-            created_at: fmt_time(r.created_at),
-            started_at: r.started_at.map(fmt_time),
-            finished_at: r.finished_at.map(fmt_time),
+        .map(|entry| RunListItem {
+            id: entry.run.id.to_string(),
+            workflow: entry
+                .workflow_name
+                .unwrap_or_else(|| entry.run.workflow_id.to_string()),
+            status: entry.run.status().as_str().to_string(),
+            created_at: fmt_time(entry.run.created_at),
+            started_at: entry.run.started_at.map(fmt_time),
+            finished_at: entry.run.finished_at.map(fmt_time),
         })
         .collect();
 
-    let has_more = offset + items.len() < total;
+    let has_more = offset + items.len() < page.total;
 
     Json(PaginatedRuns {
         items,
-        total,
+        total: page.total,
         limit,
         offset,
         has_more,
@@ -143,25 +140,21 @@ pub(crate) async fn list_workflows(
     State(api): State<ApiServer>,
     Query(params): Query<WorkflowQueryParams>,
 ) -> impl IntoResponse {
-    let mut workflows = match api.db.list_workflows().await {
-        Ok(w) => w,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-    workflows.sort_by(|a, b| a.name.cmp(&b.name));
-
-    if let Some(ref search_term) = params.search {
-        let search_lower = search_term.to_lowercase();
-        workflows.retain(|wf| wf.name.to_lowercase().contains(&search_lower));
-    }
-
-    let total = workflows.len();
     let limit = params.limit.unwrap_or(100).min(200);
     let offset = params.offset.unwrap_or(0);
+    let query = WorkflowListQuery {
+        limit,
+        offset,
+        search: params.search,
+    };
+    let page = match api.db.list_workflows_page(&query).await {
+        Ok(page) => page,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
-    let items: Vec<WorkflowListItem> = workflows
+    let items: Vec<WorkflowListItem> = page
+        .items
         .into_iter()
-        .skip(offset)
-        .take(limit)
         .map(|wf| WorkflowListItem {
             id: wf.id.to_string(),
             name: wf.name,
@@ -174,11 +167,11 @@ pub(crate) async fn list_workflows(
         })
         .collect();
 
-    let has_more = offset + items.len() < total;
+    let has_more = offset + items.len() < page.total;
 
     Json(PaginatedWorkflows {
         items,
-        total,
+        total: page.total,
         limit,
         offset,
         has_more,
@@ -476,17 +469,4 @@ pub(crate) async fn update_workflow_schedule(
     }
 
     StatusCode::OK.into_response()
-}
-
-async fn load_workflow_names(
-    db: &dyn Database,
-    workflow_ids: &HashSet<Uuid>,
-) -> anyhow::Result<HashMap<Uuid, String>> {
-    if workflow_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let ids: Vec<Uuid> = workflow_ids.iter().cloned().collect();
-    let workflows = db.get_workflows_by_ids(&ids).await?;
-    let map = workflows.into_iter().map(|wf| (wf.id, wf.name)).collect();
-    Ok(map)
 }

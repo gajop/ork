@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::{ApiServer, fmt_time, is_not_found};
-use crate::workflow_tasks::build_workflow_tasks;
 use ork_core::models::json_inner;
+use ork_core::services::workflow_yaml::{
+    ApplyWorkflowYamlRequest, ExistingWorkflowBehavior, WorkflowServiceError, apply_workflow_yaml,
+};
 
 #[derive(Deserialize)]
 pub struct CreateWorkflowRequest {
@@ -33,66 +35,44 @@ pub async fn create_workflow(
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let root = root.canonicalize().unwrap_or(root);
 
-    let definition: ork_core::workflow::Workflow = match serde_yaml::from_str(&payload.yaml) {
-        Ok(def) => def,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-    if let Err(err) = definition.validate() {
-        return (StatusCode::BAD_REQUEST, err.to_string()).into_response();
-    }
-    let compiled = match definition.compile(&root) {
-        Ok(compiled) => compiled,
-        Err(err) => return (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
-    };
-
     let replace = payload.replace.unwrap_or(true);
-    let workflow = match api.db.get_workflow(&definition.name).await {
-        Ok(existing) => {
-            if !replace {
-                return (
-                    StatusCode::CONFLICT,
-                    "Workflow already exists; pass replace=true to update tasks.".to_string(),
-                )
-                    .into_response();
-            }
-            existing
+    let existing_workflow = if replace {
+        ExistingWorkflowBehavior::Replace
+    } else {
+        ExistingWorkflowBehavior::Error
+    };
+    let workflow = match apply_workflow_yaml(
+        &*api.db,
+        ApplyWorkflowYamlRequest {
+            yaml_content: &payload.yaml,
+            root: &root,
+            project: &project,
+            region: &region,
+            existing_workflow,
+            persist_schedule_on_create: true,
+        },
+    )
+    .await
+    {
+        Ok(result) => result.workflow,
+        Err(WorkflowServiceError::WorkflowAlreadyExists { .. }) => {
+            return (
+                StatusCode::CONFLICT,
+                "Workflow already exists; pass replace=true to update tasks.".to_string(),
+            )
+                .into_response();
         }
-        Err(err) => {
-            if is_not_found(&err) {
-                match api
-                    .db
-                    .create_workflow(
-                        &definition.name,
-                        None,
-                        "dag",
-                        &region,
-                        &project,
-                        "dag",
-                        None,
-                        definition.schedule.as_deref(),
-                    )
-                    .await
-                {
-                    Ok(wf) => wf,
-                    Err(err) => {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                            .into_response();
-                    }
-                }
-            } else {
-                return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
-            }
+        Err(WorkflowServiceError::InvalidYaml(err)) => {
+            return (StatusCode::BAD_REQUEST, err.to_string()).into_response();
+        }
+        Err(WorkflowServiceError::InvalidWorkflow(msg))
+        | Err(WorkflowServiceError::Compilation(msg)) => {
+            return (StatusCode::BAD_REQUEST, msg).into_response();
+        }
+        Err(WorkflowServiceError::Storage(err)) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
         }
     };
-
-    let workflow_tasks = build_workflow_tasks(&compiled);
-    if let Err(err) = api
-        .db
-        .create_workflow_tasks(workflow.id, &workflow_tasks)
-        .await
-    {
-        return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
-    }
 
     #[derive(Serialize)]
     struct Resp {

@@ -194,6 +194,8 @@ fn test_topo_sort_returns_cycle_error_when_graph_is_cyclic() {
             timeout: 300,
             retries: 0,
             signature: None,
+            input_type: None,
+            output_type: None,
         },
         CompiledTask {
             name: "b".to_string(),
@@ -208,6 +210,8 @@ fn test_topo_sort_returns_cycle_error_when_graph_is_cyclic() {
             timeout: 300,
             retries: 0,
             signature: None,
+            input_type: None,
+            output_type: None,
         },
     ];
 
@@ -239,6 +243,8 @@ fn compiled_fixture() -> CompiledWorkflow {
                 timeout: 30,
                 retries: 2,
                 signature: None,
+                input_type: None,
+                output_type: None,
             },
             CompiledTask {
                 name: "python_task".to_string(),
@@ -253,6 +259,8 @@ fn compiled_fixture() -> CompiledWorkflow {
                 timeout: 45,
                 retries: 1,
                 signature: Some(serde_json::json!({"args": []})),
+                input_type: None,
+                output_type: None,
             },
             CompiledTask {
                 name: "cloud_task".to_string(),
@@ -267,6 +275,8 @@ fn compiled_fixture() -> CompiledWorkflow {
                 timeout: 60,
                 retries: 0,
                 signature: None,
+                input_type: None,
+                output_type: None,
             },
             CompiledTask {
                 name: "library_task".to_string(),
@@ -281,6 +291,8 @@ fn compiled_fixture() -> CompiledWorkflow {
                 timeout: 15,
                 retries: 0,
                 signature: None,
+                input_type: None,
+                output_type: None,
             },
         ],
         name_index: Default::default(),
@@ -394,6 +406,8 @@ fn test_build_workflow_tasks_maps_process_file_into_command() {
             timeout: 5,
             retries: 0,
             signature: None,
+            input_type: None,
+            output_type: None,
         }],
         name_index: indexmap::IndexMap::new(),
         topo: vec![0],

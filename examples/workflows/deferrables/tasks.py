@@ -6,7 +6,8 @@ without keeping the worker container running.
 """
 
 import os
-from ork_sdk import BigQueryJob, CustomHttp
+from typing import Any
+from ork_sdk import CustomHttp
 
 
 def simulate_bigquery_job():
@@ -20,20 +21,20 @@ def simulate_bigquery_job():
 
     The worker then scales to 0, and the scheduler tracks the job.
     """
-    project = os.getenv("GCP_PROJECT", "my-project")
     job_id = f"simulated_job_{os.getpid()}"
-    location = "US"
 
-    print(f"Starting BigQuery job: {job_id}")
-    print(f"Project: {project}, Location: {location}")
+    print(f"Starting mock BigQuery job: {job_id}")
+    print("Tracker URL: mock://success")
 
-    # Return deferrable - tells Ork to track this job
+    # Return deferrable - scheduler will mark this as completed via mock tracker
     return {
         "deferred": [
-            BigQueryJob(
-                project=project,
-                job_id=job_id,
-                location=location
+            CustomHttp(
+                url=f"mock://success/{job_id}",
+                method="GET",
+                completion_field="status",
+                completion_value="success",
+                failure_value="failed",
             ).to_dict()
         ]
     }
@@ -47,7 +48,7 @@ def simulate_custom_http_job():
     status endpoints.
     """
     job_id = f"custom_job_{os.getpid()}"
-    status_url = f"https://api.example.com/jobs/{job_id}/status"
+    status_url = f"mock://success/{job_id}"
 
     print(f"Starting custom HTTP job: {job_id}")
     print(f"Status URL: {status_url}")
@@ -73,27 +74,29 @@ def multiple_jobs():
 
     The task completes only when ALL deferred jobs complete.
     """
-    project = os.getenv("GCP_PROJECT", "my-project")
-
-    print("Starting multiple BigQuery jobs")
+    print("Starting multiple mock deferred jobs")
 
     return {
         "deferred": [
-            BigQueryJob(
-                project=project,
-                job_id=f"analytics_job_{os.getpid()}",
-                location="US"
+            CustomHttp(
+                url=f"mock://success/analytics_job_{os.getpid()}",
+                method="GET",
+                completion_field="status",
+                completion_value="success",
+                failure_value="failed",
             ).to_dict(),
-            BigQueryJob(
-                project=project,
-                job_id=f"ml_training_{os.getpid()}",
-                location="EU"
+            CustomHttp(
+                url=f"mock://success/ml_training_{os.getpid()}",
+                method="GET",
+                completion_field="status",
+                completion_value="success",
+                failure_value="failed",
             ).to_dict()
         ]
     }
 
 
-def process_results(upstream):
+def process_results(upstream: dict[str, Any]):
     """
     Example of a downstream task that runs after deferred jobs complete.
 

@@ -1,8 +1,23 @@
 use super::core::PostgresDatabase;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
+use ork_core::database::{RunListEntry, RunListPage, RunListQuery};
 use ork_core::models::{Run, RunStatus, TaskStatus};
 use sqlx::Row;
 use uuid::Uuid;
+
+#[derive(sqlx::FromRow)]
+struct RunWithWorkflowRow {
+    id: Uuid,
+    workflow_id: Uuid,
+    status: RunStatus,
+    triggered_by: String,
+    started_at: Option<DateTime<Utc>>,
+    finished_at: Option<DateTime<Utc>>,
+    error: Option<String>,
+    created_at: DateTime<Utc>,
+    workflow_name: Option<String>,
+}
 
 impl PostgresDatabase {
     pub(super) async fn create_run_impl(
@@ -63,6 +78,135 @@ impl PostgresDatabase {
             }
         };
         Ok(runs)
+    }
+
+    pub(super) async fn list_runs_page_impl(&self, query: &RunListQuery) -> Result<RunListPage> {
+        let limit = i64::try_from(query.limit).unwrap_or(i64::MAX);
+        let offset = i64::try_from(query.offset).unwrap_or(i64::MAX);
+        let status = query.status.map(|s| s.as_str().to_string());
+
+        let (total, rows) = match (status.as_deref(), query.workflow_name.as_deref()) {
+            (Some(status), Some(workflow_name)) => {
+                let total = sqlx::query_scalar::<_, i64>(
+                    r#"SELECT COUNT(*)
+                       FROM runs r
+                       INNER JOIN workflows w ON w.id = r.workflow_id
+                       WHERE r.status = $1 AND w.name = $2"#,
+                )
+                .bind(status)
+                .bind(workflow_name)
+                .fetch_one(&self.pool)
+                .await?;
+
+                let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
+                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                              w.name AS workflow_name
+                       FROM runs r
+                       LEFT JOIN workflows w ON w.id = r.workflow_id
+                       WHERE r.status = $1 AND w.name = $2
+                       ORDER BY r.created_at DESC, r.id DESC
+                       LIMIT $3 OFFSET $4"#,
+                )
+                .bind(status)
+                .bind(workflow_name)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
+                (total, rows)
+            }
+            (Some(status), None) => {
+                let total =
+                    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM runs WHERE status = $1")
+                        .bind(status)
+                        .fetch_one(&self.pool)
+                        .await?;
+
+                let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
+                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                              w.name AS workflow_name
+                       FROM runs r
+                       LEFT JOIN workflows w ON w.id = r.workflow_id
+                       WHERE r.status = $1
+                       ORDER BY r.created_at DESC, r.id DESC
+                       LIMIT $2 OFFSET $3"#,
+                )
+                .bind(status)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
+                (total, rows)
+            }
+            (None, Some(workflow_name)) => {
+                let total = sqlx::query_scalar::<_, i64>(
+                    r#"SELECT COUNT(*)
+                       FROM runs r
+                       INNER JOIN workflows w ON w.id = r.workflow_id
+                       WHERE w.name = $1"#,
+                )
+                .bind(workflow_name)
+                .fetch_one(&self.pool)
+                .await?;
+
+                let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
+                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                              w.name AS workflow_name
+                       FROM runs r
+                       LEFT JOIN workflows w ON w.id = r.workflow_id
+                       WHERE w.name = $1
+                       ORDER BY r.created_at DESC, r.id DESC
+                       LIMIT $2 OFFSET $3"#,
+                )
+                .bind(workflow_name)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
+                (total, rows)
+            }
+            (None, None) => {
+                let total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM runs")
+                    .fetch_one(&self.pool)
+                    .await?;
+
+                let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
+                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                              w.name AS workflow_name
+                       FROM runs r
+                       LEFT JOIN workflows w ON w.id = r.workflow_id
+                       ORDER BY r.created_at DESC, r.id DESC
+                       LIMIT $1 OFFSET $2"#,
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
+                (total, rows)
+            }
+        };
+
+        let items = rows
+            .into_iter()
+            .map(|row| RunListEntry {
+                run: Run {
+                    id: row.id,
+                    workflow_id: row.workflow_id,
+                    status: row.status,
+                    triggered_by: row.triggered_by,
+                    started_at: row.started_at,
+                    finished_at: row.finished_at,
+                    error: row.error,
+                    created_at: row.created_at,
+                },
+                workflow_name: row.workflow_name,
+            })
+            .collect();
+
+        Ok(RunListPage {
+            items,
+            total: total as usize,
+        })
     }
     pub(super) async fn get_pending_runs_impl(&self) -> Result<Vec<Run>> {
         let runs = sqlx::query_as::<_, Run>("SELECT * FROM runs WHERE status = $1")

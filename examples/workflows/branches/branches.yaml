@@ -7,6 +7,9 @@ tasks:
     input:
       name: "branch root"
       delay: 2
+    output_type:
+      message: string
+      timestamp: number
 
   left:
     executor: python
@@ -15,6 +18,14 @@ tasks:
     input:
       name: "left path"
       delay: 5
+    input_type:
+      upstream:
+        start:
+          message: string
+          timestamp: number
+    output_type:
+      message: string
+      timestamp: number
 
   right:
     executor: python
@@ -23,6 +34,14 @@ tasks:
     input:
       name: "right path"
       delay: 5
+    input_type:
+      upstream:
+        start:
+          message: string
+          timestamp: number
+    output_type:
+      message: string
+      timestamp: number
 
   join:
     executor: python
@@ -30,3 +49,14 @@ tasks:
     depends_on: [left, right]
     input:
       adjective: "joined outputs"
+    input_type:
+      upstream:
+        left:
+          message: string
+          timestamp: number
+        right:
+          message: string
+          timestamp: number
+    output_type:
+      line: string
+      adjective: string

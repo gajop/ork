@@ -32,6 +32,39 @@ pub struct NewWorkflowTask {
     pub signature: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WorkflowListQuery {
+    pub limit: usize,
+    pub offset: usize,
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkflowListPage {
+    pub items: Vec<Workflow>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunListQuery {
+    pub limit: usize,
+    pub offset: usize,
+    pub status: Option<RunStatus>,
+    pub workflow_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunListEntry {
+    pub run: Run,
+    pub workflow_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunListPage {
+    pub items: Vec<RunListEntry>,
+    pub total: usize,
+}
+
 /// Repository for workflow CRUD operations
 #[async_trait]
 pub trait WorkflowRepository: Send + Sync {
@@ -50,6 +83,10 @@ pub trait WorkflowRepository: Send + Sync {
     async fn get_workflow(&self, name: &str) -> anyhow::Result<Workflow>;
     async fn get_workflow_by_id(&self, workflow_id: Uuid) -> anyhow::Result<Workflow>;
     async fn list_workflows(&self) -> anyhow::Result<Vec<Workflow>>;
+    async fn list_workflows_page(
+        &self,
+        query: &WorkflowListQuery,
+    ) -> anyhow::Result<WorkflowListPage>;
     async fn delete_workflow(&self, name: &str) -> anyhow::Result<()>;
 
     /// Batch fetch workflows by IDs (used by scheduler)
@@ -81,6 +118,7 @@ pub trait RunRepository: Send + Sync {
 
     async fn get_run(&self, run_id: Uuid) -> anyhow::Result<Run>;
     async fn list_runs(&self, workflow_id: Option<Uuid>) -> anyhow::Result<Vec<Run>>;
+    async fn list_runs_page(&self, query: &RunListQuery) -> anyhow::Result<RunListPage>;
     async fn get_pending_runs(&self) -> anyhow::Result<Vec<Run>>;
 
     /// Cancel a run and all its pending/dispatched/running tasks

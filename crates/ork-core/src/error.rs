@@ -65,6 +65,16 @@ pub enum WorkflowValidationError {
     TaskFileNotFound { task: String, path: PathBuf },
     #[error("workflow contains a cycle involving task {task}")]
     Cycle { task: String },
+    #[error("task '{task}' requires 'output_type' because task '{depended_by}' depends on it")]
+    MissingOutputType { task: String, depended_by: String },
+    #[error("task '{task}' requires 'input_type' because it has dependencies")]
+    MissingInputType { task: String },
+    #[error("task '{task}' has invalid type schema at '{path}': {reason}")]
+    InvalidTypeSchema {
+        task: String,
+        path: String,
+        reason: String,
+    },
     #[error("{0}")]
     Custom(String),
 }

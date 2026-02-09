@@ -2,9 +2,10 @@ use anyhow::Result;
 use clap::Args;
 use std::sync::Arc;
 
-use ork_core::compiled::build_workflow_tasks;
 use ork_core::database::Database;
-use ork_core::workflow::Workflow as YamlWorkflow;
+use ork_core::services::workflow_yaml::{
+    ApplyWorkflowYamlRequest, ExistingWorkflowBehavior, WorkflowServiceError, apply_workflow_yaml,
+};
 
 #[derive(Args)]
 pub struct CreateWorkflowYaml {
@@ -49,11 +50,6 @@ pub async fn create_workflow_from_yaml_str(
     project: &str,
     region: &str,
 ) -> Result<ork_core::models::Workflow> {
-    let definition: YamlWorkflow = serde_yaml::from_str(yaml_content)?;
-    definition
-        .validate()
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
     let root = std::path::Path::new(file_path)
         .parent()
         .map(|p| p.to_path_buf())
@@ -61,28 +57,31 @@ pub async fn create_workflow_from_yaml_str(
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
     let root = root.canonicalize().unwrap_or(root);
-    let compiled = definition
-        .compile(&root)
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-    let workflow = db
-        .create_workflow(
-            &definition.name,
-            None,
-            "dag",
-            region,
+    let result = apply_workflow_yaml(
+        db,
+        ApplyWorkflowYamlRequest {
+            yaml_content,
+            root: &root,
             project,
-            "dag",
-            None,
-            None,
-        )
-        .await?;
+            region,
+            existing_workflow: ExistingWorkflowBehavior::Error,
+            persist_schedule_on_create: false,
+        },
+    )
+    .await
+    .map_err(|err| match err {
+        WorkflowServiceError::WorkflowAlreadyExists { name } => {
+            anyhow::anyhow!("workflow already exists: {}", name)
+        }
+        WorkflowServiceError::InvalidYaml(err) => anyhow::Error::new(err),
+        WorkflowServiceError::InvalidWorkflow(msg) | WorkflowServiceError::Compilation(msg) => {
+            anyhow::anyhow!(msg)
+        }
+        WorkflowServiceError::Storage(err) => err,
+    })?;
 
-    let workflow_tasks = build_workflow_tasks(&compiled);
-    db.create_workflow_tasks(workflow.id, &workflow_tasks)
-        .await?;
-
-    Ok(workflow)
+    Ok(result.workflow)
 }
 
 #[cfg(test)]
@@ -102,10 +101,16 @@ tasks:
   first:
     executor: process
     command: "echo first"
+    output_type:
+      data: string
   second:
     executor: process
     command: "echo second"
     depends_on: ["first"]
+    input_type:
+      upstream:
+        first:
+          data: string
 "#;
 
         let workflow =

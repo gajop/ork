@@ -141,10 +141,16 @@ tasks:
   t1:
     executor: process
     command: "echo hi"
+    output_type:
+      data: string
   t2:
     executor: python
     module: "tasks"
     depends_on: ["t1"]
+    input_type:
+      upstream:
+        t1:
+          data: string
 "#,
         )
         .expect("write workflow yaml");

@@ -7,6 +7,9 @@ tasks:
     retries: 2
     input:
       fail_times: 1
+    output_type:
+      ok: boolean
+      attempt: integer
 
   greet_after_retry:
     executor: python
@@ -15,3 +18,11 @@ tasks:
     input:
       name: "after retry"
       delay: 2
+    input_type:
+      upstream:
+        flakey:
+          ok: boolean
+          attempt: integer
+    output_type:
+      message: string
+      timestamp: number

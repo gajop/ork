@@ -43,13 +43,16 @@ class Deferrable(ABC):
         pass
 
     @abstractmethod
-    def job_id(self) -> str:
-        """Get job identifier for tracking"""
+    def tracking_id(self) -> str:
+        """Get a stable identifier for tracking this deferred job"""
         pass
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize deferrable to dictionary for JSON storage"""
-        return asdict(self)
+        payload = asdict(self)
+        payload["service_type"] = self.service_type()
+        payload.setdefault("job_id", self.tracking_id())
+        return payload
 
     def to_json(self) -> str:
         """Serialize deferrable to JSON string"""
@@ -90,7 +93,7 @@ class BigQueryJob(Deferrable):
     def service_type(self) -> str:
         return "bigquery"
 
-    def job_id(self) -> str:
+    def tracking_id(self) -> str:
         return f"{self.project}/{self.location}/{self.job_id}"
 
 
@@ -129,7 +132,7 @@ class CloudRunJob(Deferrable):
     def service_type(self) -> str:
         return "cloudrun"
 
-    def job_id(self) -> str:
+    def tracking_id(self) -> str:
         return f"{self.project}/{self.region}/{self.job_name}/{self.execution_id}"
 
 
@@ -168,7 +171,7 @@ class DataprocJob(Deferrable):
     def service_type(self) -> str:
         return "dataproc"
 
-    def job_id(self) -> str:
+    def tracking_id(self) -> str:
         return f"{self.project}/{self.region}/{self.cluster_name}/{self.job_id}"
 
 
@@ -216,7 +219,13 @@ class CustomHttp(Deferrable):
     def service_type(self) -> str:
         return "custom_http"
 
-    def job_id(self) -> str:
+    def to_dict(self) -> Dict[str, Any]:
+        payload = super().to_dict()
+        payload["status_field"] = payload.pop("completion_field")
+        payload["success_value"] = payload.pop("completion_value")
+        return payload
+
+    def tracking_id(self) -> str:
         # Use URL as job identifier
         return self.url
 

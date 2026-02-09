@@ -1,3 +1,5 @@
+mod delegation;
+
 // Legacy state stores (to be deprecated - use Database trait instead)
 mod file;
 mod memory;

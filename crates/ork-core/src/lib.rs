@@ -12,6 +12,7 @@ pub mod job_tracker;
 pub mod models;
 pub mod schedule_processor;
 pub mod scheduler;
+pub mod services;
 pub mod task_execution;
 pub mod triggerer;
 pub mod worker_client;

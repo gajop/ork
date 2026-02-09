@@ -5,15 +5,39 @@ tasks:
     executor: python
     module: fast
     function: task_a
+    output_type:
+      task: string
+      status: string
+      timestamp: number
 
   task_b:
     executor: python
     module: fast
     function: task_b
     depends_on: [task_a]
+    input_type:
+      upstream:
+        task_a:
+          task: string
+          status: string
+          timestamp: number
+    output_type:
+      task: string
+      status: string
+      timestamp: number
 
   task_c:
     executor: python
     module: fast
     function: task_c
     depends_on: [task_b]
+    input_type:
+      upstream:
+        task_b:
+          task: string
+          status: string
+          timestamp: number
+    output_type:
+      task: string
+      status: string
+      timestamp: number

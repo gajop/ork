@@ -85,6 +85,16 @@ impl JobTracker for CustomHttpTracker {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing url in job_data"))?;
 
+        if let Some(mock_state) = url.strip_prefix("mock://") {
+            return match mock_state {
+                state if state.starts_with("success") => Ok(JobStatus::Completed),
+                state if state.starts_with("failed") => {
+                    Ok(JobStatus::Failed("Mock job failed".to_string()))
+                }
+                _ => Ok(JobStatus::Running),
+            };
+        }
+
         let method = job_data
             .get("method")
             .and_then(|v| v.as_str())

@@ -22,16 +22,30 @@ tasks:
   extract:
     executor: process
     file: task.sh
+    output_type:
+      data: string
   launch:
     executor: cloudrun
     job: cloud-job
+    output_type:
+      status: string
   native:
     executor: library
     file: task.so
+    output_type:
+      result: integer
   aggregate:
     executor: process
     command: "echo done"
     depends_on: [extract, launch, native]
+    input_type:
+      upstream:
+        extract:
+          data: string
+        launch:
+          status: string
+        native:
+          result: integer
 "#;
     let workflow: Workflow = serde_yaml::from_str(yaml).expect("workflow yaml");
     let compiled = workflow.compile(dir.path()).expect("compile");

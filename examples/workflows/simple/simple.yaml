@@ -5,15 +5,32 @@ tasks:
     executor: python
     module: simple
     function: hello
+    output_type:
+      message: string
+      timestamp: number
 
   wait:
     executor: python
     module: simple
     function: wait
     depends_on: [hello]
+    input_type:
+      upstream:
+        hello:
+          message: string
+          timestamp: number
+    output_type:
+      waited_seconds: integer
 
   note:
     executor: python
     module: simple
     function: note
     depends_on: [wait]
+    input_type:
+      upstream:
+        wait:
+          waited_seconds: integer
+    output_type:
+      note: string
+      finished_at: number

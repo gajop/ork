@@ -5,7 +5,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use ork_core::database::NewTask;
-use ork_core::models::{Task, TaskStatus, json_inner};
+use ork_core::models::{Task, TaskStatus, TaskWithWorkflow, json_inner};
 
 use super::core::FileDatabase;
 
@@ -219,6 +219,15 @@ impl FileDatabase {
             }
         }
         Ok(tasks)
+    }
+
+    pub(super) async fn get_pending_tasks_with_workflow_impl(
+        &self,
+        _limit: i64,
+    ) -> Result<Vec<TaskWithWorkflow>> {
+        anyhow::bail!(
+            "FileDatabase::get_pending_tasks_with_workflow not implemented; use get_pending_tasks instead"
+        );
     }
 
     pub(super) async fn append_task_log_impl(&self, task_id: Uuid, chunk: &str) -> Result<()> {

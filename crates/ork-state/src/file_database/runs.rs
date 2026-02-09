@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::Utc;
+use ork_core::database::{RunListEntry, RunListPage, RunListQuery};
 use tokio::fs;
 use uuid::Uuid;
 
@@ -80,6 +81,45 @@ impl FileDatabase {
         }
         runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(runs)
+    }
+
+    pub(super) async fn list_runs_page_impl(&self, query: &RunListQuery) -> Result<RunListPage> {
+        let mut runs = self.list_runs_impl(None).await?;
+        let workflows = self.list_workflows_impl().await?;
+        let workflow_name_by_id = workflows
+            .into_iter()
+            .map(|workflow| (workflow.id, workflow.name))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        if let Some(status) = query.status {
+            runs.retain(|run| run.status() == status);
+        }
+        if let Some(workflow_name) = query.workflow_name.as_deref() {
+            runs.retain(|run| {
+                workflow_name_by_id
+                    .get(&run.workflow_id)
+                    .is_some_and(|name| name == workflow_name)
+            });
+        }
+
+        runs.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+
+        let total = runs.len();
+        let items = runs
+            .into_iter()
+            .skip(query.offset)
+            .take(query.limit)
+            .map(|run| RunListEntry {
+                workflow_name: workflow_name_by_id.get(&run.workflow_id).cloned(),
+                run,
+            })
+            .collect();
+
+        Ok(RunListPage { items, total })
     }
 
     pub(super) async fn get_pending_runs_impl(&self) -> Result<Vec<Run>> {

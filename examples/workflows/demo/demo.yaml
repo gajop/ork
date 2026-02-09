@@ -7,6 +7,9 @@ tasks:
     input:
       name: "Ork dev"
       delay: 5
+    output_type:
+      message: string
+      timestamp: number
 
   compliment:
     executor: python
@@ -14,8 +17,24 @@ tasks:
     depends_on: [greet]
     input:
       adjective: "ridiculously fast"
+    input_type:
+      upstream:
+        greet:
+          message: string
+          timestamp: number
+    output_type:
+      line: string
+      adjective: string
 
   shell_echo:
     executor: python
     file: tasks/shell_echo.py
     depends_on: [compliment]
+    input_type:
+      upstream:
+        compliment:
+          line: string
+          adjective: string
+    output_type:
+      note: string
+      finished_at: number

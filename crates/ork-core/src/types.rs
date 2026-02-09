@@ -159,6 +159,8 @@ mod tests {
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 1,
+                input_type: None,
+                output_type: None,
             },
         );
         Workflow {
@@ -209,6 +211,8 @@ mod tests {
                 timeout: 300,
                 retries: 0,
                 signature: None,
+                input_type: None,
+                output_type: None,
             }],
             name_index: IndexMap::from([(String::from("task0"), 0)]),
             topo: vec![0],

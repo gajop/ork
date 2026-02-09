@@ -1,6 +1,6 @@
 use super::core::PostgresDatabase;
 use anyhow::Result;
-use ork_core::database::NewWorkflowTask;
+use ork_core::database::{NewWorkflowTask, WorkflowListPage, WorkflowListQuery};
 use ork_core::models::{Workflow, WorkflowTask};
 use uuid::Uuid;
 
@@ -33,6 +33,58 @@ impl PostgresDatabase {
                 .fetch_all(&self.pool)
                 .await?;
         Ok(workflows)
+    }
+
+    pub(super) async fn list_workflows_page_impl(
+        &self,
+        query: &WorkflowListQuery,
+    ) -> Result<WorkflowListPage> {
+        let limit = i64::try_from(query.limit).unwrap_or(i64::MAX);
+        let offset = i64::try_from(query.offset).unwrap_or(i64::MAX);
+        let search = query
+            .search
+            .as_ref()
+            .map(|s| format!("%{}%", s.to_lowercase()));
+
+        let (total, items) = match search.as_deref() {
+            Some(pattern) => {
+                let total = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM workflows WHERE LOWER(name) LIKE $1",
+                )
+                .bind(pattern)
+                .fetch_one(&self.pool)
+                .await?;
+
+                let items = sqlx::query_as::<_, Workflow>(
+                    "SELECT * FROM workflows WHERE LOWER(name) LIKE $1 ORDER BY name ASC LIMIT $2 OFFSET $3",
+                )
+                .bind(pattern)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
+                (total, items)
+            }
+            None => {
+                let total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM workflows")
+                    .fetch_one(&self.pool)
+                    .await?;
+
+                let items = sqlx::query_as::<_, Workflow>(
+                    "SELECT * FROM workflows ORDER BY name ASC LIMIT $1 OFFSET $2",
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?;
+                (total, items)
+            }
+        };
+
+        Ok(WorkflowListPage {
+            items,
+            total: total as usize,
+        })
     }
     pub(super) async fn delete_workflow_impl(&self, name: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;

@@ -3,7 +3,7 @@ use chrono::Utc;
 use tokio::fs;
 use uuid::Uuid;
 
-use ork_core::database::NewWorkflowTask;
+use ork_core::database::{NewWorkflowTask, WorkflowListPage, WorkflowListQuery};
 use ork_core::models::{Workflow, WorkflowTask};
 
 use super::core::FileDatabase;
@@ -67,6 +67,28 @@ impl FileDatabase {
         }
         workflows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(workflows)
+    }
+
+    pub(super) async fn list_workflows_page_impl(
+        &self,
+        query: &WorkflowListQuery,
+    ) -> Result<WorkflowListPage> {
+        let mut workflows = self.list_workflows_impl().await?;
+        workflows.sort_by(|a, b| a.name.cmp(&b.name));
+
+        if let Some(search_term) = &query.search {
+            let search_term = search_term.to_lowercase();
+            workflows.retain(|wf| wf.name.to_lowercase().contains(&search_term));
+        }
+
+        let total = workflows.len();
+        let items = workflows
+            .into_iter()
+            .skip(query.offset)
+            .take(query.limit)
+            .collect();
+
+        Ok(WorkflowListPage { items, total })
     }
 
     pub(super) async fn delete_workflow_impl(&self, name: &str) -> Result<()> {

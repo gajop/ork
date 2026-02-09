@@ -56,6 +56,10 @@ impl FileDatabase {
         Ok(())
     }
 
+    pub async fn run_migrations(&self) -> Result<()> {
+        self.ensure_dirs().await
+    }
+
     pub(super) async fn write_json<T: Serialize>(&self, path: &Path, data: &T) -> Result<()> {
         let json = serde_json::to_string_pretty(data)?;
         fs::write(path, json).await?;

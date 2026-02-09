@@ -7,18 +7,24 @@ tasks:
     executor: python
     file: tasks.py
     function: simulate_bigquery_job
+    output_type:
+      deferred: [string]
 
   # Task 2: Simulate a custom HTTP job
   custom_http_job:
     executor: python
     file: tasks.py
     function: simulate_custom_http_job
+    output_type:
+      deferred: [string]
 
   # Task 3: Multiple deferred jobs in parallel
   multiple_jobs:
     executor: python
     file: tasks.py
     function: multiple_jobs
+    output_type:
+      deferred: [string]
 
   # Task 4: Process results after deferred job completes
   process_results:
@@ -27,3 +33,10 @@ tasks:
     function: process_results
     depends_on:
       - bigquery_job
+    input_type:
+      upstream:
+        bigquery_job:
+          deferred: [string]
+    output_type:
+      message: string
+      upstream_tasks: [string]

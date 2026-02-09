@@ -1,6 +1,5 @@
 use anyhow::Result;
 use ork_core::models::{DeferredJob, DeferredJobStatus};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -8,7 +7,7 @@ use super::FileDatabase;
 
 impl FileDatabase {
     fn deferred_jobs_dir(&self) -> PathBuf {
-        self.base_dir.join("deferred_jobs")
+        self.base.join("deferred_jobs")
     }
 
     fn deferred_job_path(&self, job_id: Uuid) -> PathBuf {
@@ -30,7 +29,7 @@ impl FileDatabase {
             task_id,
             service_type: service_type.to_string(),
             job_id: job_id.to_string(),
-            job_data: sqlx::types::Json(job_data),
+            job_data,
             status: DeferredJobStatus::Pending,
             error: None,
             created_at: now,

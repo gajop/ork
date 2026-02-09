@@ -89,6 +89,8 @@ mod tests {
                 depends_on: vec![],
                 timeout: 60,
                 retries: 0,
+                input_type: None,
+                output_type: None,
             },
         );
         Workflow {

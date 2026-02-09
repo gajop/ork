@@ -7,6 +7,9 @@ tasks:
     input:
       name: "left branch"
       delay: 5
+    output_type:
+      message: string
+      timestamp: number
 
   hello_right:
     executor: python
@@ -14,6 +17,9 @@ tasks:
     input:
       name: "right branch"
       delay: 5
+    output_type:
+      message: string
+      timestamp: number
 
   combine:
     executor: python
@@ -21,3 +27,14 @@ tasks:
     depends_on: [hello_left, hello_right]
     input:
       adjective: "running in parallel"
+    input_type:
+      upstream:
+        hello_left:
+          message: string
+          timestamp: number
+        hello_right:
+          message: string
+          timestamp: number
+    output_type:
+      line: string
+      adjective: string
