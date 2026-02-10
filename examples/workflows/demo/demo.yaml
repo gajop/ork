@@ -3,7 +3,8 @@ name: local_demo
 tasks:
   greet:
     executor: python
-    file: tasks/hello.py
+    file: demo.py
+    function: greet
     input:
       name: "Ork dev"
       delay: 5
@@ -13,7 +14,8 @@ tasks:
 
   compliment:
     executor: python
-    file: tasks/compliment.py
+    file: demo.py
+    function: compliment
     depends_on: [greet]
     input:
       adjective: "ridiculously fast"
@@ -28,7 +30,8 @@ tasks:
 
   shell_echo:
     executor: python
-    file: tasks/shell_echo.py
+    file: demo.py
+    function: shell_echo
     depends_on: [compliment]
     input_type:
       upstream:

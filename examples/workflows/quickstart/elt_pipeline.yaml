@@ -3,7 +3,8 @@ name: elt_pipeline
 tasks:
   bronze_posts:
     executor: python
-    file: tasks/load_bronze.py
+    file: elt_pipeline.py
+    function: bronze_loader
     input:
       source: posts
       date: "2024-01-15"
@@ -16,7 +17,8 @@ tasks:
 
   bronze_comments:
     executor: python
-    file: tasks/load_bronze.py
+    file: elt_pipeline.py
+    function: bronze_loader
     input:
       source: comments
       date: "2024-01-15"
@@ -29,7 +31,8 @@ tasks:
 
   bronze_users:
     executor: python
-    file: tasks/load_bronze.py
+    file: elt_pipeline.py
+    function: bronze_loader
     input:
       source: users
       date: "2024-01-15"
@@ -42,7 +45,8 @@ tasks:
 
   silver_posts:
     executor: python
-    file: tasks/transform_silver.py
+    file: elt_pipeline.py
+    function: silver_transformer
     input:
       source: posts
       db_path: data/warehouse.db
@@ -59,7 +63,8 @@ tasks:
 
   silver_comments:
     executor: python
-    file: tasks/transform_silver.py
+    file: elt_pipeline.py
+    function: silver_transformer
     input:
       source: comments
       db_path: data/warehouse.db
@@ -76,7 +81,8 @@ tasks:
 
   silver_users:
     executor: python
-    file: tasks/transform_silver.py
+    file: elt_pipeline.py
+    function: silver_transformer
     input:
       source: users
       db_path: data/warehouse.db
@@ -93,7 +99,8 @@ tasks:
 
   gold_analytics:
     executor: python
-    file: tasks/gold_analytics.py
+    file: elt_pipeline.py
+    function: gold_analytics
     input:
       db_path: data/warehouse.db
     depends_on: [silver_posts, silver_comments, silver_users]

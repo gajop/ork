@@ -3,7 +3,8 @@ name: retries_demo
 tasks:
   flakey:
     executor: python
-    file: tasks/flakey.py
+    file: retries.py
+    function: flakey
     retries: 2
     input:
       fail_times: 1
@@ -13,7 +14,8 @@ tasks:
 
   greet_after_retry:
     executor: python
-    file: tasks/hello.py
+    file: retries.py
+    function: hello
     depends_on: [flakey]
     input:
       name: "after retry"

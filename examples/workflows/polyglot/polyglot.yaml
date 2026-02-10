@@ -7,7 +7,7 @@ tasks:
   # - Zero boilerplate, just regular Python functions
   py_generate:
     executor: python
-    file: python_tasks/tasks.py
+    file: polyglot.py
     function: generate_numbers
     input:
       count: 5
@@ -66,7 +66,7 @@ tasks:
   # Back to Python for final formatting
   py_format:
     executor: python
-    file: python_tasks/tasks.py
+    file: polyglot.py
     function: format_result
     depends_on: [rust_process_sdk]
     input:
