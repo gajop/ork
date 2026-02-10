@@ -1,19 +1,35 @@
-"""Demo workflow - plain Python functions example"""
+"""Demo workflow - TypedDict example"""
 import time
+from typing import TypedDict
 
 
-def greet(name: str = "world", delay: float = 1.0) -> dict:
+class GreetOutput(TypedDict):
+    message: str
+    timestamp: float
+
+
+class ComplimentOutput(TypedDict):
+    line: str
+    adjective: str
+
+
+class ShellEchoOutput(TypedDict):
+    note: str
+    finished_at: float
+
+
+def greet(name: str = "world", delay: float = 1.0) -> GreetOutput:
     """Generate a greeting message"""
     if delay > 0:
         time.sleep(delay)
 
     message = f"Hello, {name}!"
-    result = {"message": message, "timestamp": time.time()}
+    result: GreetOutput = {"message": message, "timestamp": time.time()}
     print(result["message"])
     return result
 
 
-def compliment(adjective: str = "fast", upstream: dict = None) -> dict:
+def compliment(adjective: str = "fast", upstream: dict = None) -> ComplimentOutput:
     """Create a compliment based on upstream greeting"""
     # Get the greeting from upstream
     greet_output = upstream.get("greet", {}) if upstream else {}
@@ -23,14 +39,14 @@ def compliment(adjective: str = "fast", upstream: dict = None) -> dict:
     time.sleep(5)
 
     line = f"{greeting_message} — you built Ork to be {adjective}!"
-    result = {"line": line, "adjective": adjective}
+    result: ComplimentOutput = {"line": line, "adjective": adjective}
     print(result["line"])
     return result
 
 
-def shell_echo(delay: float = 5.0, note: str = "python fallback for shell commands", upstream: dict = None) -> dict:
+def shell_echo(delay: float = 5.0, note: str = "python fallback for shell commands", upstream: dict = None) -> ShellEchoOutput:
     """Process a note with some delay"""
     time.sleep(delay)
-    result = {"note": note, "finished_at": time.time()}
+    result: ShellEchoOutput = {"note": note, "finished_at": time.time()}
     print(result["note"])
     return result
