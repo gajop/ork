@@ -22,33 +22,31 @@ struct Upstream {
 #[derive(Debug, Deserialize)]
 struct LibraryOutput {
     sum: i32,
-    doubled: Vec<i32>,
+    tripled: Vec<i32>,
 }
 
 #[derive(Debug, Serialize)]
 struct TaskOutput {
     total: i32,
     tripled: Vec<i32>,
-    method: String,
 }
 
 fn process_with_sdk(input: TaskInput) -> TaskOutput {
     eprintln!("[Rust SDK] Processing with SDK helpers...");
 
-    let doubled = &input.upstream.rust_library.doubled;
+    let tripled = &input.upstream.rust_library.tripled;
     let sum = input.upstream.rust_library.sum;
 
-    eprintln!("[Rust SDK] Received sum: {}, doubled: {:?}", sum, doubled);
+    eprintln!("[Rust SDK] Received sum: {}, tripled: {:?}", sum, tripled);
 
     let total = sum * 3;
-    let tripled: Vec<i32> = doubled.iter().map(|n| n + n / 2).collect();  // 1.5x the doubled values
+    let tripled_copy = tripled.clone();
 
-    eprintln!("[Rust SDK] Total: {}, Tripled: {:?}", total, tripled);
+    eprintln!("[Rust SDK] Total: {}, Tripled: {:?}", total, tripled_copy);
 
     TaskOutput {
         total,
-        tripled,
-        method: "process_sdk".to_string(),
+        tripled: tripled_copy,
     }
 }
 

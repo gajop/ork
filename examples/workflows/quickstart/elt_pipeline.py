@@ -1,11 +1,15 @@
+"""ELT Pipeline workflow - consolidated single-file example"""
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+from pydantic import BaseModel
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
+# Business logic functions
 def _load_json(source: str) -> list[dict[str, Any]]:
     path = DATA_DIR / f"{source}.json"
     if not path.exists():
@@ -237,3 +241,86 @@ def create_gold_analytics(db_path: str) -> dict[str, float | int]:
         "total_comments": int(stats[2] or 0),
         "avg_comments_per_user": round(stats[3] or 0.0, 2),
     }
+
+
+# Task 1: Load Bronze
+class LoadBronzeInput(BaseModel):
+    source: str
+    date: str
+    db_path: str
+
+
+class LoadBronzeOutput(BaseModel):
+    source: str
+    count: int
+
+
+def bronze_loader(input: LoadBronzeInput) -> LoadBronzeOutput:
+    count = load_to_bronze(input.source, input.date, input.db_path)
+    return LoadBronzeOutput(source=input.source, count=count)
+
+
+# Task 2: Transform Silver
+class BronzeOutput(BaseModel):
+    source: str
+    count: int
+
+
+class TransformSilverInput(BaseModel):
+    source: Optional[str] = None
+    db_path: str
+    bronze: Optional[BronzeOutput] = None
+    upstream: Optional[dict[str, BronzeOutput]] = None
+
+
+class TransformSilverOutput(BaseModel):
+    source: str
+    bronze_count: int
+    silver_count: int
+
+
+def resolve_bronze(input: TransformSilverInput) -> BronzeOutput:
+    if input.bronze is not None:
+        return input.bronze
+    if input.upstream:
+        return next(iter(input.upstream.values()))
+    if input.source is not None:
+        return BronzeOutput(source=input.source, count=0)
+    raise ValueError("transform_silver requires bronze, upstream, or source")
+
+
+def silver_transformer(input: TransformSilverInput) -> TransformSilverOutput:
+    bronze = resolve_bronze(input)
+    silver_count = transform_to_silver(bronze.source, input.db_path)
+    return TransformSilverOutput(
+        source=bronze.source,
+        bronze_count=bronze.count,
+        silver_count=silver_count,
+    )
+
+
+# Task 3: Gold Analytics
+class SilverOutput(BaseModel):
+    source: str
+    bronze_count: int
+    silver_count: int
+
+
+class GoldAnalyticsInput(BaseModel):
+    db_path: str
+    silver_posts: Optional[SilverOutput] = None
+    silver_comments: Optional[SilverOutput] = None
+    silver_users: Optional[SilverOutput] = None
+    upstream: Optional[dict[str, SilverOutput]] = None
+
+
+class GoldAnalyticsOutput(BaseModel):
+    total_users: int
+    total_posts: int
+    total_comments: int
+    avg_comments_per_user: float
+
+
+def gold_analytics(input: GoldAnalyticsInput) -> GoldAnalyticsOutput:
+    stats = create_gold_analytics(input.db_path)
+    return GoldAnalyticsOutput(**stats)

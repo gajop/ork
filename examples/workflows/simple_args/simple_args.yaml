@@ -3,7 +3,7 @@ name: simple_args
 tasks:
   add_math:
     executor: python
-    file: tasks/demo.py
+    file: simple_args.py
     function: add
     input:
       a: 5
@@ -13,7 +13,7 @@ tasks:
 
   greet_user:
     executor: python
-    file: tasks/demo.py
+    file: simple_args.py
     function: greet
     input:
       name: "Ork User"

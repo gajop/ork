@@ -22,36 +22,30 @@ struct NumbersOutput {
 #[derive(Debug, Serialize)]
 struct ProcessedOutput {
     sum: i32,
-    doubled: Vec<i32>,
-    method: String,
+    count: i32,
 }
 
 fn main() {
     eprintln!("[Rust Raw] Starting number processing...");
 
     // Read upstream data from environment variable (manual)
-    let upstream_json = env::var("ORK_UPSTREAM_JSON")
-        .expect("ORK_UPSTREAM_JSON not set");
+    let upstream_json = env::var("ORK_UPSTREAM_JSON").expect("ORK_UPSTREAM_JSON not set");
 
     eprintln!("[Rust Raw] Received upstream: {}", upstream_json);
 
-    let upstream: UpstreamData = serde_json::from_str(&upstream_json)
-        .expect("Failed to parse upstream JSON");
+    let upstream: UpstreamData =
+        serde_json::from_str(&upstream_json).expect("Failed to parse upstream JSON");
 
     let numbers = &upstream.py_generate.numbers;
     eprintln!("[Rust Raw] Parsed {} numbers", numbers.len());
 
     // Process the numbers
     let sum: i32 = numbers.iter().sum();
-    let doubled: Vec<i32> = numbers.iter().map(|n| n * 2).collect();
+    let count = numbers.len() as i32;
 
-    eprintln!("[Rust Raw] Sum: {}, Doubled: {:?}", sum, doubled);
+    eprintln!("[Rust Raw] Sum: {}, Count: {}", sum, count);
 
-    let output = ProcessedOutput {
-        sum,
-        doubled,
-        method: "process_raw".to_string(),
-    };
+    let output = ProcessedOutput { sum, count };
 
     // Manual output with ORK_OUTPUT prefix
     let json = serde_json::to_string(&output).expect("Failed to serialize output");

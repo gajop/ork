@@ -3,7 +3,8 @@ name: parallel_demo
 tasks:
   hello_left:
     executor: python
-    file: tasks/hello.py
+    file: parallel.py
+    function: hello
     input:
       name: "left branch"
       delay: 5
@@ -13,7 +14,8 @@ tasks:
 
   hello_right:
     executor: python
-    file: tasks/hello.py
+    file: parallel.py
+    function: hello
     input:
       name: "right branch"
       delay: 5
@@ -23,7 +25,8 @@ tasks:
 
   combine:
     executor: python
-    file: tasks/compliment.py
+    file: parallel.py
+    function: compliment
     depends_on: [hello_left, hello_right]
     input:
       adjective: "running in parallel"
