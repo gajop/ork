@@ -26,6 +26,8 @@ tasks:
   extract:
     executor: python
     file: tasks/extract.py
+    input:
+      api_url: "https://api.example.com/users"
     timeout: 600
 
   transform:
@@ -36,60 +38,40 @@ tasks:
   load:
     executor: python
     file: tasks/load.py
+    input:
+      output_path: "/data/active_users.json"
     depends_on: [transform]
 ```
 
 ### 2. Write tasks
 
-Python (with Pydantic):
+Just write plain functions — no decorators, no SDK imports, no framework code:
 
 ```python
 # tasks/extract.py
-from ork import task
-from pydantic import BaseModel
-from src.extract import fetch_users, User
+import requests
 
-class Input(BaseModel):
-    api_url: str = "https://api.example.com"
-
-class Output(BaseModel):
-    users: list[User]
-
-@task
-def main(input: Input) -> Output:
-    users = fetch_users(input.api_url)
-    return Output(users=users)
+def main(api_url: str) -> list[dict]:
+    return requests.get(api_url).json()
 ```
 
-Rust (with serde):
-
-```rust
-// tasks/extract.rs
-use ork::task;
-use serde::{Deserialize, Serialize};
-use crate::extract::{fetch_users, User};
-
-#[derive(Deserialize)]
-struct Input {
-    #[serde(default = "default_api_url")]
-    api_url: String,
-}
-
-fn default_api_url() -> String {
-    "https://api.example.com".into()
-}
-
-#[derive(Serialize)]
-struct Output {
-    users: Vec<User>,
-}
-
-#[task]
-fn main(input: Input) -> ork::Result<Output> {
-    let users = fetch_users(&input.api_url)?;
-    Ok(Output { users })
-}
+```python
+# tasks/transform.py
+def main(records: list[dict]) -> list[dict]:
+    return [r for r in records if r["status"] == "active"]
 ```
+
+```python
+# tasks/load.py
+import json
+
+def main(records: list[dict], output_path: str) -> int:
+    with open(output_path, "w") as f:
+        json.dump(records, f)
+    return len(records)
+```
+
+Ork calls your functions directly — arguments come from the workflow YAML, return values flow to downstream tasks.
 
 ### 3. Run locally (DB-backed scheduler + web UI)
 
