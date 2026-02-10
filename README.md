@@ -25,19 +25,22 @@ name: my_etl
 tasks:
   extract:
     executor: python
-    file: tasks/extract.py
+    file: tasks/etl.py
+    function: extract
     input:
       api_url: "https://api.example.com/users"
     timeout: 600
 
   transform:
     executor: python
-    file: tasks/transform.py
+    file: tasks/etl.py
+    function: transform
     depends_on: [extract]
 
   load:
     executor: python
-    file: tasks/load.py
+    file: tasks/etl.py
+    function: load
     input:
       output_path: "/data/active_users.json"
     depends_on: [transform]
@@ -48,24 +51,17 @@ tasks:
 Just write plain functions — no decorators, no SDK imports, no framework code:
 
 ```python
-# tasks/extract.py
+# tasks/etl.py
+import json
 import requests
 
-def main(api_url: str) -> list[dict]:
+def extract(api_url: str) -> list[dict]:
     return requests.get(api_url).json()
-```
 
-```python
-# tasks/transform.py
-def main(records: list[dict]) -> list[dict]:
+def transform(records: list[dict]) -> list[dict]:
     return [r for r in records if r["status"] == "active"]
-```
 
-```python
-# tasks/load.py
-import json
-
-def main(records: list[dict], output_path: str) -> int:
+def load(records: list[dict], output_path: str) -> int:
     with open(output_path, "w") as f:
         json.dump(records, f)
     return len(records)
