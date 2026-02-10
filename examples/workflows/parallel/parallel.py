@@ -1,11 +1,12 @@
 """Parallel workflow - TypedDict example"""
 import time
+from datetime import datetime
 from typing import TypedDict
 
 
 class HelloOutput(TypedDict):
     message: str
-    timestamp: float
+    timestamp: datetime
 
 
 class ComplimentOutput(TypedDict):
@@ -19,7 +20,7 @@ def hello(name: str = "world", delay: float = 1.0) -> HelloOutput:
         time.sleep(delay)
 
     message = f"Hello, {name}!"
-    result: HelloOutput = {"message": message, "timestamp": time.time()}
+    result: HelloOutput = {"message": message, "timestamp": datetime.now()}
     print(result["message"])
     return result
 

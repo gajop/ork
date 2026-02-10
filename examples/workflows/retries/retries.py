@@ -1,6 +1,7 @@
 """Retries workflow - TypedDict example"""
 import os
 import time
+from datetime import datetime
 from typing import TypedDict
 
 
@@ -11,7 +12,7 @@ class FlakeyOutput(TypedDict):
 
 class HelloOutput(TypedDict):
     message: str
-    timestamp: float
+    timestamp: datetime
 
 
 def flakey(fail_times: int = 0) -> FlakeyOutput:
@@ -35,6 +36,6 @@ def hello(name: str = "world", delay: float = 1.0, upstream: dict = None) -> Hel
         time.sleep(delay)
 
     message = f"Hello, {name}!"
-    result: HelloOutput = {"message": message, "timestamp": time.time()}
+    result: HelloOutput = {"message": message, "timestamp": datetime.now()}
     print(result["message"])
     return result
