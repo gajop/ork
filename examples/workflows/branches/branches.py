@@ -1,19 +1,30 @@
-"""Branches workflow - plain Python functions example"""
+"""Branches workflow - TypedDict example"""
 import time
+from typing import TypedDict
 
 
-def hello(name: str = "world", delay: float = 1.0, upstream: dict = None) -> dict:
+class HelloOutput(TypedDict):
+    message: str
+    timestamp: float
+
+
+class ComplimentOutput(TypedDict):
+    line: str
+    adjective: str
+
+
+def hello(name: str = "world", delay: float = 1.0, upstream: dict = None) -> HelloOutput:
     """Generate a greeting message"""
     if delay > 0:
         time.sleep(delay)
 
     message = f"Hello, {name}!"
-    result = {"message": message, "timestamp": time.time()}
+    result: HelloOutput = {"message": message, "timestamp": time.time()}
     print(result["message"])
     return result
 
 
-def compliment(adjective: str = "fast", upstream: dict = None) -> dict:
+def compliment(adjective: str = "fast", upstream: dict = None) -> ComplimentOutput:
     """Create a compliment based on upstream greetings"""
     # Get the first upstream greeting (could be from left or right branch)
     greeting_message = "Hello!"
@@ -27,6 +38,6 @@ def compliment(adjective: str = "fast", upstream: dict = None) -> dict:
     time.sleep(5)
 
     line = f"{greeting_message} — you built Ork to be {adjective}!"
-    result = {"line": line, "adjective": adjective}
+    result: ComplimentOutput = {"line": line, "adjective": adjective}
     print(result["line"])
     return result

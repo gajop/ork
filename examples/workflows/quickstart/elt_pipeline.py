@@ -1,11 +1,29 @@
-"""ELT Pipeline workflow - plain Python functions example"""
+"""ELT Pipeline workflow - TypedDict example"""
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+
+
+class BronzeOutput(TypedDict):
+    source: str
+    count: int
+
+
+class SilverOutput(TypedDict):
+    source: str
+    bronze_count: int
+    silver_count: int
+
+
+class GoldOutput(TypedDict):
+    total_users: int
+    total_posts: int
+    total_comments: int
+    avg_comments_per_user: float
 
 
 # Business logic functions
@@ -243,14 +261,14 @@ def create_gold_analytics(db_path: str) -> dict[str, float | int]:
 
 
 # Task 1: Load Bronze
-def bronze_loader(source: str, date: str, db_path: str) -> dict:
+def bronze_loader(source: str, date: str, db_path: str) -> BronzeOutput:
     """Load data from JSON files into bronze tables"""
     count = load_to_bronze(source, date, db_path)
     return {"source": source, "count": count}
 
 
 # Task 2: Transform Silver
-def silver_transformer(source: str = None, db_path: str = None, upstream: dict = None) -> dict:
+def silver_transformer(source: str = None, db_path: str = None, upstream: dict = None) -> SilverOutput:
     """Transform bronze data into silver tables"""
     # Get bronze data from upstream
     bronze_source = source
@@ -270,7 +288,7 @@ def silver_transformer(source: str = None, db_path: str = None, upstream: dict =
 
 
 # Task 3: Gold Analytics
-def gold_analytics(db_path: str, upstream: dict = None) -> dict:
+def gold_analytics(db_path: str, upstream: dict = None) -> GoldOutput:
     """Create gold analytics tables and compute summary statistics"""
     stats = create_gold_analytics(db_path)
-    return stats
+    return stats  # type: ignore
