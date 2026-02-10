@@ -1,6 +1,4 @@
-"""Python tasks for polyglot workflow example."""
-import json
-import sys
+"""Python tasks for polyglot workflow example - plain functions"""
 
 
 def generate_numbers(count: int) -> dict:
@@ -11,21 +9,13 @@ def generate_numbers(count: int) -> dict:
     return {"numbers": numbers}
 
 
-def format_result(multiplier: int) -> dict:
+def format_result(multiplier: int, upstream: dict = None) -> dict:
     """Format the final result (Python task 3)."""
-    import os
-    import json
-
     print(f"[Python] Formatting result with multiplier {multiplier}...")
-
-    # Get upstream data from environment
-    upstream_json = os.getenv("ORK_UPSTREAM_JSON", "{}")
-    upstream = json.loads(upstream_json)
-
     print(f"[Python] Received upstream data: {upstream}")
 
     # Extract rust_process_sdk output
-    processed = upstream.get("rust_process_sdk", {})
+    processed = upstream.get("rust_process_sdk", {}) if upstream else {}
     total = processed.get("total", 0)
     tripled = processed.get("tripled", [])
 
