@@ -29,7 +29,7 @@ pub enum Commands {
     /// Initialize the database with migrations
     Init(Init),
 
-    /// Start the orchestrator scheduler
+    /// Start the scheduler (`ork run`) or execute a workflow file (`ork run <workflow.yaml>`)
     Run(Run),
 
     /// Create a new workflow

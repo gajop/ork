@@ -11,6 +11,10 @@ build:
 build-release:
     cargo build --workspace --release
 
+# Install the local `ork` CLI binary (SQLite + process executor).
+install:
+    cargo install --path crates/ork-cli --no-default-features --features sqlite,process --bin ork --force
+
 # Start Postgres, run migrations, then start the scheduler + web UI.
 up:
     ./scripts/dev-up.sh

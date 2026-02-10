@@ -19,6 +19,14 @@ class ShellEchoOutput(TypedDict):
     finished_at: datetime
 
 
+class ComplimentUpstream(TypedDict, total=False):
+    greet: GreetOutput
+
+
+class ShellEchoUpstream(TypedDict, total=False):
+    compliment: ComplimentOutput
+
+
 def greet(name: str = "world", delay: float = 1.0) -> GreetOutput:
     """Generate a greeting message"""
     if delay > 0:
@@ -30,7 +38,7 @@ def greet(name: str = "world", delay: float = 1.0) -> GreetOutput:
     return result
 
 
-def compliment(adjective: str = "fast", upstream: dict = None) -> ComplimentOutput:
+def compliment(adjective: str = "fast", upstream: ComplimentUpstream | None = None) -> ComplimentOutput:
     """Create a compliment based on upstream greeting"""
     # Get the greeting from upstream
     greet_output = upstream.get("greet", {}) if upstream else {}
@@ -45,7 +53,11 @@ def compliment(adjective: str = "fast", upstream: dict = None) -> ComplimentOutp
     return result
 
 
-def shell_echo(delay: float = 5.0, note: str = "python fallback for shell commands", upstream: dict = None) -> ShellEchoOutput:
+def shell_echo(
+    delay: float = 5.0,
+    note: str = "python fallback for shell commands",
+    upstream: ShellEchoUpstream | None = None,
+) -> ShellEchoOutput:
     """Process a note with some delay"""
     time.sleep(delay)
     result: ShellEchoOutput = {"note": note, "finished_at": datetime.now()}

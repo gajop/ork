@@ -3,6 +3,7 @@ use clap::Args;
 use std::sync::Arc;
 use tracing::info;
 
+use super::Execute;
 use ork_core::config::OrchestratorConfig;
 use ork_core::database::Database;
 use ork_core::scheduler::Scheduler;
@@ -10,9 +11,17 @@ use ork_executors::ExecutorManager;
 
 #[derive(Args)]
 pub struct Run {
+    /// Optional workflow YAML file path to execute locally
+    #[arg(value_name = "WORKFLOW_FILE")]
+    pub file: Option<String>,
+
     /// Optional config file path (YAML)
     #[arg(short, long)]
     pub config: Option<String>,
+
+    /// Maximum time to wait for completion in seconds (only used with WORKFLOW_FILE)
+    #[arg(short, long, default_value = "300")]
+    pub timeout: u64,
 }
 
 impl Run {
@@ -20,6 +29,16 @@ impl Run {
     where
         D: Database + 'static,
     {
+        if let Some(file) = self.file {
+            return Execute {
+                file,
+                config: self.config,
+                timeout: self.timeout,
+            }
+            .execute(db)
+            .await;
+        }
+
         info!("Starting orchestrator...");
         let executor_manager = Arc::new(ExecutorManager::new());
         let scheduler = if let Some(config_path) = self.config {
@@ -47,7 +66,9 @@ mod tests {
         db.run_migrations().await.expect("migrate");
 
         let result = Run {
+            file: None,
             config: Some("/tmp/does-not-exist-config.yaml".to_string()),
+            timeout: 300,
         }
         .execute(db)
         .await;
@@ -64,7 +85,9 @@ mod tests {
         std::fs::write(&path, "this: [is: not-valid-yaml").expect("write invalid yaml");
 
         let result = Run {
+            file: None,
             config: Some(path.to_string_lossy().to_string()),
+            timeout: 300,
         }
         .execute(db)
         .await;
@@ -78,7 +101,15 @@ mod tests {
         let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
         db.run_migrations().await.expect("migrate");
 
-        let handle = tokio::spawn(async move { Run { config: None }.execute(db).await });
+        let handle = tokio::spawn(async move {
+            Run {
+                file: None,
+                config: None,
+                timeout: 300,
+            }
+            .execute(db)
+            .await
+        });
         sleep(Duration::from_millis(60)).await;
         handle.abort();
         let join = handle.await;
@@ -107,7 +138,9 @@ enable_triggerer: false
         let cfg_path = path.to_string_lossy().to_string();
         let handle = tokio::spawn(async move {
             Run {
+                file: None,
                 config: Some(cfg_path),
+                timeout: 300,
             }
             .execute(db)
             .await
@@ -117,5 +150,38 @@ enable_triggerer: false
         let join = handle.await;
         let _ = std::fs::remove_file(path);
         assert!(join.is_err(), "aborted scheduler loop should cancel task");
+    }
+
+    #[tokio::test]
+    async fn test_run_command_with_workflow_file_uses_execute_path() {
+        let db = Arc::new(SqliteDatabase::new(":memory:").await.expect("create db"));
+        db.run_migrations().await.expect("migrate");
+
+        let temp_dir = std::env::temp_dir().join(format!("ork-run-workflow-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let workflow_path = temp_dir.join("workflow.yaml");
+
+        std::fs::write(
+            &workflow_path,
+            r#"
+name: wf-run-command-success
+tasks:
+  task_a:
+    executor: process
+    command: "printf 'ORK_OUTPUT:{\"ok\":true}\n'"
+"#,
+        )
+        .expect("write workflow");
+
+        let result = Run {
+            file: Some(workflow_path.to_string_lossy().to_string()),
+            config: None,
+            timeout: 10,
+        }
+        .execute(db)
+        .await;
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+        assert!(result.is_ok());
     }
 }

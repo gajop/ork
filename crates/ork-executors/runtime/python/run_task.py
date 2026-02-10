@@ -1,8 +1,19 @@
+from datetime import date, datetime, time
 import importlib.util
 import inspect
 import json
 import os
 import sys
+
+
+def _json_default(value):
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if hasattr(value, "dict"):
+        return value.dict()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def main() -> int:
@@ -108,7 +119,7 @@ def main() -> int:
         result = result.dict()
 
     # Prefix output with magic string to distinguish from debug prints
-    print(f"ORK_OUTPUT:{json.dumps(result)}")
+    print(f"ORK_OUTPUT:{json.dumps(result, default=_json_default)}")
     return 0
 
 

@@ -19,9 +19,7 @@ pub fn get_run_task_script() -> io::Result<PathBuf> {
     let cache_dir = get_runtime_cache_dir()?;
     let script_path = cache_dir.join("run_task.py");
 
-    if !script_path.exists() {
-        fs::write(&script_path, RUN_TASK_PY)?;
-    }
+    ensure_script_content(&script_path, RUN_TASK_PY)?;
 
     Ok(script_path)
 }
@@ -32,11 +30,20 @@ pub fn get_inspect_task_script() -> io::Result<PathBuf> {
     let cache_dir = get_runtime_cache_dir()?;
     let script_path = cache_dir.join("inspect_task.py");
 
-    if !script_path.exists() {
-        fs::write(&script_path, INSPECT_TASK_PY)?;
-    }
+    ensure_script_content(&script_path, INSPECT_TASK_PY)?;
 
     Ok(script_path)
+}
+
+fn ensure_script_content(path: &PathBuf, content: &str) -> io::Result<()> {
+    let should_write = match fs::read_to_string(path) {
+        Ok(existing) => existing != content,
+        Err(_) => true,
+    };
+    if should_write {
+        fs::write(path, content)?;
+    }
+    Ok(())
 }
 
 fn get_runtime_cache_dir() -> io::Result<PathBuf> {
@@ -100,6 +107,32 @@ mod tests {
 
         let second = get_inspect_task_script().expect("get inspect_task.py again");
         assert_eq!(second, path);
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("XDG_CACHE_HOME", v) },
+            None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
+        }
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn test_get_run_task_script_overwrites_stale_cached_content() {
+        let _guard = env_lock().lock().expect("env lock");
+        let temp_root =
+            std::env::temp_dir().join(format!("ork-runtime-test-{}", uuid::Uuid::new_v4()));
+        let prev = std::env::var("XDG_CACHE_HOME").ok();
+
+        unsafe {
+            std::env::set_var("XDG_CACHE_HOME", &temp_root);
+        }
+
+        let path = get_run_task_script().expect("get run_task.py");
+        fs::write(&path, "# stale script\n").expect("write stale content");
+
+        let refreshed = get_run_task_script().expect("refresh run_task.py");
+        assert_eq!(refreshed, path);
+        let content = fs::read_to_string(&path).expect("read refreshed script");
+        assert_eq!(content, RUN_TASK_PY);
 
         match prev {
             Some(v) => unsafe { std::env::set_var("XDG_CACHE_HOME", v) },

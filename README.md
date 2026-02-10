@@ -29,12 +29,16 @@ tasks:
     function: extract
     input:
       api_url: "https://api.example.com/users"
+      raw_path: "/tmp/users_raw.json"
     timeout: 600
 
   transform:
     executor: python
     file: tasks/etl.py
     function: transform
+    input:
+      raw_path: "/tmp/users_raw.json"
+      active_path: "/tmp/users_active.json"
     depends_on: [extract]
 
   load:
@@ -42,6 +46,7 @@ tasks:
     file: tasks/etl.py
     function: load
     input:
+      active_path: "/tmp/users_active.json"
       output_path: "/data/active_users.json"
     depends_on: [transform]
 ```
@@ -53,35 +58,64 @@ Just write plain functions — no decorators, no SDK imports, no framework code:
 ```python
 # tasks/etl.py
 import json
+from pathlib import Path
+from typing import TypedDict
+
 import requests
 
-def extract(api_url: str) -> list[dict]:
-    return requests.get(api_url).json()
+class User(TypedDict):
+    id: int
+    status: str
 
-def transform(records: list[dict]) -> list[dict]:
-    return [r for r in records if r["status"] == "active"]
+def extract(api_url: str, raw_path: str) -> int:
+    response = requests.get(api_url, timeout=30)
+    response.raise_for_status()
+    users: list[User] = response.json()
+    raw_file = Path(raw_path)
+    raw_file.parent.mkdir(parents=True, exist_ok=True)
+    raw_file.write_text(json.dumps(users), encoding="utf-8")
+    return len(users)
 
-def load(records: list[dict], output_path: str) -> int:
-    with open(output_path, "w") as f:
-        json.dump(records, f)
-    return len(records)
+def transform(raw_path: str, active_path: str) -> int:
+    users: list[User] = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+    active_users = [user for user in users if user["status"] == "active"]
+    active_file = Path(active_path)
+    active_file.parent.mkdir(parents=True, exist_ok=True)
+    active_file.write_text(json.dumps(active_users), encoding="utf-8")
+    return len(active_users)
+
+def load(active_path: str, output_path: str) -> str:
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(
+        Path(active_path).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    return output_path
 ```
 
-Ork calls your functions directly — arguments come from the workflow YAML, return values flow to downstream tasks.
+Ork calls your functions directly. Prefer strongly typed, small inputs/outputs (paths, IDs, counts), and avoid passing large payloads between tasks.
 
-### 3. Run locally (DB-backed scheduler + web UI)
+### 3. Run the workflow locally
 
 ```bash
-# Terminal 1: boot everything (Postgres + scheduler + web UI)
-just up
+# One-time local install of the Ork CLI binary from this repo
+just install
 
-# Terminal 2: create + trigger the example workflow
-just example simple
+# Run the workflow end-to-end (defaults to sqlite://./.ork/ork.db?mode=rwc)
+ork run workflows/etl.yaml
 ```
 
-Open the web UI at `http://127.0.0.1:4000` to see runs and task status.
+Target package UX for Python users is:
 
-Examples run via SQLite by default: `just example simple`.
+```bash
+uv add -d ork
+ork run workflows/etl.yaml
+```
+
+(`uv add -d ork` is not available yet because the package is not published.)
+
+For contributor-focused DB-backed scheduler + web UI setup, see [Running Locally](docs/dev/running.md).
 
 ### 4. Deploy
 

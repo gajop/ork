@@ -25,6 +25,12 @@ compile_error!("Enable either the 'postgres' or 'sqlite' feature for ork-cli, no
 #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
 compile_error!("Enable either the 'postgres' or 'sqlite' feature for ork-cli.");
 
+#[cfg(feature = "postgres")]
+const DEFAULT_DATABASE_URL: &str = "postgres://postgres:postgres@localhost:5432/orchestrator";
+
+#[cfg(feature = "sqlite")]
+const DEFAULT_DATABASE_URL: &str = "sqlite://./.ork/ork.db?mode=rwc";
+
 #[derive(Parser)]
 #[command(name = "ork")]
 #[command(about = "Ork - A high-performance task orchestrator supporting multiple execution backends", long_about = None)]
@@ -32,10 +38,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    #[arg(
-        long,
-        default_value = "postgres://postgres:postgres@localhost:5432/orchestrator"
-    )]
+    #[arg(long, default_value = DEFAULT_DATABASE_URL)]
     database_url: String,
 }
 
@@ -128,10 +131,7 @@ mod tests {
     #[test]
     fn test_cli_parse_defaults() {
         let cli = Cli::parse_from(["ork", "init"]);
-        assert_eq!(
-            cli.database_url,
-            "postgres://postgres:postgres@localhost:5432/orchestrator"
-        );
+        assert_eq!(cli.database_url, DEFAULT_DATABASE_URL);
     }
 
     #[test]
@@ -328,7 +328,9 @@ tasks:
 
         let run_err = dispatch_command(
             Commands::Run(Run {
+                file: None,
                 config: Some("/tmp/does-not-exist-config.yaml".to_string()),
+                timeout: 300,
             }),
             db.clone(),
         )

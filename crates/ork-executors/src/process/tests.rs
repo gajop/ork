@@ -422,6 +422,60 @@ print(
 }
 
 #[tokio::test]
+async fn test_execute_process_python_runner_serializes_datetime_outputs() {
+    let base = std::env::temp_dir().join(format!("ork-process-test-{}", Uuid::new_v4()));
+    fs::create_dir_all(&base).expect("create temp dir");
+
+    let task_file = base.join("task_datetime.py");
+    fs::write(
+        &task_file,
+        r#"
+from datetime import date, datetime, time
+
+def run():
+    return {
+        "dt": datetime(2024, 1, 2, 3, 4, 5, 123456),
+        "d": date(2024, 1, 2),
+        "t": time(3, 4, 5, 654321),
+    }
+"#,
+    )
+    .expect("write task file");
+
+    let executor = ProcessExecutor::new(Some(base.to_string_lossy().to_string()));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    executor.set_status_channel(tx).await;
+    let task_id = Uuid::new_v4();
+
+    let execution_id = executor
+        .execute(
+            task_id,
+            "ignored",
+            Some(serde_json::json!({
+                "task_file": task_file,
+                "task_function": "run",
+                "python_path": base,
+                "task_name": "task-datetime",
+                "workflow_name": "wf-datetime",
+                "run_id": task_id.to_string(),
+            })),
+        )
+        .await
+        .expect("execute process with datetime output");
+    assert!(!execution_id.is_empty());
+
+    let updates = collect_updates(&mut rx).await.expect("collect updates");
+    let terminal = updates.last().expect("terminal update");
+    assert_eq!(terminal.status, "success");
+    let output = terminal.output.clone().expect("output payload");
+    assert_eq!(output["dt"], "2024-01-02T03:04:05.123456");
+    assert_eq!(output["d"], "2024-01-02");
+    assert_eq!(output["t"], "03:04:05.654321");
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[tokio::test]
 async fn test_execute_process_with_uv_path_sets_cache_env_and_fails_cleanly() {
     let base = std::env::temp_dir().join(format!("ork-process-test-{}", Uuid::new_v4()));
     fs::create_dir_all(&base).expect("create temp dir");

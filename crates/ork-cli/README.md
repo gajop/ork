@@ -34,7 +34,8 @@ ork tasks <run-id>
 
 # Database
 ork init
-ork run  # Start scheduler
+ork run                   # Start scheduler
+ork run <workflow.yaml>   # Run one workflow locally to completion
 ```
 
 ## Development

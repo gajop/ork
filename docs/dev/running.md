@@ -1,8 +1,10 @@
 # Running Ork Locally
 
-This workflow uses a single command to boot the database, scheduler, and web UI, plus a separate command to trigger an example workflow.
+These are contributor/developer instructions for the full local stack (DB-backed scheduler + web UI).
 
 ## 1) Boot services (Postgres + Docker)
+
+In terminal 1:
 
 ```bash
 just up
@@ -11,7 +13,7 @@ just up
 What this does:
 - Starts Postgres via `docker compose`
 - Runs migrations
-- Starts the DB-backed scheduler (`ork run`)
+- Starts the DB-backed scheduler (`ork run` with no workflow file)
 - Starts the web UI at `http://127.0.0.1:4000`
 
 Leave this running in one terminal.
@@ -27,20 +29,13 @@ Set `DATABASE_URL` to use a different SQLite file (e.g. `sqlite://./tmp/ork.db?m
 
 ## 2) Run an example
 
-In a second terminal:
+In terminal 2:
 
 ```bash
 just example simple
 ```
 
-This uses `ork run-workflow` to post YAML to the running API, trigger a run, and poll status.
-Set `ORK_API_URL` (or pass `--api-url`) if the web UI is running on a different host/port.
-
-### Example run
-
-```bash
-just example simple
-```
+This runs `examples/workflows/simple/simple.yaml` via `ork execute` using the local SQLite DB by default.
 
 ## Optional
 
