@@ -1,6 +1,7 @@
 """ELT Pipeline workflow - TypedDict example"""
 import json
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -35,13 +36,16 @@ def _load_json(source: str) -> list[dict[str, Any]]:
         return json.load(f)
 
 
-def load_to_bronze(source: str, date: str, db_path: str) -> int:
+def load_to_bronze(source: str, load_date: date, db_path: str) -> int:
     records = _load_json(source)
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path_obj = Path(db_path)
+    db_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path_obj)
     conn.execute("PRAGMA foreign_keys = ON")
+
+    # Convert date to ISO format string for database storage
+    date_str = load_date.isoformat()
 
     if source == "posts":
         conn.execute("DROP TABLE IF EXISTS bronze_posts")
@@ -66,7 +70,7 @@ def load_to_bronze(source: str, date: str, db_path: str) -> int:
                     item.get("title", "").strip(),
                     item.get("body", "").strip(),
                     item.get("timestamp", ""),
-                    date,
+                    date_str,
                 )
                 for item in records
             ],
@@ -94,7 +98,7 @@ def load_to_bronze(source: str, date: str, db_path: str) -> int:
                     item.get("name", "").strip(),
                     item.get("email", "").strip(),
                     item.get("body", "").strip(),
-                    date,
+                    date_str,
                 )
                 for item in records
             ],
@@ -120,7 +124,7 @@ def load_to_bronze(source: str, date: str, db_path: str) -> int:
                     item.get("name", "").strip(),
                     item.get("username", "").strip(),
                     item.get("email", "").strip(),
-                    date,
+                    date_str,
                 )
                 for item in records
             ],
@@ -261,7 +265,7 @@ def create_gold_analytics(db_path: str) -> dict[str, float | int]:
 
 
 # Task 1: Load Bronze
-def bronze_loader(source: str, date: str, db_path: str) -> BronzeOutput:
+def bronze_loader(source: str, date: date, db_path: str) -> BronzeOutput:
     """Load data from JSON files into bronze tables"""
     count = load_to_bronze(source, date, db_path)
     return {"source": source, "count": count}
