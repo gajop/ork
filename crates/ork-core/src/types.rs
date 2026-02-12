@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -67,9 +66,6 @@ pub struct TaskSpec {
     pub task_name: TaskName,
     pub attempt: u32,
     pub executor: ExecutorKind,
-    pub input: Value,
-    #[serde(default)]
-    pub upstream: IndexMap<TaskName, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +83,6 @@ impl TaskSpec {
         run_id: RunId,
         task_name: &str,
         attempt: u32,
-        upstream: IndexMap<TaskName, Value>,
     ) -> Option<Self> {
         let definition = workflow.tasks.get(task_name)?;
         Some(TaskSpec {
@@ -96,8 +91,6 @@ impl TaskSpec {
             task_name: task_name.to_string(),
             attempt,
             executor: definition.executor.clone(),
-            input: definition.input.clone(),
-            upstream,
         })
     }
 }
@@ -108,7 +101,6 @@ impl TaskSpec {
         run_id: RunId,
         task_idx: usize,
         attempt: u32,
-        upstream: IndexMap<TaskName, Value>,
     ) -> Option<Self> {
         let definition = workflow.tasks.get(task_idx)?;
         Some(TaskSpec {
@@ -117,8 +109,6 @@ impl TaskSpec {
             task_name: definition.name.clone(),
             attempt,
             executor: definition.executor.clone(),
-            input: definition.input.clone(),
-            upstream,
         })
     }
 }
@@ -142,6 +132,7 @@ mod tests {
     use super::*;
     use crate::compiled::{CompiledTask, CompiledWorkflow};
     use crate::workflow::TaskDefinition;
+    use indexmap::IndexMap;
     use std::path::PathBuf;
 
     fn sample_workflow() -> Workflow {
@@ -155,7 +146,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::json!({"x": 1}),
                 inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
@@ -176,24 +166,15 @@ mod tests {
     #[test]
     fn test_task_spec_from_workflow_and_missing_task() {
         let workflow = sample_workflow();
-        let upstream = IndexMap::from([(String::from("dep"), serde_json::json!({"ok": true}))]);
-        let spec = TaskSpec::from_workflow(&workflow, "run-1".to_string(), "task_a", 2, upstream)
+        let spec = TaskSpec::from_workflow(&workflow, "run-1".to_string(), "task_a", 2)
             .expect("task should exist");
 
         assert_eq!(spec.workflow_name, "wf");
         assert_eq!(spec.task_name, "task_a");
         assert_eq!(spec.attempt, 2);
         assert!(matches!(spec.executor, ExecutorKind::Process));
-        assert_eq!(spec.input, serde_json::json!({"x": 1}));
         assert!(
-            TaskSpec::from_workflow(
-                &workflow,
-                "run-1".to_string(),
-                "missing",
-                1,
-                IndexMap::new()
-            )
-            .is_none()
+            TaskSpec::from_workflow(&workflow, "run-1".to_string(), "missing", 1).is_none()
         );
     }
 
@@ -209,7 +190,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::json!({"value": 42}),
                 inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
@@ -223,15 +203,11 @@ mod tests {
             root: PathBuf::from("."),
         };
 
-        let spec = TaskSpec::from_compiled(&compiled, "run-2".to_string(), 0, 1, IndexMap::new())
+        let spec = TaskSpec::from_compiled(&compiled, "run-2".to_string(), 0, 1)
             .expect("compiled task should exist");
         assert_eq!(spec.workflow_name, "wf-compiled");
         assert_eq!(spec.task_name, "task0");
-        assert_eq!(spec.input, serde_json::json!({"value": 42}));
-        assert!(
-            TaskSpec::from_compiled(&compiled, "run-2".to_string(), 9, 1, IndexMap::new())
-                .is_none()
-        );
+        assert!(TaskSpec::from_compiled(&compiled, "run-2".to_string(), 9, 1).is_none());
     }
 
     #[test]

@@ -34,21 +34,8 @@ struct WorkflowSchema {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
-    params: BTreeMap<String, ParamDefinition>,
-    #[serde(default)]
     types: BTreeMap<String, TypeExpr>,
     tasks: BTreeMap<String, TaskDefinition>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ParamDefinition {
-    #[serde(rename = "type")]
-    type_expr: TypeExpr,
-    #[serde(default)]
-    required: bool,
-    #[serde(default)]
-    default: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,8 +54,6 @@ struct TaskDefinition {
     input_type: TypeExpr,
     output_type: TypeExpr,
     inputs: BTreeMap<String, Binding>,
-    #[serde(default)]
-    run_if: Option<RunIf>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -80,20 +65,6 @@ enum ExecutorKind {
     CloudRun,
     Python,
     Library,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RunIf {
-    deps: DependencyCondition,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum DependencyCondition {
-    AllSuccess,
-    AllDone,
-    AnyFailed,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,29 +133,6 @@ impl WorkflowSchema {
             self.validate_type_expr(expr, &format!("types.{}", alias), &mut stack)?;
         }
 
-        for (param_name, param_def) in &self.params {
-            validate_identifier(param_name, &format!("params.{}", param_name))?;
-            if !param_def.required && param_def.default.is_none() {
-                bail!(
-                    "params.{} must set required: true or provide a default value",
-                    param_name
-                );
-            }
-            let mut stack = Vec::new();
-            self.validate_type_expr(
-                &param_def.type_expr,
-                &format!("params.{}.type", param_name),
-                &mut stack,
-            )?;
-            if let Some(default) = &param_def.default {
-                self.validate_const_against_type(
-                    default,
-                    &param_def.type_expr,
-                    &format!("params.{}.default", param_name),
-                )?;
-            }
-        }
-
         self.validate_task_graph()?;
 
         for (task_name, task_def) in &self.tasks {
@@ -192,20 +140,6 @@ impl WorkflowSchema {
             let _ = (task_def.timeout, task_def.retries);
 
             self.validate_executor_requirements(task_name, task_def)?;
-
-            if let Some(run_if) = &task_def.run_if {
-                if task_def.depends_on.is_empty() {
-                    bail!(
-                        "tasks.{}.run_if is only valid when depends_on is non-empty",
-                        task_name
-                    );
-                }
-                match run_if.deps {
-                    DependencyCondition::AllSuccess
-                    | DependencyCondition::AllDone
-                    | DependencyCondition::AnyFailed => {}
-                }
-            }
 
             let mut stack = Vec::new();
             self.validate_type_expr(
@@ -568,32 +502,12 @@ impl WorkflowSchema {
         }
 
         match parts[0] {
-            "params" => self.resolve_param_ref(reference, &parts),
             "tasks" => self.resolve_task_ref(reference, &parts, current_task),
             _ => bail!(
-                "invalid ref '{}': root must be 'params' or 'tasks'",
+                "invalid ref '{}': must be tasks.<task>.output[.<field>...]",
                 reference
             ),
         }
-    }
-
-    fn resolve_param_ref(&self, reference: &str, parts: &[&str]) -> Result<TypeExpr> {
-        if parts.len() < 2 || parts[1].is_empty() {
-            bail!(
-                "invalid ref '{}': params reference must be params.<name>[.<field>...]",
-                reference
-            );
-        }
-
-        let param_name = parts[1];
-        let param = self.params.get(param_name).with_context(|| {
-            format!(
-                "ref '{}' points to unknown param '{}'",
-                reference, param_name
-            )
-        })?;
-
-        self.resolve_field_path(&param.type_expr, &parts[2..], reference)
     }
 
     fn resolve_task_ref(
@@ -924,10 +838,6 @@ mod tests {
         let path = write_temp_workflow(
             r#"
 name: wf_schema_valid
-params:
-  env:
-    type: str
-    required: true
 types:
   TaskResult:
     task: str
@@ -950,13 +860,10 @@ tasks:
     depends_on: [task_a]
     input_type:
       a: types.TaskResult
-      run_env: str
     output_type: types.TaskResult
     inputs:
       a:
         ref: tasks.task_a.output
-      run_env:
-        ref: params.env
 "#,
         );
 

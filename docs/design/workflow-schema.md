@@ -1,11 +1,11 @@
 # Workflow Schema
 
-Status: draft implementation with CLI validation support.
+Status: implemented in core runtime and CLI validation.
 
 ## Scope
-This document defines a strict workflow schema for YAML task definitions.
+This document defines the strict workflow schema for YAML task definitions as implemented in the ork runtime and CLI validator.
 
-Current CLI support:
+CLI support:
 - Validate command: `ork validate-workflow <file.yaml>`
 - Validation is strict and intentionally rejects v1-style `upstream` conventions.
 
@@ -19,13 +19,7 @@ Current CLI support:
 ```yaml
 name: <workflow_name>
 
-params:               # optional
-  <param_name>:
-    type: <type_expr>
-    required: true|false
-    default: <literal>   # required when required=false
-
-types:                # optional aliases
+types:                # optional type aliases
   <TypeAlias>: <type_expr>
 
 tasks:
@@ -37,8 +31,6 @@ tasks:
     command: <cmd>       # executor-dependent
     job: <job_name>      # executor-dependent
     depends_on: [<task_name>, ...]
-    run_if:              # optional
-      deps: all_success|all_done|any_failed
     input_type: <object_type_expr>
     output_type: <type_expr>
     inputs:
@@ -97,7 +89,6 @@ A binding must be exactly one of:
 No bare scalar/array/object values are allowed in `inputs`.
 
 Reference path grammar:
-- `params.<param_name>[.<field>...]`
 - `tasks.<task_name>.output[.<field>...]`
 
 Rules:
@@ -106,12 +97,11 @@ Rules:
 - Ref field traversal must follow object fields.
 - Ref type must be assignable to the target input field type.
 
-## Task graph and execution gating
+## Task graph validation
 - `depends_on` tasks must exist.
 - No self-dependency.
 - No duplicate dependencies.
 - Task graph must be acyclic.
-- `run_if` is valid only when `depends_on` is non-empty.
 
 ## Executor-specific requirements
 - `python`: non-empty `module` or `file`

@@ -30,8 +30,6 @@ pub struct TaskDefinition {
     pub module: Option<String>,
     pub function: Option<String>,
     #[serde(default)]
-    pub input: serde_json::Value,
-    #[serde(default)]
     pub inputs: serde_json::Value,
     #[serde(default)]
     pub depends_on: Vec<String>,
@@ -149,12 +147,6 @@ impl Workflow {
                 }
             }
 
-            if !task.input.is_null() {
-                return Err(WorkflowValidationError::Custom(format!(
-                    "task '{}' uses removed legacy field 'input'; use 'inputs' bindings with 'const'/'ref'",
-                    name
-                )));
-            }
             if !task.inputs.is_null() && !task.inputs.is_object() {
                 return Err(WorkflowValidationError::Custom(format!(
                     "task '{}' field 'inputs' must be an object",
@@ -223,84 +215,111 @@ impl Workflow {
             )?;
         }
 
-        // When explicit `inputs` bindings are provided, all `input_type` fields should be bound.
+        // Enforce strict input binding: tasks with input_type must have matching inputs bindings
         for (name, task) in &self.tasks {
-            if task.inputs.is_null() {
-                continue;
-            }
-            let Some(input_type) = task.input_type.as_ref() else {
-                return Err(WorkflowValidationError::Custom(format!(
-                    "task '{}' defines 'inputs' but is missing 'input_type'",
-                    name
-                )));
-            };
-            let Some(type_obj) = input_type.as_object() else {
-                return Err(WorkflowValidationError::Custom(format!(
-                    "task '{}' input_type must be an object when 'inputs' is used",
-                    name
-                )));
-            };
-            let Some(bindings_obj) = task.inputs.as_object() else {
-                return Err(WorkflowValidationError::Custom(format!(
-                    "task '{}' inputs must be an object",
-                    name
-                )));
-            };
-            for key in type_obj.keys() {
-                if !bindings_obj.contains_key(key) {
+            // If task has input_type, validate its structure and require matching inputs
+            if let Some(input_type) = task.input_type.as_ref() {
+                let Some(type_obj) = input_type.as_object() else {
                     return Err(WorkflowValidationError::Custom(format!(
-                        "task '{}' inputs missing binding for '{}'",
-                        name, key
-                    )));
-                }
-            }
-            for key in bindings_obj.keys() {
-                if !type_obj.contains_key(key) {
-                    return Err(WorkflowValidationError::Custom(format!(
-                        "task '{}' inputs contains unknown binding '{}'",
-                        name, key
-                    )));
-                }
-            }
-            for (key, binding) in bindings_obj {
-                let Some(binding_obj) = binding.as_object() else {
-                    return Err(WorkflowValidationError::Custom(format!(
-                        "task '{}' input binding '{}' must be an object with exactly one of: const, ref",
-                        name, key
+                        "task '{}' input_type must be an object type (for named arguments)",
+                        name
                     )));
                 };
-                let has_const = binding_obj.contains_key("const");
-                let has_ref = binding_obj.contains_key("ref");
-                if binding_obj.len() != 1 || has_const == has_ref {
-                    return Err(WorkflowValidationError::Custom(format!(
-                        "task '{}' input binding '{}' must define exactly one of: const, ref",
-                        name, key
-                    )));
-                }
-                if has_ref {
-                    let ref_path =
-                        binding_obj
-                            .get("ref")
-                            .and_then(|v| v.as_str())
-                            .ok_or_else(|| {
-                                WorkflowValidationError::Custom(format!(
-                                    "task '{}' input binding '{}.ref' must be a string",
-                                    name, key
-                                ))
-                            })?;
-                    let parts: Vec<&str> = ref_path.split('.').collect();
-                    if parts.len() < 3 || parts[0] != "tasks" || parts[2] != "output" {
+
+                // If input_type has any fields, inputs must be present and non-null
+                if !type_obj.is_empty() {
+                    if task.inputs.is_null() {
                         return Err(WorkflowValidationError::Custom(format!(
-                            "task '{}' input binding '{}' has invalid ref '{}'; expected tasks.<task>.output[.<field>...]",
-                            name, key, ref_path
+                            "task '{}' has input_type with fields but is missing 'inputs' bindings",
+                            name
                         )));
                     }
-                    let dep_task = parts[1];
-                    if !task.depends_on.iter().any(|dep| dep == dep_task) {
+
+                    let Some(bindings_obj) = task.inputs.as_object() else {
                         return Err(WorkflowValidationError::Custom(format!(
-                            "task '{}' input binding '{}' ref '{}' targets '{}' which is not listed in depends_on",
-                            name, key, ref_path, dep_task
+                            "task '{}' inputs must be an object",
+                            name
                         )));
+                    };
+
+                    // Check for missing bindings
+                    for key in type_obj.keys() {
+                        if !bindings_obj.contains_key(key) {
+                            return Err(WorkflowValidationError::Custom(format!(
+                                "task '{}' inputs missing binding for '{}'",
+                                name, key
+                            )));
+                        }
+                    }
+
+                    // Check for extra bindings
+                    for key in bindings_obj.keys() {
+                        if !type_obj.contains_key(key) {
+                            return Err(WorkflowValidationError::Custom(format!(
+                                "task '{}' inputs contains unknown binding '{}'",
+                                name, key
+                            )));
+                        }
+                    }
+                }
+            }
+
+            // When explicit `inputs` bindings are provided, validate their structure
+            if !task.inputs.is_null() {
+                let Some(_input_type) = task.input_type.as_ref() else {
+                    return Err(WorkflowValidationError::Custom(format!(
+                        "task '{}' defines 'inputs' but is missing 'input_type'",
+                        name
+                    )));
+                };
+
+                let Some(bindings_obj) = task.inputs.as_object() else {
+                    return Err(WorkflowValidationError::Custom(format!(
+                        "task '{}' inputs must be an object",
+                        name
+                    )));
+                };
+
+                for (key, binding) in bindings_obj {
+                    let Some(binding_obj) = binding.as_object() else {
+                        return Err(WorkflowValidationError::Custom(format!(
+                            "task '{}' input binding '{}' must be an object with exactly one of: const, ref",
+                            name, key
+                        )));
+                    };
+                    let has_const = binding_obj.contains_key("const");
+                    let has_ref = binding_obj.contains_key("ref");
+                    if binding_obj.len() != 1 || has_const == has_ref {
+                        return Err(WorkflowValidationError::Custom(format!(
+                            "task '{}' input binding '{}' must define exactly one of: const, ref",
+                            name, key
+                        )));
+                    }
+                    if has_ref {
+                        let ref_path =
+                            binding_obj
+                                .get("ref")
+                                .and_then(|v| v.as_str())
+                                .ok_or_else(|| {
+                                    WorkflowValidationError::Custom(format!(
+                                        "task '{}' input binding '{}.ref' must be a string",
+                                        name, key
+                                    ))
+                                })?;
+                        let parts: Vec<&str> = ref_path.split('.').collect();
+                        if parts.len() < 3 || parts[0] != "tasks" || parts[2] != "output" {
+                            return Err(WorkflowValidationError::Custom(format!(
+                                "task '{}' input binding '{}' has invalid ref '{}'; expected tasks.<task>.output[.<field>...]",
+                                name, key, ref_path
+                            )));
+                        }
+                        let dep_task = parts[1];
+                        if !task.depends_on.iter().any(|dep| dep == dep_task) {
+                            return Err(WorkflowValidationError::Custom(format!(
+                                "task '{}' input binding '{}' ref '{}' targets '{}' which is not listed in depends_on",
+                                name, key, ref_path, dep_task
+                            )));
+                        }
                     }
                 }
             }
@@ -462,7 +481,6 @@ mod tests {
             job: None,
             module: None,
             function: None,
-            input: serde_json::Value::Null,
             inputs: serde_json::Value::Null,
             depends_on: Vec::new(),
             timeout: 300,
@@ -544,7 +562,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::Value::Null,
                 inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
@@ -575,7 +592,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::Value::Null,
                 inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
@@ -606,7 +622,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::Value::Null,
                 inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
@@ -637,7 +652,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::Value::Null,
                 inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
@@ -760,6 +774,11 @@ tasks:
         transform.depends_on = vec!["extract".to_string()];
         transform.input_type =
             Some(serde_json::json!({"upstream": {"extract": {"users": ["str"], "count": "int"}}}));
+        transform.inputs = serde_json::json!({
+            "upstream": {
+                "ref": "tasks.extract.output"
+            }
+        });
         tasks.insert("extract".to_string(), extract);
         tasks.insert("transform".to_string(), transform);
 
@@ -798,6 +817,11 @@ tasks:
         let mut b = process_task();
         b.depends_on = vec!["a".to_string()];
         b.input_type = Some(serde_json::json!({"upstream": {"a": {"x": "int"}}}));
+        b.inputs = serde_json::json!({
+            "upstream": {
+                "ref": "tasks.a.output"
+            }
+        });
         // b has no output_type — that's fine, nothing depends on b
         tasks.insert("a".to_string(), a);
         tasks.insert("b".to_string(), b);
@@ -833,6 +857,9 @@ tasks:
         extract:
           users: [str]
           count: int
+    inputs:
+      upstream:
+        ref: tasks.extract.output
 "#;
         std::io::Write::write_all(&mut file, yaml.as_bytes())
             .expect("yaml content should be written");

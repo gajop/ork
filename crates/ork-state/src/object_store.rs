@@ -210,7 +210,6 @@ impl ObjectStore for LocalObjectStore {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use indexmap::IndexMap;
     use ork_core::types::{TaskSpec, TaskStatus, TaskStatusFile};
     use ork_core::workflow::ExecutorKind;
     use uuid::Uuid;
@@ -222,8 +221,6 @@ mod tests {
             task_name: task_name.to_string(),
             attempt: 1,
             executor: ExecutorKind::Process,
-            input: serde_json::json!({"x": 1}),
-            upstream: IndexMap::new(),
         }
     }
 
@@ -242,7 +239,6 @@ mod tests {
 
         let loaded = store.read_spec("run-1", "task-a").await.expect("read spec");
         assert_eq!(loaded.task_name, "task-a");
-        assert_eq!(loaded.input, serde_json::json!({"x": 1}));
 
         let _ = std::fs::remove_dir_all(dir);
     }

@@ -46,6 +46,12 @@ tasks:
           status: str
         native:
           result: int
+    inputs:
+      upstream:
+        const:
+          extract: {}
+          launch: {}
+          native: {}
 "#;
     let workflow: Workflow = serde_yaml::from_str(yaml).expect("workflow yaml");
     let compiled = workflow.compile(dir.path()).expect("compile");

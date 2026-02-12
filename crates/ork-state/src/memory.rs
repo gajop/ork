@@ -85,7 +85,6 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::Value::Null,
                 inputs: serde_json::Value::Null,
                 depends_on: vec![],
                 timeout: 60,
