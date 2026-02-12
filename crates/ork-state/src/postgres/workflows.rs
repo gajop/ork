@@ -1,7 +1,8 @@
 use super::core::PostgresDatabase;
 use anyhow::Result;
+use chrono::Utc;
 use ork_core::database::{NewWorkflowTask, WorkflowListPage, WorkflowListQuery};
-use ork_core::models::{Workflow, WorkflowTask};
+use ork_core::models::{Workflow, WorkflowSnapshot, WorkflowTask};
 use uuid::Uuid;
 
 impl PostgresDatabase {
@@ -198,6 +199,54 @@ impl PostgresDatabase {
         sqlx::query("UPDATE workflows SET schedule = $1, schedule_enabled = $2 WHERE id = $3")
             .bind(schedule)
             .bind(schedule_enabled)
+            .bind(workflow_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub(super) async fn create_or_get_snapshot_impl(
+        &self,
+        workflow_id: Uuid,
+        content_hash: &str,
+        tasks_json: serde_json::Value,
+    ) -> Result<WorkflowSnapshot> {
+        let snapshot_id = Uuid::new_v4();
+        let now = Utc::now();
+        let snapshot = sqlx::query_as::<_, WorkflowSnapshot>(
+            r#"INSERT INTO workflow_snapshots (id, workflow_id, content_hash, tasks_json, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (workflow_id, content_hash)
+            DO UPDATE SET content_hash = EXCLUDED.content_hash
+            RETURNING *"#,
+        )
+        .bind(snapshot_id)
+        .bind(workflow_id)
+        .bind(content_hash)
+        .bind(sqlx::types::Json(tasks_json))
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(snapshot)
+    }
+
+    pub(super) async fn get_snapshot_impl(&self, snapshot_id: Uuid) -> Result<WorkflowSnapshot> {
+        let snapshot =
+            sqlx::query_as::<_, WorkflowSnapshot>("SELECT * FROM workflow_snapshots WHERE id = $1")
+                .bind(snapshot_id)
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(snapshot)
+    }
+
+    pub(super) async fn update_workflow_snapshot_impl(
+        &self,
+        workflow_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<()> {
+        sqlx::query("UPDATE workflows SET current_snapshot_id = $1 WHERE id = $2")
+            .bind(snapshot_id)
             .bind(workflow_id)
             .execute(&self.pool)
             .await?;

@@ -10,6 +10,7 @@ use uuid::Uuid;
 struct RunWithWorkflowRow {
     id: Uuid,
     workflow_id: Uuid,
+    snapshot_id: Option<Uuid>,
     status: RunStatus,
     triggered_by: String,
     started_at: Option<DateTime<Utc>>,
@@ -25,10 +26,15 @@ impl PostgresDatabase {
         workflow_id: Uuid,
         triggered_by: &str,
     ) -> Result<Run> {
+        // Get workflow's current snapshot
+        let workflow = self.get_workflow_by_id_impl(workflow_id).await?;
+        let snapshot_id = workflow.current_snapshot_id;
+
         let run = sqlx::query_as::<_, Run>(
-            "INSERT INTO runs (workflow_id, status, triggered_by) VALUES ($1, $2, $3) RETURNING *",
+            "INSERT INTO runs (workflow_id, snapshot_id, status, triggered_by) VALUES ($1, $2, $3, $4) RETURNING *",
         )
         .bind(workflow_id)
+        .bind(snapshot_id)
         .bind(RunStatus::Pending.as_str())
         .bind(triggered_by)
         .fetch_one(&self.pool)
@@ -99,7 +105,7 @@ impl PostgresDatabase {
                 .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -123,7 +129,7 @@ impl PostgresDatabase {
                         .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -150,7 +156,7 @@ impl PostgresDatabase {
                 .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -171,7 +177,7 @@ impl PostgresDatabase {
                     .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -192,6 +198,7 @@ impl PostgresDatabase {
                 run: Run {
                     id: row.id,
                     workflow_id: row.workflow_id,
+                    snapshot_id: row.snapshot_id,
                     status: row.status,
                     triggered_by: row.triggered_by,
                     started_at: row.started_at,

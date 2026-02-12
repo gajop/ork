@@ -18,7 +18,7 @@ impl PostgresDatabase {
         let mut tx = self.pool.begin().await?;
         for i in 0..task_count {
             let params = serde_json::json!({"task_index": i, "run_id": run_id, "workflow_name": workflow_name});
-            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, params) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (run_id, task_index) DO NOTHING")
                 .bind(run_id)
                 .bind(i)
                 .bind(format!("task_{}", i))
@@ -39,7 +39,7 @@ impl PostgresDatabase {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         for task in tasks {
-            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, attempts, max_retries, timeout_seconds, params) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9)")
+            sqlx::query("INSERT INTO tasks (run_id, task_index, task_name, executor_type, depends_on, status, attempts, max_retries, timeout_seconds, params) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9) ON CONFLICT (run_id, task_index) DO NOTHING")
                 .bind(run_id)
                 .bind(task.task_index)
                 .bind(&task.task_name)

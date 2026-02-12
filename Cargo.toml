@@ -40,6 +40,7 @@ reqwest = { version = "0.13", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9.34-deprecated"
+sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false }
 sysinfo = "0.38.1"
 thiserror = "2"

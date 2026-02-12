@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::compiled::build_workflow_tasks;
@@ -106,7 +107,30 @@ pub async fn apply_workflow_yaml(
     db.create_workflow_tasks(workflow.id, &workflow_tasks)
         .await?;
 
+    // Create or reuse snapshot based on content hash
+    let tasks_json = serde_json::to_value(&workflow_tasks)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize workflow tasks: {}", e))?;
+    let content_hash = compute_content_hash(&tasks_json);
+
+    let snapshot = db
+        .create_or_get_snapshot(workflow.id, &content_hash, tasks_json)
+        .await?;
+
+    // Update workflow's current_snapshot_id
+    db.update_workflow_snapshot(workflow.id, snapshot.id)
+        .await?;
+
+    // Fetch the updated workflow to return
+    let workflow = db.get_workflow_by_id(workflow.id).await?;
+
     Ok(ApplyWorkflowYamlResult { workflow, outcome })
+}
+
+fn compute_content_hash(tasks_json: &serde_json::Value) -> String {
+    let canonical = serde_json::to_string(tasks_json).unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 fn is_not_found_error(err: &anyhow::Error) -> bool {

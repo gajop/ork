@@ -1,10 +1,11 @@
 use anyhow::Result;
+use chrono::Utc;
 use uuid::Uuid;
 
 use ork_core::database::{NewWorkflowTask, WorkflowListPage, WorkflowListQuery};
-use ork_core::models::{Workflow, WorkflowTask};
+use ork_core::models::{Workflow, WorkflowSnapshot, WorkflowTask};
 
-use super::core::{SqliteDatabase, WorkflowTaskRow, encode_depends_on};
+use super::core::{SqliteDatabase, WorkflowSnapshotRow, WorkflowTaskRow, encode_depends_on};
 
 impl SqliteDatabase {
     pub(super) async fn create_workflow_impl(
@@ -230,6 +231,57 @@ impl SqliteDatabase {
         sqlx::query("UPDATE workflows SET schedule = ?, schedule_enabled = ? WHERE id = ?")
             .bind(schedule)
             .bind(schedule_enabled)
+            .bind(workflow_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub(super) async fn create_or_get_snapshot_impl(
+        &self,
+        workflow_id: Uuid,
+        content_hash: &str,
+        tasks_json: serde_json::Value,
+    ) -> Result<WorkflowSnapshot> {
+        let snapshot_id = Uuid::new_v4();
+        let now = Utc::now();
+        let tasks_json_str = serde_json::to_string(&tasks_json)?;
+
+        let row = sqlx::query_as::<_, WorkflowSnapshotRow>(
+            r#"INSERT INTO workflow_snapshots (id, workflow_id, content_hash, tasks_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (workflow_id, content_hash)
+            DO UPDATE SET content_hash = excluded.content_hash
+            RETURNING *"#,
+        )
+        .bind(snapshot_id)
+        .bind(workflow_id)
+        .bind(content_hash)
+        .bind(tasks_json_str)
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Self::map_workflow_snapshot(row)
+    }
+
+    pub(super) async fn get_snapshot_impl(&self, snapshot_id: Uuid) -> Result<WorkflowSnapshot> {
+        let row = sqlx::query_as::<_, WorkflowSnapshotRow>(
+            "SELECT * FROM workflow_snapshots WHERE id = ?",
+        )
+        .bind(snapshot_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Self::map_workflow_snapshot(row)
+    }
+
+    pub(super) async fn update_workflow_snapshot_impl(
+        &self,
+        workflow_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<()> {
+        sqlx::query("UPDATE workflows SET current_snapshot_id = ? WHERE id = ?")
+            .bind(snapshot_id)
             .bind(workflow_id)
             .execute(&self.pool)
             .await?;

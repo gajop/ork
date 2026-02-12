@@ -29,7 +29,7 @@ impl FileDatabase {
             task_id,
             service_type: service_type.to_string(),
             job_id: job_id.to_string(),
-            job_data,
+            job_data: sqlx::types::Json(job_data),
             status: DeferredJobStatus::Pending,
             error: None,
             created_at: now,

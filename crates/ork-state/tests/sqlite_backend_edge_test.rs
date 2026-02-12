@@ -4,6 +4,7 @@ use anyhow::Result;
 use chrono::{Duration, Utc};
 use ork_core::database::{
     NewTask, NewWorkflowTask, RunRepository, TaskRepository, WorkflowRepository,
+    WorkflowSnapshotRepository,
 };
 use ork_state::SqliteDatabase;
 use uuid::Uuid;
@@ -158,6 +159,73 @@ async fn test_sqlite_branch_and_edge_paths() -> Result<()> {
             .iter()
             .any(|j| j.id == deferred.id && j.status_str() == "cancelled")
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sqlite_batch_create_dag_tasks_is_idempotent_per_run_index() -> Result<()> {
+    let db = SqliteDatabase::new(":memory:").await?;
+    db.run_migrations().await?;
+
+    let wf = db
+        .create_workflow(
+            "sqlite-idempotent-tasks",
+            None,
+            "job",
+            "region",
+            "project",
+            "dag",
+            None,
+            None,
+        )
+        .await?;
+
+    let snapshot = db
+        .create_or_get_snapshot(
+            wf.id,
+            "hash-1",
+            serde_json::json!([{
+                "task_index": 0,
+                "task_name": "extract",
+                "executor_type": "process",
+                "depends_on": [],
+                "params": {"command": "echo extract"},
+                "signature": null
+            }]),
+        )
+        .await?;
+    db.update_workflow_snapshot(wf.id, snapshot.id).await?;
+
+    let run = db.create_run(wf.id, "tests").await?;
+    let tasks = vec![
+        NewTask {
+            task_index: 0,
+            task_name: "extract".to_string(),
+            executor_type: "process".to_string(),
+            depends_on: vec![],
+            params: serde_json::json!({"command":"echo extract"}),
+            max_retries: 0,
+            timeout_seconds: None,
+        },
+        NewTask {
+            task_index: 1,
+            task_name: "load".to_string(),
+            executor_type: "process".to_string(),
+            depends_on: vec!["extract".to_string()],
+            params: serde_json::json!({"command":"echo load"}),
+            max_retries: 0,
+            timeout_seconds: None,
+        },
+    ];
+
+    db.batch_create_dag_tasks(run.id, &tasks).await?;
+    db.batch_create_dag_tasks(run.id, &tasks).await?;
+
+    let created = db.list_tasks(run.id).await?;
+    assert_eq!(created.len(), 2);
+    assert_eq!(created.iter().filter(|t| t.task_index == 0).count(), 1);
+    assert_eq!(created.iter().filter(|t| t.task_index == 1).count(), 1);
 
     Ok(())
 }

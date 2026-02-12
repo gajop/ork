@@ -170,14 +170,7 @@ enable_triggerer: false
         let addr = free_local_addr();
         let test_addr = addr.clone();
 
-        let handle = tokio::spawn(async move {
-            Serve {
-                config: None,
-                addr,
-            }
-            .execute(db)
-            .await
-        });
+        let handle = tokio::spawn(async move { Serve { config: None, addr }.execute(db).await });
 
         // Wait for server to start
         sleep(Duration::from_millis(200)).await;

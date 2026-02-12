@@ -173,9 +173,7 @@ mod tests {
         assert_eq!(spec.task_name, "task_a");
         assert_eq!(spec.attempt, 2);
         assert!(matches!(spec.executor, ExecutorKind::Process));
-        assert!(
-            TaskSpec::from_workflow(&workflow, "run-1".to_string(), "missing", 1).is_none()
-        );
+        assert!(TaskSpec::from_workflow(&workflow, "run-1".to_string(), "missing", 1).is_none());
     }
 
     #[test]

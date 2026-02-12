@@ -441,6 +441,8 @@ def run():
 "#,
     )
     .expect("write task file");
+    let runner = base.join("run_task.py");
+    fs::write(&runner, crate::python_runtime::RUN_TASK_PY).expect("write runner script");
 
     let executor = ProcessExecutor::new(Some(base.to_string_lossy().to_string()));
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -454,6 +456,7 @@ def run():
             Some(serde_json::json!({
                 "task_file": task_file,
                 "task_function": "run",
+                "runner_path": runner,
                 "python_path": base,
                 "task_name": "task-datetime",
                 "workflow_name": "wf-datetime",

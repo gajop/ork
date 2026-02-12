@@ -281,5 +281,49 @@ pub fn build_run_tasks(
         .collect()
 }
 
+pub fn build_run_tasks_from_snapshot(
+    run_id: Uuid,
+    workflow: &Workflow,
+    snapshot_tasks: &[crate::database::NewWorkflowTask],
+) -> Vec<NewTask> {
+    snapshot_tasks
+        .iter()
+        .map(|task| {
+            let mut params = task.params.clone();
+            if !params.is_object() {
+                params = serde_json::json!({});
+            }
+            let obj = params.as_object_mut().expect("params object");
+            let max_retries = obj
+                .get("max_retries")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                .clamp(0, i64::from(i32::MAX)) as i32;
+            let timeout_seconds = obj
+                .get("timeout_seconds")
+                .and_then(|v| v.as_i64())
+                .map(|v| v.clamp(0, i64::from(i32::MAX)) as i32);
+            obj.entry("task_index".to_string())
+                .or_insert_with(|| serde_json::json!(task.task_index));
+            obj.entry("task_name".to_string())
+                .or_insert_with(|| serde_json::json!(task.task_name.clone()));
+            obj.entry("workflow_name".to_string())
+                .or_insert_with(|| serde_json::json!(workflow.name.clone()));
+            obj.entry("run_id".to_string())
+                .or_insert_with(|| serde_json::json!(run_id.to_string()));
+
+            NewTask {
+                task_index: task.task_index,
+                task_name: task.task_name.clone(),
+                executor_type: task.executor_type.clone(),
+                depends_on: task.depends_on.clone(),
+                params,
+                max_retries,
+                timeout_seconds,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

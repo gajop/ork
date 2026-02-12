@@ -28,7 +28,7 @@ impl Default for OrchestratorConfig {
             poll_interval_secs: std::env::var("POLL_INTERVAL_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(1.0),
+                .unwrap_or(0.5),
             max_tasks_per_batch: std::env::var("MAX_TASKS_PER_BATCH")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -170,7 +170,7 @@ mod tests {
             std::env::set_var("MAX_TASKS_PER_BATCH", "bad");
         }
         let fallback = OrchestratorConfig::default();
-        assert_eq!(fallback.poll_interval_secs, 1.0);
+        assert_eq!(fallback.poll_interval_secs, 0.5);
         assert_eq!(fallback.max_tasks_per_batch, 100);
 
         for (key, value) in previous {

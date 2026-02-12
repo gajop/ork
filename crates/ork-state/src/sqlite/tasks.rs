@@ -25,7 +25,8 @@ impl SqliteDatabase {
             }));
             sqlx::query(
                 r#"INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, params)
-                VALUES (?, ?, ?, ?, ?, '[]', ?, ?)"#,
+                VALUES (?, ?, ?, ?, ?, '[]', ?, ?)
+                ON CONFLICT (run_id, task_index) DO NOTHING"#,
             )
             .bind(task_id)
             .bind(run_id)
@@ -53,7 +54,8 @@ impl SqliteDatabase {
             let params_json = sqlx::types::Json(&task.params);
             sqlx::query(
                 r#"INSERT INTO tasks (id, run_id, task_index, task_name, executor_type, depends_on, status, attempts, max_retries, timeout_seconds, params)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)"#,
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ON CONFLICT (run_id, task_index) DO NOTHING"#,
             )
             .bind(task_id)
             .bind(run_id)

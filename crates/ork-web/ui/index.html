@@ -406,6 +406,24 @@
     let runsWorkflowFilter = '';
     const WORKFLOWS_PER_PAGE = 50;
     const RUNS_PER_PAGE = 50;
+    const MIN_POLL_MS = 100;
+    const MAX_POLL_MS = 5000;
+
+    function queryInt(name, fallback) {
+      const raw = new URLSearchParams(window.location.search).get(name);
+      if (!raw) return fallback;
+      const parsed = parseInt(raw, 10);
+      if (Number.isNaN(parsed)) return fallback;
+      return Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, parsed));
+    }
+
+    const RUNS_POLL_MS = queryInt('runs_poll_ms', 250);
+    const WORKFLOWS_POLL_MS = queryInt('workflows_poll_ms', 1000);
+    const DETAIL_POLL_MS = queryInt('detail_poll_ms', 250);
+    const WS_RECONNECT_MS = queryInt('ws_reconnect_ms', 1000);
+    let workflowsFetchInFlight = false;
+    let runsFetchInFlight = false;
+    let runDetailFetchInFlightFor = null;
 
     const workflowListEl = document.getElementById('workflow-list');
     const runsListEl = document.getElementById('runs-list');
@@ -495,22 +513,25 @@
         };
 
         ws.onclose = () => {
-          console.log('WebSocket disconnected, reconnecting in 5s...');
+          console.log(`WebSocket disconnected, reconnecting in ${WS_RECONNECT_MS}ms...`);
           ws = null;
-          wsReconnectTimeout = setTimeout(connectWebSocket, 5000);
+          wsReconnectTimeout = setTimeout(connectWebSocket, WS_RECONNECT_MS);
         };
       } catch (e) {
         console.error('Failed to create WebSocket:', e);
-        wsReconnectTimeout = setTimeout(connectWebSocket, 5000);
+        wsReconnectTimeout = setTimeout(connectWebSocket, WS_RECONNECT_MS);
       }
     }
 
     connectWebSocket();
     fetchWorkflows();
     fetchRuns();
-    setInterval(fetchRuns, 5000); // Reduced polling frequency since we have WebSocket
+    setInterval(fetchWorkflows, WORKFLOWS_POLL_MS);
+    setInterval(fetchRuns, RUNS_POLL_MS);
 
     function fetchWorkflows() {
+      if (workflowsFetchInFlight) return;
+      workflowsFetchInFlight = true;
       const params = new URLSearchParams({
         limit: WORKFLOWS_PER_PAGE,
         offset: workflowsPage * WORKFLOWS_PER_PAGE,
@@ -530,10 +551,15 @@
           renderWorkflows();
           renderRuns();
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          workflowsFetchInFlight = false;
+        });
     }
 
     function fetchRuns() {
+      if (runsFetchInFlight) return;
+      runsFetchInFlight = true;
       const params = new URLSearchParams({
         limit: RUNS_PER_PAGE,
         offset: runsPage * RUNS_PER_PAGE,
@@ -550,7 +576,10 @@
           renderRuns();
           renderWorkflows();
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          runsFetchInFlight = false;
+        });
     }
 
     function fetchWorkflowGraph(name) {
@@ -582,7 +611,7 @@
       renderRuns();
       fetchRunDetail(id);
       if (detailInterval) clearInterval(detailInterval);
-      detailInterval = setInterval(() => fetchRunDetail(id), 5000); // Reduced since WebSocket handles updates
+      detailInterval = setInterval(() => fetchRunDetail(id), DETAIL_POLL_MS);
       setActiveTab('run');
     }
 
@@ -690,13 +719,20 @@
 
     function fetchRunDetail(id) {
       if (!id) return;
+      if (runDetailFetchInFlightFor === id) return;
+      runDetailFetchInFlightFor = id;
       fetch('/api/runs/' + id)
         .then(r => r.ok ? r.json() : null)
         .then(data => {
           if (!data) return;
           showDetail(data);
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (runDetailFetchInFlightFor === id) {
+            runDetailFetchInFlightFor = null;
+          }
+        });
     }
 
     function triggerRun() {
@@ -883,10 +919,10 @@
       const ms = e - s;
       if (ms < 0) return '';
       const secs = ms / 1000;
-      if (secs < 60) return secs.toFixed(2) + 's';
+      if (secs < 60) return secs.toFixed(1) + 's';
       const mins = Math.floor(secs / 60);
       const rem = (secs % 60);
-      return `${mins}m ${rem.toFixed(2)}s`;
+      return `${mins}m ${rem.toFixed(1)}s`;
     }
 
     function truncate(str, len) {

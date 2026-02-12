@@ -31,6 +31,19 @@ const DEFAULT_DATABASE_URL: &str = "postgres://postgres:postgres@localhost:5432/
 #[cfg(feature = "sqlite")]
 const DEFAULT_DATABASE_URL: &str = "sqlite://./.ork/ork.db?mode=rwc";
 
+#[cfg(feature = "postgres")]
+fn default_database_url() -> String {
+    DEFAULT_DATABASE_URL.to_string()
+}
+
+#[cfg(feature = "sqlite")]
+fn default_database_url() -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        return format!("sqlite://{home}/.ork/ork.db?mode=rwc");
+    }
+    DEFAULT_DATABASE_URL.to_string()
+}
+
 #[derive(Parser)]
 #[command(name = "ork")]
 #[command(about = "Ork - A high-performance task orchestrator supporting multiple execution backends", long_about = None)]
@@ -38,7 +51,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    #[arg(long, default_value = DEFAULT_DATABASE_URL)]
+    #[arg(long, default_value_t = default_database_url())]
     database_url: String,
 }
 
@@ -123,7 +136,7 @@ mod tests {
     use super::*;
     use crate::commands::{
         CreateWorkflow, CreateWorkflowYaml, DeleteWorkflow, Execute, Init, ListWorkflows, Run,
-        RunWorkflow, Serve, Status, Tasks, Trigger, ValidateWorkflow,
+        RunWorkflow, Status, Tasks, Trigger, ValidateWorkflow,
     };
     use axum::{Json, Router, extract::Path, routing::get, routing::post};
     use ork_core::database::RunRepository;
@@ -140,7 +153,7 @@ mod tests {
     #[test]
     fn test_cli_parse_defaults() {
         let cli = Cli::parse_from(["ork", "init"]);
-        assert_eq!(cli.database_url, DEFAULT_DATABASE_URL);
+        assert_eq!(cli.database_url, default_database_url());
     }
 
     #[test]
@@ -373,11 +386,7 @@ tasks:
         )
         .await
         .expect_err("missing workflow file should error");
-        assert!(
-            run_err
-                .to_string()
-                .contains("Failed to read workflow file")
-        );
+        assert!(run_err.to_string().contains("Failed to read workflow file"));
 
         let exec_err = dispatch_command(
             Commands::Execute(Execute {

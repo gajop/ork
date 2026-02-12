@@ -124,6 +124,7 @@ mod tests {
             schedule_enabled: false,
             last_scheduled_at: None,
             next_scheduled_at: None,
+            current_snapshot_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

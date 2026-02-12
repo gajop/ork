@@ -4,7 +4,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use ork_core::database::{NewWorkflowTask, WorkflowListPage, WorkflowListQuery};
-use ork_core::models::{Workflow, WorkflowTask};
+use ork_core::models::{Workflow, WorkflowSnapshot, WorkflowTask};
 
 use super::core::FileDatabase;
 
@@ -30,11 +30,12 @@ impl FileDatabase {
             region: region.to_string(),
             project: project.to_string(),
             executor_type: executor_type.to_string(),
-            task_params,
+            task_params: task_params.map(sqlx::types::Json),
             schedule: schedule.map(|s| s.to_string()),
             schedule_enabled: false,
             last_scheduled_at: None,
             next_scheduled_at: None,
+            current_snapshot_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -140,7 +141,7 @@ impl FileDatabase {
                 task_name: task.task_name.clone(),
                 executor_type: task.executor_type.clone(),
                 depends_on: task.depends_on.clone(),
-                params: Some(task.params.clone()),
+                params: Some(sqlx::types::Json(task.params.clone())),
                 created_at: now,
             });
         }
@@ -184,6 +185,59 @@ impl FileDatabase {
         _schedule_enabled: bool,
     ) -> Result<()> {
         // File database doesn't support live scheduling
+        Ok(())
+    }
+
+    pub(super) async fn create_or_get_snapshot_impl(
+        &self,
+        workflow_id: Uuid,
+        content_hash: &str,
+        tasks_json: serde_json::Value,
+    ) -> Result<WorkflowSnapshot> {
+        self.ensure_dirs().await?;
+
+        // Check for existing snapshot with same hash
+        let snapshots_dir = self.base.join("snapshots");
+        fs::create_dir_all(&snapshots_dir).await?;
+
+        let mut entries = fs::read_dir(&snapshots_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let snapshot = self.read_json::<WorkflowSnapshot>(&entry.path()).await?;
+            if snapshot.workflow_id == workflow_id && snapshot.content_hash == content_hash {
+                return Ok(snapshot);
+            }
+        }
+
+        // Create new snapshot
+        let snapshot = WorkflowSnapshot {
+            id: Uuid::new_v4(),
+            workflow_id,
+            content_hash: content_hash.to_string(),
+            tasks_json: sqlx::types::Json(tasks_json),
+            created_at: Utc::now(),
+        };
+
+        let snapshot_path = snapshots_dir.join(format!("{}.json", snapshot.id));
+        self.write_json(&snapshot_path, &snapshot).await?;
+        Ok(snapshot)
+    }
+
+    pub(super) async fn get_snapshot_impl(&self, snapshot_id: Uuid) -> Result<WorkflowSnapshot> {
+        let snapshots_dir = self.base.join("snapshots");
+        let snapshot_path = snapshots_dir.join(format!("{}.json", snapshot_id));
+        self.read_json(&snapshot_path).await
+    }
+
+    pub(super) async fn update_workflow_snapshot_impl(
+        &self,
+        workflow_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<()> {
+        let mut workflow = self.get_workflow_by_id_impl(workflow_id).await?;
+        workflow.current_snapshot_id = Some(snapshot_id);
+        workflow.updated_at = Utc::now();
+        self.write_json(&self.workflow_path(workflow_id), &workflow)
+            .await?;
         Ok(())
     }
 }

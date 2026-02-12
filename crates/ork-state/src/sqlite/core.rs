@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
+use std::path::PathBuf;
 use uuid::Uuid;
 
-use ork_core::models::{Task, TaskStatus, TaskWithWorkflow, WorkflowTask};
+use ork_core::models::{Task, TaskStatus, TaskWithWorkflow, WorkflowSnapshot, WorkflowTask};
 
 pub(super) fn parse_depends_on(raw: Option<String>) -> Vec<String> {
     match raw {
@@ -82,12 +83,51 @@ pub(super) struct TaskWithWorkflowRow {
     pub region: String,
 }
 
+#[derive(sqlx::FromRow)]
+pub(super) struct WorkflowSnapshotRow {
+    pub id: Uuid,
+    pub workflow_id: Uuid,
+    pub content_hash: String,
+    pub tasks_json: String,
+    pub created_at: DateTime<Utc>,
+}
+
 pub struct SqliteDatabase {
     pub(super) pool: SqlitePool,
 }
 
+fn sqlite_database_file_path(database_url: &str) -> Option<PathBuf> {
+    let raw = if let Some(rest) = database_url.strip_prefix("sqlite://") {
+        rest
+    } else if let Some(rest) = database_url.strip_prefix("sqlite:") {
+        rest
+    } else {
+        return None;
+    };
+
+    let path = raw.split('?').next().unwrap_or(raw);
+    if path.is_empty() || path == ":memory:" || path.starts_with("file:") {
+        return None;
+    }
+
+    Some(PathBuf::from(path))
+}
+
 impl SqliteDatabase {
     pub async fn new(database_url: &str) -> Result<Self> {
+        if let Some(path) = sqlite_database_file_path(database_url) {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "Failed to create SQLite database directory: {}",
+                            parent.display()
+                        )
+                    })?;
+                }
+            }
+        }
+
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
             .min_connections(1)
@@ -180,7 +220,51 @@ impl SqliteDatabase {
         }
     }
 
+    pub(super) fn map_workflow_snapshot(row: WorkflowSnapshotRow) -> Result<WorkflowSnapshot> {
+        let tasks_json = serde_json::from_str(&row.tasks_json)?;
+        Ok(WorkflowSnapshot {
+            id: row.id,
+            workflow_id: row.workflow_id,
+            content_hash: row.content_hash,
+            tasks_json: sqlx::types::Json(tasks_json),
+            created_at: row.created_at,
+        })
+    }
+
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sqlite_database_file_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_sqlite_database_file_path_extracts_file_paths() {
+        assert_eq!(
+            sqlite_database_file_path("sqlite://./.ork/ork.db?mode=rwc"),
+            Some(PathBuf::from("./.ork/ork.db"))
+        );
+        assert_eq!(
+            sqlite_database_file_path("sqlite:///home/me/.ork/ork.db?mode=rwc"),
+            Some(PathBuf::from("/home/me/.ork/ork.db"))
+        );
+        assert_eq!(
+            sqlite_database_file_path("sqlite:./local.db"),
+            Some(PathBuf::from("./local.db"))
+        );
+    }
+
+    #[test]
+    fn test_sqlite_database_file_path_ignores_memory_and_non_file_urls() {
+        assert_eq!(sqlite_database_file_path(":memory:"), None);
+        assert_eq!(sqlite_database_file_path("sqlite::memory:"), None);
+        assert_eq!(sqlite_database_file_path("sqlite://:memory:"), None);
+        assert_eq!(
+            sqlite_database_file_path("sqlite://file:memdb1?mode=memory&cache=shared"),
+            None
+        );
     }
 }

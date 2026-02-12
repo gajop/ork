@@ -269,6 +269,34 @@ macro_rules! impl_database_delegates {
         }
 
         #[async_trait::async_trait]
+        impl ork_core::database::WorkflowSnapshotRepository for $db_ty {
+            async fn create_or_get_snapshot(
+                &self,
+                workflow_id: uuid::Uuid,
+                content_hash: &str,
+                tasks_json: serde_json::Value,
+            ) -> anyhow::Result<ork_core::models::WorkflowSnapshot> {
+                <$db_ty>::create_or_get_snapshot_impl(self, workflow_id, content_hash, tasks_json)
+                    .await
+            }
+
+            async fn get_snapshot(
+                &self,
+                snapshot_id: uuid::Uuid,
+            ) -> anyhow::Result<ork_core::models::WorkflowSnapshot> {
+                <$db_ty>::get_snapshot_impl(self, snapshot_id).await
+            }
+
+            async fn update_workflow_snapshot(
+                &self,
+                workflow_id: uuid::Uuid,
+                snapshot_id: uuid::Uuid,
+            ) -> anyhow::Result<()> {
+                <$db_ty>::update_workflow_snapshot_impl(self, workflow_id, snapshot_id).await
+            }
+        }
+
+        #[async_trait::async_trait]
         impl ork_core::database::ScheduleRepository for $db_ty {
             async fn get_due_scheduled_workflows(
                 &self,

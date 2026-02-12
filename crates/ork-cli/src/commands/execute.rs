@@ -27,6 +27,22 @@ pub struct Execute {
 }
 
 impl Execute {
+    async fn should_start_local_scheduler(db: &dyn Database, run_id: uuid::Uuid) -> Result<bool> {
+        // If another scheduler picks this run up quickly, avoid starting a second one.
+        for _ in 0..10 {
+            let run = db.get_run(run_id).await?;
+            if !matches!(run.status(), RunStatus::Pending) {
+                return Ok(false);
+            }
+            let tasks = db.list_tasks(run_id).await?;
+            if !tasks.is_empty() {
+                return Ok(false);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(true)
+    }
+
     pub async fn execute<D>(self, db: Arc<D>) -> Result<()>
     where
         D: Database + 'static,
@@ -38,31 +54,31 @@ impl Execute {
         let yaml_content = std::fs::read_to_string(&self.file)
             .with_context(|| format!("Failed to read workflow file: {}", self.file))?;
 
-        let yaml: serde_yaml::Value =
-            serde_yaml::from_str(&yaml_content).with_context(|| "Failed to parse YAML")?;
+        // Always apply the workflow YAML (creates or updates with snapshots)
+        let root = std::path::Path::new(&self.file)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+        let root = root.canonicalize().unwrap_or(root);
 
-        let workflow_name = yaml
-            .get("name")
-            .and_then(|v| v.as_str())
-            .context("Workflow YAML must have a 'name' field")?;
-
-        // Check if workflow already exists, delete if so
-        let existing_workflows = db.list_workflows().await?;
-        if existing_workflows.iter().any(|w| w.name == workflow_name) {
-            info!("Workflow '{}' already exists, deleting...", workflow_name);
-            db.delete_workflow(workflow_name).await?;
-        }
-
-        // Create workflow
-        let workflow = crate::commands::create_workflow_yaml::create_workflow_from_yaml_str(
+        let result = ork_core::services::workflow_yaml::apply_workflow_yaml(
             &*db,
-            &yaml_content,
-            &self.file,
-            "local",
-            "local",
+            ork_core::services::workflow_yaml::ApplyWorkflowYamlRequest {
+                yaml_content: &yaml_content,
+                root: &root,
+                project: "local",
+                region: "local",
+                existing_workflow:
+                    ork_core::services::workflow_yaml::ExistingWorkflowBehavior::Replace,
+                persist_schedule_on_create: false,
+            },
         )
         .await
-        .context("Failed to create workflow")?;
+        .with_context(|| "Failed to apply workflow")?;
+
+        let workflow = result.workflow;
 
         println!("✓ Created workflow: {}", workflow.name);
         println!("  ID: {}", workflow.id);
@@ -73,29 +89,36 @@ impl Execute {
         println!("✓ Triggered run: {}", run.id);
         println!();
 
-        // Start scheduler in background with fast config for local execution
-        info!("Starting scheduler...");
-        let executor_manager = Arc::new(ExecutorManager::new());
-        let scheduler = if let Some(config_path) = self.config {
-            let config_content = std::fs::read_to_string(&config_path)?;
-            let orchestrator_config: OrchestratorConfig = serde_yaml::from_str(&config_content)?;
-            Scheduler::new_with_config(db.clone(), executor_manager, orchestrator_config)
-        } else {
-            // Use fast config for local execution - 10ms poll interval
-            let config = OrchestratorConfig {
-                poll_interval_secs: 0.01,
-                max_tasks_per_batch: 100,
-                max_concurrent_dispatches: 10,
-                max_concurrent_status_checks: 50,
-                db_pool_size: 5,
-                enable_triggerer: true,
+        let start_local_scheduler = Self::should_start_local_scheduler(&*db, run.id).await?;
+        let scheduler_handle = if start_local_scheduler {
+            // Start scheduler in background with fast config for local execution.
+            info!("Starting local scheduler...");
+            let executor_manager = Arc::new(ExecutorManager::new());
+            let scheduler = if let Some(config_path) = self.config {
+                let config_content = std::fs::read_to_string(&config_path)?;
+                let orchestrator_config: OrchestratorConfig =
+                    serde_yaml::from_str(&config_content)?;
+                Scheduler::new_with_config(db.clone(), executor_manager, orchestrator_config)
+            } else {
+                // Use fast config for local execution - 10ms poll interval.
+                let config = OrchestratorConfig {
+                    poll_interval_secs: 0.01,
+                    max_tasks_per_batch: 100,
+                    max_concurrent_dispatches: 10,
+                    max_concurrent_status_checks: 50,
+                    db_pool_size: 5,
+                    enable_triggerer: true,
+                };
+                Scheduler::new_with_config(db.clone(), executor_manager, config)
             };
-            Scheduler::new_with_config(db.clone(), executor_manager, config)
-        };
 
-        let scheduler_handle = tokio::spawn(async move {
-            let _ = scheduler.run().await;
-        });
+            Some(tokio::spawn(async move {
+                let _ = scheduler.run().await;
+            }))
+        } else {
+            info!("Detected external scheduler activity; skipping local scheduler startup");
+            None
+        };
 
         // Wait for completion
         let result = timeout(Duration::from_secs(self.timeout), async {
@@ -110,7 +133,9 @@ impl Execute {
         })
         .await;
 
-        scheduler_handle.abort();
+        if let Some(scheduler_handle) = scheduler_handle {
+            scheduler_handle.abort();
+        }
 
         match result {
             Ok(Ok(())) => {
@@ -369,7 +394,8 @@ enable_triggerer: false
             .filter(|w| w.name == "wf-execute-replace")
             .collect();
         assert_eq!(matching.len(), 1);
-        assert_eq!(matching[0].executor_type, "dag");
+        // Workflow metadata is preserved, but tasks are updated via snapshots
+        assert!(matching[0].current_snapshot_id.is_some());
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

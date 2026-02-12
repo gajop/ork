@@ -22,7 +22,7 @@ pub struct NewTask {
     pub timeout_seconds: Option<i32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NewWorkflowTask {
     pub task_index: i32,
     pub task_name: String,
@@ -102,6 +102,31 @@ pub trait WorkflowRepository: Send + Sync {
         &self,
         workflow_id: Uuid,
     ) -> anyhow::Result<Vec<crate::models::WorkflowTask>>;
+}
+
+/// Repository for workflow snapshot operations (versioning)
+#[async_trait]
+pub trait WorkflowSnapshotRepository: Send + Sync {
+    /// Create a new workflow snapshot or return existing one with same hash
+    async fn create_or_get_snapshot(
+        &self,
+        workflow_id: Uuid,
+        content_hash: &str,
+        tasks_json: serde_json::Value,
+    ) -> anyhow::Result<crate::models::WorkflowSnapshot>;
+
+    /// Get a snapshot by ID
+    async fn get_snapshot(
+        &self,
+        snapshot_id: Uuid,
+    ) -> anyhow::Result<crate::models::WorkflowSnapshot>;
+
+    /// Update workflow's current_snapshot_id
+    async fn update_workflow_snapshot(
+        &self,
+        workflow_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> anyhow::Result<()>;
 }
 
 /// Repository for run lifecycle operations
@@ -282,6 +307,7 @@ pub trait DeferredJobRepository: Send + Sync {
 #[async_trait]
 pub trait Database:
     WorkflowRepository
+    + WorkflowSnapshotRepository
     + RunRepository
     + TaskRepository
     + ScheduleRepository

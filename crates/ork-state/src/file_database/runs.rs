@@ -15,11 +15,17 @@ impl FileDatabase {
         triggered_by: &str,
     ) -> Result<Run> {
         self.ensure_dirs().await?;
+
+        // Get workflow's current snapshot
+        let workflow = self.get_workflow_by_id_impl(workflow_id).await?;
+        let snapshot_id = workflow.current_snapshot_id;
+
         let id = Uuid::new_v4();
         let now = Utc::now();
         let run: Run = serde_json::from_value(serde_json::json!({
             "id": id,
             "workflow_id": workflow_id,
+            "snapshot_id": snapshot_id,
             "status": RunStatus::Pending,
             "triggered_by": triggered_by,
             "started_at": null,
@@ -53,6 +59,7 @@ impl FileDatabase {
         let updated_run: Run = serde_json::from_value(serde_json::json!({
             "id": run.id,
             "workflow_id": run.workflow_id,
+            "snapshot_id": run.snapshot_id,
             "status": status,
             "triggered_by": run.triggered_by,
             "started_at": started_at,

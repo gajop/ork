@@ -11,6 +11,7 @@ use super::core::SqliteDatabase;
 struct RunWithWorkflowRow {
     id: Uuid,
     workflow_id: Uuid,
+    snapshot_id: Option<Uuid>,
     status: RunStatus,
     triggered_by: String,
     started_at: Option<DateTime<Utc>>,
@@ -26,12 +27,17 @@ impl SqliteDatabase {
         workflow_id: Uuid,
         triggered_by: &str,
     ) -> Result<Run> {
+        // Get workflow's current snapshot
+        let workflow = self.get_workflow_by_id_impl(workflow_id).await?;
+        let snapshot_id = workflow.current_snapshot_id;
+
         let run_id = Uuid::new_v4();
         let run = sqlx::query_as::<_, Run>(
-            r#"INSERT INTO runs (id, workflow_id, status, triggered_by) VALUES (?, ?, ?, ?) RETURNING *"#,
+            r#"INSERT INTO runs (id, workflow_id, snapshot_id, status, triggered_by) VALUES (?, ?, ?, ?, ?) RETURNING *"#,
         )
         .bind(run_id)
         .bind(workflow_id)
+        .bind(snapshot_id)
         .bind(RunStatus::Pending.as_str())
         .bind(triggered_by)
         .fetch_one(&self.pool)
@@ -112,7 +118,7 @@ impl SqliteDatabase {
                 .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -136,7 +142,7 @@ impl SqliteDatabase {
                         .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -163,7 +169,7 @@ impl SqliteDatabase {
                 .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -184,7 +190,7 @@ impl SqliteDatabase {
                     .await?;
 
                 let rows = sqlx::query_as::<_, RunWithWorkflowRow>(
-                    r#"SELECT r.id, r.workflow_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
+                    r#"SELECT r.id, r.workflow_id, r.snapshot_id, r.status, r.triggered_by, r.started_at, r.finished_at, r.error, r.created_at,
                               w.name AS workflow_name
                        FROM runs r
                        LEFT JOIN workflows w ON w.id = r.workflow_id
@@ -205,6 +211,7 @@ impl SqliteDatabase {
                 run: Run {
                     id: row.id,
                     workflow_id: row.workflow_id,
+                    snapshot_id: row.snapshot_id,
                     status: row.status,
                     triggered_by: row.triggered_by,
                     started_at: row.started_at,

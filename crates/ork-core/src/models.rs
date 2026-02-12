@@ -43,8 +43,19 @@ pub struct Workflow {
     pub schedule_enabled: bool,
     pub last_scheduled_at: Option<DateTime<Utc>>,
     pub next_scheduled_at: Option<DateTime<Utc>>,
+    pub current_snapshot_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
+pub struct WorkflowSnapshot {
+    pub id: Uuid,
+    pub workflow_id: Uuid,
+    pub content_hash: String,
+    pub tasks_json: JsonValue,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +203,7 @@ impl std::str::FromStr for RunStatus {
 pub struct Run {
     pub id: Uuid,
     pub workflow_id: Uuid,
+    pub snapshot_id: Option<Uuid>,
     pub status: RunStatus,
     pub triggered_by: String,
     pub started_at: Option<DateTime<Utc>>,
@@ -404,6 +416,7 @@ mod tests {
         let run = Run {
             id: Uuid::new_v4(),
             workflow_id: Uuid::new_v4(),
+            snapshot_id: None,
             status: RunStatus::Running,
             triggered_by: "test".to_string(),
             started_at: Some(Utc::now()),

@@ -12,14 +12,27 @@ use ork_state::PostgresDatabase;
 #[cfg(feature = "sqlite")]
 use ork_state::SqliteDatabase;
 
+#[cfg(feature = "postgres")]
+const DEFAULT_DATABASE_URL: &str = "postgres://postgres:postgres@localhost:5432/orchestrator";
+
+#[cfg(feature = "postgres")]
+fn default_database_url() -> String {
+    DEFAULT_DATABASE_URL.to_string()
+}
+
+#[cfg(feature = "sqlite")]
+fn default_database_url() -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        return format!("sqlite://{home}/.ork/ork.db?mode=rwc");
+    }
+    "sqlite://./.ork/ork.db?mode=rwc".to_string()
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "ork-web", about = "Serve the Ork web UI and API")]
 struct Args {
     /// Database connection string
-    #[arg(
-        long,
-        default_value = "postgres://postgres:postgres@localhost:5432/orchestrator"
-    )]
+    #[arg(long, default_value_t = default_database_url())]
     database_url: String,
     /// Address to bind (e.g., 127.0.0.1:8080)
     #[arg(long, default_value = "127.0.0.1:8080")]
@@ -74,9 +87,9 @@ where
     compile_error!("Enable either the 'postgres' or 'sqlite' feature for ork-web, not both.");
 
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
-    let db: Arc<dyn Database> = {
+    {
         return Err("No database backend enabled. Enable 'postgres' or 'sqlite' feature.".into());
-    };
+    }
 
     let db: Arc<dyn Database> = db;
     println!("Serving on http://{}", addr);
@@ -111,10 +124,7 @@ mod tests {
     #[test]
     fn test_args_defaults() {
         let args = Args::parse_from(["ork-web"]);
-        assert_eq!(
-            args.database_url,
-            "postgres://postgres:postgres@localhost:5432/orchestrator"
-        );
+        assert_eq!(args.database_url, default_database_url());
         assert_eq!(args.addr, "127.0.0.1:8080");
     }
 

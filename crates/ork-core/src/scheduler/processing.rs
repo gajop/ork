@@ -35,9 +35,38 @@ impl<D: Database + 'static, E: ExecutorManager + 'static> Scheduler<D, E> {
                 continue;
             };
 
-            let create_result = if let Some(workflow_tasks) =
-                workflow_tasks_map.get(&run.workflow_id)
-            {
+            let create_result = if let Some(snapshot_id) = run.snapshot_id {
+                // Use snapshot for task definitions
+                match self.db.get_snapshot(snapshot_id).await {
+                    Ok(snapshot) => {
+                        let tasks_json = json_inner(&snapshot.tasks_json);
+                        match serde_json::from_value::<Vec<crate::database::NewWorkflowTask>>(
+                            tasks_json.clone(),
+                        ) {
+                            Ok(snapshot_tasks) => {
+                                let tasks = crate::task_execution::build_run_tasks_from_snapshot(
+                                    run.id,
+                                    workflow,
+                                    &snapshot_tasks,
+                                );
+                                self.db.batch_create_dag_tasks(run.id, &tasks).await
+                            }
+                            Err(e) => Err(anyhow::anyhow!(
+                                "Failed to deserialize snapshot tasks for run {}: {}",
+                                run.id,
+                                e
+                            )),
+                        }
+                    }
+                    Err(e) => Err(anyhow::anyhow!(
+                        "Failed to load snapshot {} for run {}: {}",
+                        snapshot_id,
+                        run.id,
+                        e
+                    )),
+                }
+            } else if let Some(workflow_tasks) = workflow_tasks_map.get(&run.workflow_id) {
+                // Fall back to workflow_tasks table for old runs
                 let tasks = build_run_tasks(run.id, workflow, workflow_tasks);
                 self.db.batch_create_dag_tasks(run.id, &tasks).await
             } else if workflow.executor_type == "dag" {
