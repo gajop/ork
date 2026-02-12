@@ -11,6 +11,7 @@ pub mod run_workflow;
 pub mod status;
 pub mod tasks;
 pub mod trigger;
+pub mod validate_workflow;
 
 pub use create_workflow::CreateWorkflow;
 pub use create_workflow_yaml::CreateWorkflowYaml;
@@ -23,6 +24,7 @@ pub use run_workflow::RunWorkflow;
 pub use status::Status;
 pub use tasks::Tasks;
 pub use trigger::Trigger;
+pub use validate_workflow::ValidateWorkflow;
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -58,11 +60,17 @@ pub enum Commands {
 
     /// Create + trigger a workflow from a YAML file via the HTTP API
     RunWorkflow(RunWorkflow),
+
+    /// Validate a workflow YAML file against the strict workflow schema
+    ValidateWorkflow(ValidateWorkflow),
 }
 
 impl Commands {
     pub fn uses_api(&self) -> bool {
-        matches!(self, Commands::RunWorkflow(_))
+        matches!(
+            self,
+            Commands::RunWorkflow(_) | Commands::ValidateWorkflow(_)
+        )
     }
 }
 
@@ -71,8 +79,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_uses_api_only_for_run_workflow() {
-        let command = Commands::RunWorkflow(RunWorkflow {
+    fn test_uses_api_for_pre_db_commands() {
+        let run_workflow = Commands::RunWorkflow(RunWorkflow {
             file: "wf.yaml".to_string(),
             api_url: "http://127.0.0.1:4000".to_string(),
             project: "local".to_string(),
@@ -80,7 +88,12 @@ mod tests {
             root: None,
             replace: true,
         });
-        assert!(command.uses_api());
+        assert!(run_workflow.uses_api());
+
+        let validate = Commands::ValidateWorkflow(ValidateWorkflow {
+            file: "wf.yaml".to_string(),
+        });
+        assert!(validate.uses_api());
 
         let non_api = Commands::Init(Init);
         assert!(!non_api.uses_api());

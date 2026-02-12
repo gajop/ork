@@ -1,43 +1,56 @@
 name: parallel_demo
 
+types:
+  HelloOutput:
+    message: str
+    timestamp: datetime_notz
+  ComplimentOutput:
+    line: str
+    adjective: str
+
 tasks:
   hello_left:
     executor: python
     file: parallel.py
     function: hello
-    input:
-      name: "left branch"
-      delay: 5
-    output_type:
-      message: string
-      timestamp: number
+    input_type:
+      name: str
+      delay: float
+    output_type: types.HelloOutput
+    inputs:
+      name:
+        const: left branch
+      delay:
+        const: 5
 
   hello_right:
     executor: python
     file: parallel.py
     function: hello
-    input:
-      name: "right branch"
-      delay: 5
-    output_type:
-      message: string
-      timestamp: number
+    input_type:
+      name: str
+      delay: float
+    output_type: types.HelloOutput
+    inputs:
+      name:
+        const: right branch
+      delay:
+        const: 5
 
   combine:
     executor: python
     file: parallel.py
     function: compliment
     depends_on: [hello_left, hello_right]
-    input:
-      adjective: "running in parallel"
     input_type:
-      upstream:
-        hello_left:
-          message: string
-          timestamp: number
-        hello_right:
-          message: string
-          timestamp: number
-    output_type:
-      line: string
-      adjective: string
+      adjective: str
+      hello_left: types.HelloOutput
+      hello_right: types.HelloOutput
+    output_type: types.ComplimentOutput
+    inputs:
+      adjective:
+        const: running in parallel
+      hello_left:
+        ref: tasks.hello_left.output
+      hello_right:
+        ref: tasks.hello_right.output

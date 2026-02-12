@@ -5,22 +5,28 @@ tasks:
     executor: python
     file: simple_args.py
     function: add
-    input:
-      a: 5
-      b: 10
     timeout: 10
-    output_type: integer
+    input_type:
+      a: int
+      b: int
+    output_type: int
+    inputs:
+      a:
+        const: 5
+      b:
+        const: 10
 
   greet_user:
     executor: python
     file: simple_args.py
     function: greet
-    input:
-      name: "Ork User"
-      shout: true
     depends_on: [add_math]
     input_type:
-      upstream:
-        add_math: integer
-    output_type: string
-
+      name: str
+      shout: bool
+    output_type: str
+    inputs:
+      name:
+        const: Ork User
+      shout:
+        const: true

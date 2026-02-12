@@ -58,44 +58,11 @@ pub async fn execute_task<E: ExecutorManager>(
         }
     }
 
-    if !task_with_workflow.depends_on.is_empty()
-        && let Some(outputs) = outputs_by_run.get(&task_with_workflow.run_id)
+    if let Some(obj) = params.as_object_mut()
+        && let Err(err) =
+            resolve_bindings_for_task(obj, &task_with_workflow, outputs_by_run.as_ref())
     {
-        let mut upstream_map = serde_json::Map::new();
-        for dep in &task_with_workflow.depends_on {
-            let value = outputs.get(dep).cloned().unwrap_or(serde_json::Value::Null);
-            upstream_map.insert(dep.clone(), value);
-        }
-
-        if !upstream_map.is_empty() {
-            let upstream_value = serde_json::Value::Object(upstream_map);
-            if let Some(obj) = params.as_object_mut() {
-                obj.entry("upstream".to_string())
-                    .or_insert(upstream_value.clone());
-
-                match obj.get_mut("task_input") {
-                    Some(task_input) => {
-                        if task_input.is_null() {
-                            *task_input = serde_json::json!({
-                                "upstream": upstream_value.clone()
-                            });
-                        } else if let Some(input_obj) = task_input.as_object_mut()
-                            && input_obj.is_empty()
-                        {
-                            input_obj.insert("upstream".to_string(), upstream_value.clone());
-                        }
-                    }
-                    None => {
-                        obj.insert(
-                            "task_input".to_string(),
-                            serde_json::json!({
-                                "upstream": upstream_value.clone()
-                            }),
-                        );
-                    }
-                }
-            }
-        }
+        return (task_with_workflow.task_id, Err(err));
     }
 
     let execution_result = match executor_manager
@@ -112,6 +79,137 @@ pub async fn execute_task<E: ExecutorManager>(
     };
 
     (task_with_workflow.task_id, execution_result)
+}
+
+fn resolve_bindings_for_task(
+    params_obj: &mut serde_json::Map<String, serde_json::Value>,
+    task: &TaskWithWorkflow,
+    outputs_by_run: &HashMap<Uuid, HashMap<String, serde_json::Value>>,
+) -> Result<()> {
+    let Some(bindings_value) = params_obj.get("task_bindings").cloned() else {
+        return Ok(());
+    };
+    let bindings_obj = bindings_value.as_object().ok_or_else(|| {
+        anyhow::anyhow!(
+            "task_bindings must be an object for task '{}'",
+            task.task_name
+        )
+    })?;
+
+    let run_outputs = outputs_by_run.get(&task.run_id);
+    let mut resolved_input = serde_json::Map::new();
+
+    for (arg, binding) in bindings_obj {
+        let binding_obj = binding.as_object().ok_or_else(|| {
+            anyhow::anyhow!(
+                "task '{}' binding '{}' must be an object with one of: const, ref",
+                task.task_name,
+                arg
+            )
+        })?;
+        let has_const = binding_obj.contains_key("const");
+        let has_ref = binding_obj.contains_key("ref");
+        match (has_const, has_ref) {
+            (true, false) => {
+                resolved_input.insert(
+                    arg.clone(),
+                    binding_obj
+                        .get("const")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                );
+            }
+            (false, true) => {
+                let ref_path =
+                    binding_obj
+                        .get("ref")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "task '{}' binding '{}.ref' must be a string path",
+                                task.task_name,
+                                arg
+                            )
+                        })?;
+                let value = resolve_ref_path(task, ref_path, run_outputs)?;
+                resolved_input.insert(arg.clone(), value);
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "task '{}' binding '{}' must define exactly one of: const, ref",
+                    task.task_name,
+                    arg
+                ));
+            }
+        }
+    }
+
+    params_obj.insert(
+        "task_input".to_string(),
+        serde_json::Value::Object(resolved_input),
+    );
+    Ok(())
+}
+
+fn resolve_ref_path(
+    task: &TaskWithWorkflow,
+    reference: &str,
+    run_outputs: Option<&HashMap<String, serde_json::Value>>,
+) -> Result<serde_json::Value> {
+    let parts: Vec<&str> = reference.split('.').collect();
+    if parts.len() < 3 || parts[0] != "tasks" || parts[2] != "output" {
+        return Err(anyhow::anyhow!(
+            "task '{}' has unsupported ref '{}': expected tasks.<task>.output[.<field>...]",
+            task.task_name,
+            reference
+        ));
+    }
+    let dep_task = parts[1];
+    if !task.depends_on.iter().any(|dep| dep == dep_task) {
+        return Err(anyhow::anyhow!(
+            "task '{}' ref '{}' targets task '{}' which is not listed in depends_on",
+            task.task_name,
+            reference,
+            dep_task
+        ));
+    }
+
+    let outputs = run_outputs.ok_or_else(|| {
+        anyhow::anyhow!(
+            "task '{}' ref '{}' cannot be resolved: run outputs are unavailable",
+            task.task_name,
+            reference
+        )
+    })?;
+    let mut value = outputs.get(dep_task).cloned().ok_or_else(|| {
+        anyhow::anyhow!(
+            "task '{}' ref '{}' cannot be resolved: no output for dependency '{}'",
+            task.task_name,
+            reference,
+            dep_task
+        )
+    })?;
+
+    for segment in parts.iter().skip(3) {
+        let obj = value.as_object().ok_or_else(|| {
+            anyhow::anyhow!(
+                "task '{}' ref '{}' cannot access field '{}' on non-object value",
+                task.task_name,
+                reference,
+                segment
+            )
+        })?;
+        value = obj.get(*segment).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "task '{}' ref '{}' missing field '{}'",
+                task.task_name,
+                reference,
+                segment
+            )
+        })?;
+    }
+
+    Ok(value)
 }
 
 fn resolve_job_name(task: &TaskWithWorkflow) -> String {

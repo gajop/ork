@@ -156,6 +156,7 @@ mod tests {
                 module: None,
                 function: None,
                 input: serde_json::json!({"x": 1}),
+                inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 1,
@@ -165,7 +166,9 @@ mod tests {
         );
         Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: std::collections::BTreeMap::new(),
             tasks,
         }
     }
@@ -207,6 +210,7 @@ mod tests {
                 module: None,
                 function: None,
                 input: serde_json::json!({"value": 42}),
+                inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 0,

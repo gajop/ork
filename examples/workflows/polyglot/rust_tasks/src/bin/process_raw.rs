@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Deserialize)]
-struct UpstreamData {
+struct TaskInput {
     py_generate: NumbersOutput,
 }
 
@@ -28,15 +28,14 @@ struct ProcessedOutput {
 fn main() {
     eprintln!("[Rust Raw] Starting number processing...");
 
-    // Read upstream data from environment variable (manual)
-    let upstream_json = env::var("ORK_UPSTREAM_JSON").expect("ORK_UPSTREAM_JSON not set");
+    // Read task input from environment variable (manual)
+    let input_json = env::var("ORK_INPUT_JSON").expect("ORK_INPUT_JSON not set");
 
-    eprintln!("[Rust Raw] Received upstream: {}", upstream_json);
+    eprintln!("[Rust Raw] Received input: {}", input_json);
 
-    let upstream: UpstreamData =
-        serde_json::from_str(&upstream_json).expect("Failed to parse upstream JSON");
+    let input: TaskInput = serde_json::from_str(&input_json).expect("Failed to parse input JSON");
 
-    let numbers = &upstream.py_generate.numbers;
+    let numbers = &input.py_generate.numbers;
     eprintln!("[Rust Raw] Parsed {} numbers", numbers.len());
 
     // Process the numbers

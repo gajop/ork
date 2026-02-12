@@ -142,7 +142,7 @@ tasks:
     executor: process
     command: "echo hi"
     output_type:
-      data: string
+      data: str
   t2:
     executor: python
     module: "tasks"
@@ -150,7 +150,7 @@ tasks:
     input_type:
       upstream:
         t1:
-          data: string
+          data: str
 "#,
         )
         .expect("write workflow yaml");

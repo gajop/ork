@@ -1,7 +1,7 @@
 """ELT Pipeline workflow - TypedDict example"""
 import json
 import sqlite3
-from datetime import date
+from datetime import date as Date
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -36,7 +36,7 @@ def _load_json(source: str) -> list[dict[str, Any]]:
         return json.load(f)
 
 
-def load_to_bronze(source: str, load_date: date, db_path: str) -> int:
+def load_to_bronze(source: str, load_date: Date | str, db_path: str) -> int:
     records = _load_json(source)
     db_path_obj = Path(db_path)
     db_path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -45,7 +45,8 @@ def load_to_bronze(source: str, load_date: date, db_path: str) -> int:
     conn.execute("PRAGMA foreign_keys = ON")
 
     # Convert date to ISO format string for database storage
-    date_str = load_date.isoformat()
+    parsed_date = Date.fromisoformat(load_date) if isinstance(load_date, str) else load_date
+    date_str = parsed_date.isoformat()
 
     if source == "posts":
         conn.execute("DROP TABLE IF EXISTS bronze_posts")
@@ -265,23 +266,17 @@ def create_gold_analytics(db_path: str) -> dict[str, float | int]:
 
 
 # Task 1: Load Bronze
-def bronze_loader(source: str, date: date, db_path: str) -> BronzeOutput:
+def bronze_loader(source: str, date: Date | str, db_path: str) -> BronzeOutput:
     """Load data from JSON files into bronze tables"""
     count = load_to_bronze(source, date, db_path)
     return {"source": source, "count": count}
 
 
 # Task 2: Transform Silver
-def silver_transformer(source: str = None, db_path: str = None, upstream: dict = None) -> SilverOutput:
-    """Transform bronze data into silver tables"""
-    # Get bronze data from upstream
-    bronze_source = source
-    bronze_count = 0
-
-    if upstream:
-        bronze = next(iter(upstream.values()))
-        bronze_source = bronze.get("source", source)
-        bronze_count = bronze.get("count", 0)
+def silver_transformer(source: str, db_path: str, bronze: BronzeOutput) -> SilverOutput:
+    """Transform bronze data into silver tables."""
+    bronze_source = bronze.get("source", source)
+    bronze_count = bronze.get("count", 0)
 
     silver_count = transform_to_silver(bronze_source, db_path)
     return {
@@ -292,7 +287,13 @@ def silver_transformer(source: str = None, db_path: str = None, upstream: dict =
 
 
 # Task 3: Gold Analytics
-def gold_analytics(db_path: str, upstream: dict = None) -> GoldOutput:
-    """Create gold analytics tables and compute summary statistics"""
+def gold_analytics(
+    db_path: str,
+    silver_posts: SilverOutput,
+    silver_comments: SilverOutput,
+    silver_users: SilverOutput,
+) -> GoldOutput:
+    """Create gold analytics tables and compute summary statistics."""
+    _ = (silver_posts, silver_comments, silver_users)
     stats = create_gold_analytics(db_path)
     return stats  # type: ignore

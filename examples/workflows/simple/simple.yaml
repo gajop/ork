@@ -1,36 +1,38 @@
 name: simple_demo
 
+types:
+  HelloOutput:
+    message: str
+    timestamp: float
+  WaitOutput:
+    waited_seconds: int
+  NoteOutput:
+    note: str
+    finished_at: float
+
 tasks:
   hello:
     executor: python
     module: simple
     function: hello
-    output_type:
-      message: string
-      timestamp: number
+    input_type: {}
+    output_type: types.HelloOutput
+    inputs: {}
 
   wait:
     executor: python
     module: simple
     function: wait
     depends_on: [hello]
-    input_type:
-      upstream:
-        hello:
-          message: string
-          timestamp: number
-    output_type:
-      waited_seconds: integer
+    input_type: {}
+    output_type: types.WaitOutput
+    inputs: {}
 
   note:
     executor: python
     module: simple
     function: note
     depends_on: [wait]
-    input_type:
-      upstream:
-        wait:
-          waited_seconds: integer
-    output_type:
-      note: string
-      finished_at: number
+    input_type: {}
+    output_type: types.NoteOutput
+    inputs: {}

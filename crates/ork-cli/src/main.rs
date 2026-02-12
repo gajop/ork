@@ -58,11 +58,18 @@ fn init_tracing() -> Result<()> {
 }
 
 async fn handle_api_command(command: Commands) -> Result<Option<Commands>> {
-    if command.uses_api()
-        && let Commands::RunWorkflow(cmd) = command
-    {
-        cmd.execute().await?;
-        return Ok(None);
+    if command.uses_api() {
+        match command {
+            Commands::RunWorkflow(cmd) => {
+                cmd.execute().await?;
+                return Ok(None);
+            }
+            Commands::ValidateWorkflow(cmd) => {
+                cmd.execute().await?;
+                return Ok(None);
+            }
+            _ => {}
+        }
     }
     Ok(Some(command))
 }
@@ -83,6 +90,7 @@ where
         Commands::Tasks(cmd) => cmd.execute(db).await?,
         Commands::Execute(cmd) => cmd.execute(db).await?,
         Commands::RunWorkflow(_) => unreachable!("run-workflow handled earlier"),
+        Commands::ValidateWorkflow(_) => unreachable!("validate-workflow handled earlier"),
     }
     Ok(())
 }
@@ -114,7 +122,7 @@ mod tests {
     use super::*;
     use crate::commands::{
         CreateWorkflow, CreateWorkflowYaml, DeleteWorkflow, Execute, Init, ListWorkflows, Run,
-        RunWorkflow, Status, Tasks, Trigger,
+        RunWorkflow, Status, Tasks, Trigger, ValidateWorkflow,
     };
     use axum::{Json, Router, extract::Path, routing::get, routing::post};
     use ork_core::database::RunRepository;
@@ -223,6 +231,34 @@ mod tests {
             .err()
             .expect("missing file should error");
         assert!(err.to_string().contains("Missing workflow file"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_command_executes_validate_workflow() {
+        let path = std::env::temp_dir().join(format!("ork-main-validate-{}.yaml", Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+name: wf-validate-main
+tasks:
+  only_task:
+    executor: process
+    command: "echo hi"
+    input_type: {}
+    output_type: str
+    inputs: {}
+"#,
+        )
+        .expect("write validation yaml");
+
+        let command = Commands::ValidateWorkflow(ValidateWorkflow {
+            file: path.to_string_lossy().to_string(),
+        });
+        let handled = handle_api_command(command)
+            .await
+            .expect("validate command should succeed");
+        let _ = std::fs::remove_file(path);
+        assert!(handled.is_none(), "validate command should return early");
     }
 
     #[tokio::test]

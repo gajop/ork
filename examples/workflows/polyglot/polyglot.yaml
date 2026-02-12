@@ -1,83 +1,80 @@
 name: polyglot
-description: Multi-language workflow demonstrating ALL 4 Ork execution methods
+description: Multi-language workflow demonstrating all 4 Ork execution methods
+
+types:
+  NumbersOutput:
+    numbers: [int]
+  RustLibraryOutput:
+    tripled: [int]
+    sum: int
+  RustProcessSdkOutput:
+    total: int
+    tripled: [int]
+  RustProcessRawOutput:
+    sum: int
+    count: int
+  FinalOutput:
+    summary: str
+    total: int
+    final_value: int
+    tripled_numbers: [int]
 
 tasks:
-  # METHOD 1: Python (Dynamic Module Loading)
-  # - Python gets special treatment: file + function, dynamic loading
-  # - Zero boilerplate, just regular Python functions
   py_generate:
     executor: python
     file: polyglot.py
     function: generate_numbers
-    input:
-      count: 5
-    output_type:
-      numbers: [integer]
+    input_type:
+      count: int
+    output_type: types.NumbersOutput
+    inputs:
+      count:
+        const: 5
 
-  # METHOD 2: Rust Library Executor (High Performance, Zero Overhead)
-  # - Uses cdylib and C ABI
-  # - Direct FFI calls, no subprocess
-  # - Fastest method, ideal for CPU-intensive tasks
   rust_library:
     executor: library
     file: rust_tasks/target/debug/libpolyglot_rust_lib.so
     depends_on: [py_generate]
     input_type:
-      upstream:
-        py_generate:
-          numbers: [integer]
-    output_type:
-      tripled: [integer]
-      sum: integer
+      py_generate: types.NumbersOutput
+    output_type: types.RustLibraryOutput
+    inputs:
+      py_generate:
+        ref: tasks.py_generate.output
 
-  # METHOD 3: Rust Process with SDK (Clean, Minimal Boilerplate)
-  # - Uses ork-sdk-rust helpers
-  # - Automatic input/output handling via stdin
-  # - Pre-compiled binary for distribution
   rust_process_sdk:
     executor: process
     command: rust_tasks/target/debug/process_sdk
     depends_on: [rust_library]
     input_type:
-      upstream:
-        rust_library:
-          tripled: [integer]
-          sum: integer
-    output_type:
-      total: integer
-      tripled: [integer]
+      rust_library: types.RustLibraryOutput
+    output_type: types.RustProcessSdkOutput
+    inputs:
+      rust_library:
+        ref: tasks.rust_library.output
 
-  # METHOD 4: Rust Process Raw (Maximum Control)
-  # - Manual env var parsing and JSON handling
-  # - Shows what happens under the hood
-  # - Pre-compiled binary
   rust_process_raw:
     executor: process
     command: rust_tasks/target/debug/process_raw
     depends_on: [py_generate]
     input_type:
-      upstream:
-        py_generate:
-          numbers: [integer]
-    output_type:
-      sum: integer
-      count: integer
+      py_generate: types.NumbersOutput
+    output_type: types.RustProcessRawOutput
+    inputs:
+      py_generate:
+        ref: tasks.py_generate.output
 
-  # Back to Python for final formatting
   py_format:
     executor: python
     file: polyglot.py
     function: format_result
     depends_on: [rust_process_sdk]
-    input:
-      multiplier: 10
     input_type:
-      upstream:
-        rust_process_sdk:
-          total: integer
-          tripled: [integer]
-    output_type:
-      summary: string
-      total: integer
-      final_value: integer
-      tripled_numbers: [integer]
+      multiplier: int
+      rust_process_sdk: types.RustProcessSdkOutput
+    output_type: types.FinalOutput
+    inputs:
+      multiplier:
+        const: 10
+      rust_process_sdk:
+        ref: tasks.rust_process_sdk.output

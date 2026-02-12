@@ -82,8 +82,15 @@ impl LibraryExecutor {
             })?
         };
 
+        // Use explicitly resolved task_input only.
+        let input_value = params
+            .as_ref()
+            .and_then(|p| p.get("task_input"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+
         // Prepare input JSON
-        let input_json = serde_json::to_string(&params.unwrap_or(serde_json::json!({})))?;
+        let input_json = serde_json::to_string(&input_value)?;
         let input_cstring =
             CString::new(input_json).map_err(|e| anyhow!("Invalid input JSON: {}", e))?;
 

@@ -172,7 +172,7 @@ async fn test_execute_task_errors_when_workflow_missing() {
 }
 
 #[tokio::test]
-async fn test_execute_task_builds_attempt_env_and_upstream_inputs() {
+async fn test_execute_task_builds_attempt_env_without_implicit_upstream() {
     let mut task = sample_task_with_workflow(Some(serde_json::json!({
         "env": "bad-type",
         "task_input": {}
@@ -205,12 +205,8 @@ async fn test_execute_task_builds_attempt_env_and_upstream_inputs() {
         .expect("captured execute params");
     let params = params.expect("params should be present");
     assert_eq!(params["env"]["ORK_ATTEMPT"], 2);
-    assert_eq!(params["upstream"]["dep_a"], serde_json::json!({"v": 1}));
-    assert_eq!(params["upstream"]["dep_missing"], serde_json::Value::Null);
-    assert_eq!(
-        params["task_input"]["upstream"]["dep_a"],
-        serde_json::json!({"v": 1})
-    );
+    assert_eq!(params["task_input"], serde_json::json!({}));
+    assert!(params.get("upstream").is_none());
 }
 
 #[tokio::test]
@@ -243,11 +239,11 @@ async fn test_execute_task_preserves_non_empty_task_input() {
         .expect("captured execute params");
     let params = params.expect("params");
     assert_eq!(params["task_input"]["keep"], true);
-    assert_eq!(params["upstream"]["dep"], 5);
+    assert!(params.get("upstream").is_none());
 }
 
 #[tokio::test]
-async fn test_execute_task_normalizes_non_object_params_and_inserts_missing_task_input() {
+async fn test_execute_task_normalizes_non_object_params_without_injecting_inputs() {
     let mut task = sample_task_with_workflow(Some(serde_json::json!("bad-params")));
     task.depends_on = vec!["dep".to_string()];
 
@@ -274,11 +270,12 @@ async fn test_execute_task_normalizes_non_object_params_and_inserts_missing_task
         .expect("captured execute params");
     let params = params.expect("params");
     assert_eq!(params["env"]["ORK_ATTEMPT"], 1);
-    assert_eq!(params["task_input"]["upstream"]["dep"], 7);
+    assert!(params.get("task_input").is_none());
+    assert!(params.get("upstream").is_none());
 }
 
 #[tokio::test]
-async fn test_execute_task_replaces_null_task_input_with_upstream_payload() {
+async fn test_execute_task_preserves_null_task_input_without_upstream_injection() {
     let mut task = sample_task_with_workflow(Some(serde_json::json!({
         "task_input": null
     })));
@@ -306,10 +303,8 @@ async fn test_execute_task_replaces_null_task_input_with_upstream_payload() {
         .clone()
         .expect("captured execute params");
     let params = params.expect("params");
-    assert_eq!(
-        params["task_input"]["upstream"]["dep"],
-        serde_json::json!({"k": "v"})
-    );
+    assert!(params["task_input"].is_null());
+    assert!(params.get("upstream").is_none());
 }
 
 #[tokio::test]
@@ -327,6 +322,74 @@ async fn test_execute_task_returns_executor_manager_error() {
     let (_task_id, result) = execute_task(task, workflow_map, outputs_by_run, &manager, tx).await;
     let err = result.expect_err("get_executor must fail");
     assert!(err.to_string().contains("mock get_executor failure"));
+}
+
+#[tokio::test]
+async fn test_execute_task_resolves_task_bindings_into_task_input() {
+    let mut task = sample_task_with_workflow(Some(serde_json::json!({
+        "task_bindings": {
+            "from_const": {"const": 15},
+            "from_ref": {"ref": "tasks.dep.output.x"}
+        }
+    })));
+    task.depends_on = vec!["dep".to_string()];
+
+    let workflow = sample_workflow(task.workflow_id);
+    let workflow_map = Arc::new(HashMap::from([(workflow.id, workflow)]));
+    let outputs_by_run = Arc::new(HashMap::from([(
+        task.run_id,
+        HashMap::from([("dep".to_string(), serde_json::json!({"x": 7}))]),
+    )]));
+    let executor = Arc::new(RecordingExecutor::new(false));
+    let manager = RecordingManager {
+        executor: executor.clone(),
+        fail_get_executor: false,
+    };
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let (_task_id, result) = execute_task(task, workflow_map, outputs_by_run, &manager, tx).await;
+    assert!(result.is_ok());
+
+    let (_id, _job_name, params) = executor
+        .captured
+        .lock()
+        .await
+        .clone()
+        .expect("captured execute params");
+    let params = params.expect("params should be present");
+    assert_eq!(params["task_input"]["from_const"], 15);
+    assert_eq!(params["task_input"]["from_ref"], 7);
+    assert_eq!(params.get("upstream"), None);
+}
+
+#[tokio::test]
+async fn test_execute_task_binding_ref_requires_dependency() {
+    let task = sample_task_with_workflow(Some(serde_json::json!({
+        "task_bindings": {
+            "x": {"ref": "tasks.other.output.value"}
+        }
+    })));
+
+    let workflow = sample_workflow(task.workflow_id);
+    let workflow_map = Arc::new(HashMap::from([(workflow.id, workflow)]));
+    let outputs_by_run = Arc::new(HashMap::new());
+    let executor = Arc::new(RecordingExecutor::new(false));
+    let manager = RecordingManager {
+        executor: executor.clone(),
+        fail_get_executor: false,
+    };
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let (_task_id, result) = execute_task(task, workflow_map, outputs_by_run, &manager, tx).await;
+    let err = result.expect_err("binding ref without dependency should fail");
+    assert!(
+        err.to_string().contains("not listed in depends_on"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        executor.captured.lock().await.is_none(),
+        "executor should not be called on binding resolution error"
+    );
 }
 
 #[test]

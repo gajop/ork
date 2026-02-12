@@ -1,14 +1,19 @@
 name: fast_demo
 
+types:
+  TaskResult:
+    task: str
+    status: str
+    timestamp: float
+
 tasks:
   task_a:
     executor: python
     module: fast
     function: task_a
-    output_type:
-      task: string
-      status: string
-      timestamp: number
+    input_type: {}
+    output_type: types.TaskResult
+    inputs: {}
 
   task_b:
     executor: python
@@ -16,15 +21,11 @@ tasks:
     function: task_b
     depends_on: [task_a]
     input_type:
-      upstream:
-        task_a:
-          task: string
-          status: string
-          timestamp: number
-    output_type:
-      task: string
-      status: string
-      timestamp: number
+      task_a: types.TaskResult
+    output_type: types.TaskResult
+    inputs:
+      task_a:
+        ref: tasks.task_a.output
 
   task_c:
     executor: python
@@ -32,12 +33,8 @@ tasks:
     function: task_c
     depends_on: [task_b]
     input_type:
-      upstream:
-        task_b:
-          task: string
-          status: string
-          timestamp: number
-    output_type:
-      task: string
-      status: string
-      timestamp: number
+      task_b: types.TaskResult
+    output_type: types.TaskResult
+    inputs:
+      task_b:
+        ref: tasks.task_b.output

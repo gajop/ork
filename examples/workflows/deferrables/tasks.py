@@ -7,6 +7,7 @@ without keeping the worker container running.
 
 import os
 from typing import Any
+
 from ork_sdk import CustomHttp
 
 
@@ -26,7 +27,6 @@ def simulate_bigquery_job():
     print(f"Starting mock BigQuery job: {job_id}")
     print("Tracker URL: mock://success")
 
-    # Return deferrable - scheduler will mark this as completed via mock tracker
     return {
         "deferred": [
             CustomHttp(
@@ -53,7 +53,6 @@ def simulate_custom_http_job():
     print(f"Starting custom HTTP job: {job_id}")
     print(f"Status URL: {status_url}")
 
-    # Return CustomHttp deferrable
     return {
         "deferred": [
             CustomHttp(
@@ -62,7 +61,7 @@ def simulate_custom_http_job():
                 headers={"Authorization": "Bearer fake-token"},
                 completion_field="status",
                 completion_value="completed",
-                failure_value="failed"
+                failure_value="failed",
             ).to_dict()
         ]
     }
@@ -72,7 +71,7 @@ def multiple_jobs():
     """
     Example of returning multiple deferrables.
 
-    The task completes only when ALL deferred jobs complete.
+    The task completes only when all deferred jobs complete.
     """
     print("Starting multiple mock deferred jobs")
 
@@ -91,21 +90,21 @@ def multiple_jobs():
                 completion_field="status",
                 completion_value="success",
                 failure_value="failed",
-            ).to_dict()
+            ).to_dict(),
         ]
     }
 
 
-def process_results(upstream: dict[str, Any]):
+def process_results(bigquery_job: dict[str, Any]):
     """
     Example of a downstream task that runs after deferred jobs complete.
 
     This task would fetch and process the results from the BigQuery tables
     that were populated by the previous task's deferred job.
     """
-    print(f"Processing results from {len(upstream)} upstream tasks")
+    print("Processing results from 1 upstream task")
 
     return {
         "message": "Results processed successfully",
-        "upstream_tasks": list(upstream.keys())
+        "upstream_tasks": ["bigquery_job"],
     }

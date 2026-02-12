@@ -14,8 +14,8 @@ class ComplimentOutput(TypedDict):
     adjective: str
 
 
-def hello(name: str = "world", delay: float = 1.0, upstream: dict = None) -> HelloOutput:
-    """Generate a greeting message"""
+def hello(name: str = "world", delay: float = 1.0) -> HelloOutput:
+    """Generate a greeting message."""
     if delay > 0:
         time.sleep(delay)
 
@@ -25,20 +25,13 @@ def hello(name: str = "world", delay: float = 1.0, upstream: dict = None) -> Hel
     return result
 
 
-def compliment(adjective: str = "fast", upstream: dict = None) -> ComplimentOutput:
-    """Create a compliment based on upstream greetings"""
-    # Get the first upstream greeting (could be from left or right branch)
-    greeting_message = "Hello!"
-    if upstream:
-        for task_output in upstream.values():
-            if "message" in task_output:
-                greeting_message = task_output["message"]
-                break
+def compliment(left: HelloOutput, right: HelloOutput, adjective: str = "fast") -> ComplimentOutput:
+    """Create a compliment based on two branch outputs."""
+    greeting_message = left.get("message") or right.get("message") or "Hello!"
 
-    # Simulate work
     time.sleep(5)
 
-    line = f"{greeting_message} — you built Ork to be {adjective}!"
+    line = f"{greeting_message} - you built Ork to be {adjective}!"
     result: ComplimentOutput = {"line": line, "adjective": adjective}
     print(result["line"])
     return result

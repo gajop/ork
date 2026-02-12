@@ -1,32 +1,45 @@
 name: local_demo
 
+types:
+  GreetOutput:
+    message: str
+    timestamp: datetime_notz
+  ComplimentOutput:
+    line: str
+    adjective: str
+  ShellEchoOutput:
+    note: str
+    finished_at: datetime_notz
+
 tasks:
   greet:
     executor: python
     file: demo.py
     function: greet
-    input:
-      name: "Ork dev"
-      delay: 5
-    output_type:
-      message: string
-      timestamp: number
+    input_type:
+      name: str
+      delay: float
+    output_type: types.GreetOutput
+    inputs:
+      name:
+        const: Ork dev
+      delay:
+        const: 5
 
   compliment:
     executor: python
     file: demo.py
     function: compliment
     depends_on: [greet]
-    input:
-      adjective: "ridiculously fast"
     input_type:
-      upstream:
-        greet:
-          message: string
-          timestamp: number
-    output_type:
-      line: string
-      adjective: string
+      adjective: str
+      greet: types.GreetOutput
+    output_type: types.ComplimentOutput
+    inputs:
+      adjective:
+        const: ridiculously fast
+      greet:
+        ref: tasks.greet.output
 
   shell_echo:
     executor: python
@@ -34,10 +47,14 @@ tasks:
     function: shell_echo
     depends_on: [compliment]
     input_type:
-      upstream:
-        compliment:
-          line: string
-          adjective: string
-    output_type:
-      note: string
-      finished_at: number
+      delay: float
+      note: str
+      compliment: types.ComplimentOutput
+    output_type: types.ShellEchoOutput
+    inputs:
+      delay:
+        const: 5
+      note:
+        const: python fallback for shell commands
+      compliment:
+        ref: tasks.compliment.output

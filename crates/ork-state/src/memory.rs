@@ -86,6 +86,7 @@ mod tests {
                 module: None,
                 function: None,
                 input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: vec![],
                 timeout: 60,
                 retries: 0,
@@ -95,7 +96,9 @@ mod tests {
         );
         Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: std::collections::BTreeMap::new(),
             tasks,
         }
     }

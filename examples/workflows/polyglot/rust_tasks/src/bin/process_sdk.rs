@@ -11,11 +11,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct TaskInput {
-    upstream: Upstream,
-}
-
-#[derive(Debug, Deserialize)]
-struct Upstream {
     rust_library: LibraryOutput,
 }
 
@@ -34,8 +29,8 @@ struct TaskOutput {
 fn process_with_sdk(input: TaskInput) -> TaskOutput {
     eprintln!("[Rust SDK] Processing with SDK helpers...");
 
-    let tripled = &input.upstream.rust_library.tripled;
-    let sum = input.upstream.rust_library.sum;
+    let tripled = &input.rust_library.tripled;
+    let sum = input.rust_library.sum;
 
     eprintln!("[Rust SDK] Received sum: {}, tripled: {:?}", sum, tripled);
 

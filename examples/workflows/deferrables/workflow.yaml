@@ -1,42 +1,46 @@
 name: deferrables_demo
 description: Demonstration of deferrables for long-running external jobs
 
+types:
+  DeferredOutput:
+    deferred: [str]
+  ProcessResultsOutput:
+    message: str
+    upstream_tasks: [str]
+
 tasks:
-  # Task 1: Simulate a BigQuery job
   bigquery_job:
     executor: python
     file: tasks.py
     function: simulate_bigquery_job
-    output_type:
-      deferred: [string]
+    input_type: {}
+    output_type: types.DeferredOutput
+    inputs: {}
 
-  # Task 2: Simulate a custom HTTP job
   custom_http_job:
     executor: python
     file: tasks.py
     function: simulate_custom_http_job
-    output_type:
-      deferred: [string]
+    input_type: {}
+    output_type: types.DeferredOutput
+    inputs: {}
 
-  # Task 3: Multiple deferred jobs in parallel
   multiple_jobs:
     executor: python
     file: tasks.py
     function: multiple_jobs
-    output_type:
-      deferred: [string]
+    input_type: {}
+    output_type: types.DeferredOutput
+    inputs: {}
 
-  # Task 4: Process results after deferred job completes
   process_results:
     executor: python
     file: tasks.py
     function: process_results
-    depends_on:
-      - bigquery_job
+    depends_on: [bigquery_job]
     input_type:
-      upstream:
-        bigquery_job:
-          deferred: [string]
-    output_type:
-      message: string
-      upstream_tasks: [string]
+      bigquery_job: types.DeferredOutput
+    output_type: types.ProcessResultsOutput
+    inputs:
+      bigquery_job:
+        ref: tasks.bigquery_job.output

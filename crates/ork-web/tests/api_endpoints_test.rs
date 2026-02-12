@@ -110,16 +110,21 @@ tasks:
   first:
     executor: process
     command: "echo first"
+    input_type: {}
     output_type:
-      data: string
+      data: str
+    inputs: {}
   second:
     executor: process
     command: "echo second"
     depends_on: [first]
     input_type:
-      upstream:
-        first:
-          data: string
+      first_data: str
+    output_type:
+      done: bool
+    inputs:
+      first_data:
+        ref: tasks.first.output.data
 "#;
 
     let (status, body) = request_json(

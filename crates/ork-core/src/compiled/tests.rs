@@ -190,6 +190,7 @@ fn test_topo_sort_returns_cycle_error_when_graph_is_cyclic() {
             module: None,
             function: None,
             input: serde_json::json!({}),
+            inputs: serde_json::Value::Null,
             depends_on: vec![1],
             timeout: 300,
             retries: 0,
@@ -206,6 +207,7 @@ fn test_topo_sort_returns_cycle_error_when_graph_is_cyclic() {
             module: None,
             function: None,
             input: serde_json::json!({}),
+            inputs: serde_json::Value::Null,
             depends_on: vec![0],
             timeout: 300,
             retries: 0,
@@ -239,6 +241,7 @@ fn compiled_fixture() -> CompiledWorkflow {
                 module: None,
                 function: None,
                 input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: vec![],
                 timeout: 30,
                 retries: 2,
@@ -254,7 +257,8 @@ fn compiled_fixture() -> CompiledWorkflow {
                 job: None,
                 module: Some("tasks.example".to_string()),
                 function: Some("run".to_string()),
-                input: serde_json::json!({"k": "v"}),
+                input: serde_json::Value::Null,
+                inputs: serde_json::json!({"k": {"const": "v"}}),
                 depends_on: vec![0],
                 timeout: 45,
                 retries: 1,
@@ -271,6 +275,7 @@ fn compiled_fixture() -> CompiledWorkflow {
                 module: None,
                 function: None,
                 input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: vec![0, 1],
                 timeout: 60,
                 retries: 0,
@@ -287,6 +292,7 @@ fn compiled_fixture() -> CompiledWorkflow {
                 module: None,
                 function: None,
                 input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: vec![2],
                 timeout: 15,
                 retries: 0,
@@ -358,8 +364,8 @@ fn test_build_workflow_tasks_populates_executor_specific_params() {
         Some(&serde_json::json!("/tmp/ork-workflow"))
     );
     assert_eq!(
-        python_params.get("task_input"),
-        Some(&serde_json::json!({"k": "v"}))
+        python_params.get("task_bindings"),
+        Some(&serde_json::json!({"k": {"const": "v"}}))
     );
 
     let cloud_params = &tasks[2].params;
@@ -402,6 +408,7 @@ fn test_build_workflow_tasks_maps_process_file_into_command() {
             module: None,
             function: None,
             input: serde_json::Value::Null,
+            inputs: serde_json::Value::Null,
             depends_on: vec![],
             timeout: 5,
             retries: 0,

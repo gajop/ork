@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     collections::HashMap,
     path::{Path, PathBuf},
 };
@@ -12,7 +13,11 @@ use crate::error::{OrkError, OrkResult, WorkflowValidationError};
 pub struct Workflow {
     pub name: String,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     pub schedule: Option<String>,
+    #[serde(default)]
+    pub types: BTreeMap<String, serde_json::Value>,
     pub tasks: IndexMap<String, TaskDefinition>,
 }
 
@@ -26,6 +31,8 @@ pub struct TaskDefinition {
     pub function: Option<String>,
     #[serde(default)]
     pub input: serde_json::Value,
+    #[serde(default)]
+    pub inputs: serde_json::Value,
     #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default = "default_timeout_secs")]
@@ -79,6 +86,13 @@ impl Workflow {
     pub fn validate(&self) -> Result<(), WorkflowValidationError> {
         if self.name.trim().is_empty() {
             return Err(WorkflowValidationError::EmptyWorkflowName);
+        }
+        if let Some(description) = &self.description
+            && description.trim().is_empty()
+        {
+            return Err(WorkflowValidationError::Custom(
+                "workflow description cannot be empty".to_string(),
+            ));
         }
         if self.tasks.is_empty() {
             return Err(WorkflowValidationError::NoTasks);
@@ -134,6 +148,19 @@ impl Workflow {
                     }
                 }
             }
+
+            if !task.input.is_null() {
+                return Err(WorkflowValidationError::Custom(format!(
+                    "task '{}' uses removed legacy field 'input'; use 'inputs' bindings with 'const'/'ref'",
+                    name
+                )));
+            }
+            if !task.inputs.is_null() && !task.inputs.is_object() {
+                return Err(WorkflowValidationError::Custom(format!(
+                    "task '{}' field 'inputs' must be an object",
+                    name
+                )));
+            }
         }
 
         if let Some(task) = detect_cycle(self) {
@@ -174,17 +201,108 @@ impl Workflow {
 
             // If task has dependencies, input_type is REQUIRED
             if !task.depends_on.is_empty() && task.input_type.is_none() {
-                return Err(WorkflowValidationError::MissingInputType {
-                    task: name.clone(),
-                });
+                return Err(WorkflowValidationError::MissingInputType { task: name.clone() });
             }
 
             // Validate type schema structure
             if let Some(ref schema) = task.output_type {
-                validate_type_schema(schema, name, "output_type")?;
+                validate_type_schema(schema, name, "output_type", &self.types, &mut Vec::new())?;
             }
             if let Some(ref schema) = task.input_type {
-                validate_type_schema(schema, name, "input_type")?;
+                validate_type_schema(schema, name, "input_type", &self.types, &mut Vec::new())?;
+            }
+        }
+
+        for (alias, schema) in &self.types {
+            validate_type_schema(
+                schema,
+                "<types>",
+                &format!("types.{}", alias),
+                &self.types,
+                &mut Vec::new(),
+            )?;
+        }
+
+        // When explicit `inputs` bindings are provided, all `input_type` fields should be bound.
+        for (name, task) in &self.tasks {
+            if task.inputs.is_null() {
+                continue;
+            }
+            let Some(input_type) = task.input_type.as_ref() else {
+                return Err(WorkflowValidationError::Custom(format!(
+                    "task '{}' defines 'inputs' but is missing 'input_type'",
+                    name
+                )));
+            };
+            let Some(type_obj) = input_type.as_object() else {
+                return Err(WorkflowValidationError::Custom(format!(
+                    "task '{}' input_type must be an object when 'inputs' is used",
+                    name
+                )));
+            };
+            let Some(bindings_obj) = task.inputs.as_object() else {
+                return Err(WorkflowValidationError::Custom(format!(
+                    "task '{}' inputs must be an object",
+                    name
+                )));
+            };
+            for key in type_obj.keys() {
+                if !bindings_obj.contains_key(key) {
+                    return Err(WorkflowValidationError::Custom(format!(
+                        "task '{}' inputs missing binding for '{}'",
+                        name, key
+                    )));
+                }
+            }
+            for key in bindings_obj.keys() {
+                if !type_obj.contains_key(key) {
+                    return Err(WorkflowValidationError::Custom(format!(
+                        "task '{}' inputs contains unknown binding '{}'",
+                        name, key
+                    )));
+                }
+            }
+            for (key, binding) in bindings_obj {
+                let Some(binding_obj) = binding.as_object() else {
+                    return Err(WorkflowValidationError::Custom(format!(
+                        "task '{}' input binding '{}' must be an object with exactly one of: const, ref",
+                        name, key
+                    )));
+                };
+                let has_const = binding_obj.contains_key("const");
+                let has_ref = binding_obj.contains_key("ref");
+                if binding_obj.len() != 1 || has_const == has_ref {
+                    return Err(WorkflowValidationError::Custom(format!(
+                        "task '{}' input binding '{}' must define exactly one of: const, ref",
+                        name, key
+                    )));
+                }
+                if has_ref {
+                    let ref_path =
+                        binding_obj
+                            .get("ref")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                WorkflowValidationError::Custom(format!(
+                                    "task '{}' input binding '{}.ref' must be a string",
+                                    name, key
+                                ))
+                            })?;
+                    let parts: Vec<&str> = ref_path.split('.').collect();
+                    if parts.len() < 3 || parts[0] != "tasks" || parts[2] != "output" {
+                        return Err(WorkflowValidationError::Custom(format!(
+                            "task '{}' input binding '{}' has invalid ref '{}'; expected tasks.<task>.output[.<field>...]",
+                            name, key, ref_path
+                        )));
+                    }
+                    let dep_task = parts[1];
+                    if !task.depends_on.iter().any(|dep| dep == dep_task) {
+                        return Err(WorkflowValidationError::Custom(format!(
+                            "task '{}' input binding '{}' ref '{}' targets '{}' which is not listed in depends_on",
+                            name, key, ref_path, dep_task
+                        )));
+                    }
+                }
             }
         }
 
@@ -192,9 +310,16 @@ impl Workflow {
     }
 }
 
-/// Valid primitive type names (language-agnostic).
+/// Valid primitive type names for workflow schema.
 const VALID_PRIMITIVES: &[&str] = &[
-    "string", "integer", "number", "boolean", "date", "datetime",
+    "str",
+    "int",
+    "float",
+    "bool",
+    "date",
+    "datetime_notz",
+    "datetime_tz",
+    "datetime_utc",
 ];
 
 /// Validate that a type schema value uses only valid type expressions:
@@ -205,10 +330,41 @@ fn validate_type_schema(
     value: &serde_json::Value,
     task_name: &str,
     path: &str,
+    aliases: &BTreeMap<String, serde_json::Value>,
+    alias_stack: &mut Vec<String>,
 ) -> Result<(), WorkflowValidationError> {
     match value {
         serde_json::Value::String(s) => {
             if !VALID_PRIMITIVES.contains(&s.as_str()) {
+                if let Some(alias_name) = s.strip_prefix("types.") {
+                    let alias_schema = aliases.get(alias_name).ok_or_else(|| {
+                        WorkflowValidationError::InvalidTypeSchema {
+                            task: task_name.to_string(),
+                            path: path.to_string(),
+                            reason: format!("unknown type alias '{}'", s),
+                        }
+                    })?;
+                    if alias_stack.iter().any(|existing| existing == alias_name) {
+                        alias_stack.push(alias_name.to_string());
+                        let chain = alias_stack.join(" -> ");
+                        alias_stack.pop();
+                        return Err(WorkflowValidationError::InvalidTypeSchema {
+                            task: task_name.to_string(),
+                            path: path.to_string(),
+                            reason: format!("recursive type alias chain: {}", chain),
+                        });
+                    }
+                    alias_stack.push(alias_name.to_string());
+                    let result = validate_type_schema(
+                        alias_schema,
+                        task_name,
+                        &format!("{} -> {}", path, s),
+                        aliases,
+                        alias_stack,
+                    );
+                    alias_stack.pop();
+                    return result;
+                }
                 return Err(WorkflowValidationError::InvalidTypeSchema {
                     task: task_name.to_string(),
                     path: path.to_string(),
@@ -232,18 +388,23 @@ fn validate_type_schema(
                     ),
                 });
             }
-            validate_type_schema(&arr[0], task_name, &format!("{}[]", path))
+            validate_type_schema(
+                &arr[0],
+                task_name,
+                &format!("{}[]", path),
+                aliases,
+                alias_stack,
+            )
         }
         serde_json::Value::Object(map) => {
-            if map.is_empty() {
-                return Err(WorkflowValidationError::InvalidTypeSchema {
-                    task: task_name.to_string(),
-                    path: path.to_string(),
-                    reason: "object type must have at least one field".to_string(),
-                });
-            }
             for (key, val) in map {
-                validate_type_schema(val, task_name, &format!("{}.{}", path, key))?;
+                validate_type_schema(
+                    val,
+                    task_name,
+                    &format!("{}.{}", path, key),
+                    aliases,
+                    alias_stack,
+                )?;
             }
             Ok(())
         }
@@ -301,7 +462,8 @@ mod tests {
             job: None,
             module: None,
             function: None,
-            input: serde_json::json!({}),
+            input: serde_json::Value::Null,
+            inputs: serde_json::Value::Null,
             depends_on: Vec::new(),
             timeout: 300,
             retries: 0,
@@ -314,7 +476,9 @@ mod tests {
     fn test_validate_rejects_empty_workflow_name_and_no_tasks() {
         let empty_name = Workflow {
             name: "  ".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks: IndexMap::new(),
         };
         assert_eq!(
@@ -324,7 +488,9 @@ mod tests {
 
         let no_tasks = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks: IndexMap::new(),
         };
         assert_eq!(no_tasks.validate(), Err(WorkflowValidationError::NoTasks));
@@ -339,7 +505,9 @@ mod tests {
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(matches!(
@@ -353,7 +521,9 @@ mod tests {
         tasks.insert("a".to_string(), self_dep);
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(matches!(
@@ -374,7 +544,8 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::json!({}),
+                input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 0,
@@ -385,7 +556,9 @@ mod tests {
         assert!(matches!(
             (Workflow {
                 name: "wf".to_string(),
+                description: None,
                 schedule: None,
+                types: BTreeMap::new(),
                 tasks,
             })
             .validate(),
@@ -402,7 +575,8 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::json!({}),
+                input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 0,
@@ -413,7 +587,9 @@ mod tests {
         assert!(matches!(
             (Workflow {
                 name: "wf".to_string(),
+                description: None,
                 schedule: None,
+                types: BTreeMap::new(),
                 tasks,
             })
             .validate(),
@@ -430,7 +606,8 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::json!({}),
+                input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 0,
@@ -441,7 +618,9 @@ mod tests {
         assert!(matches!(
             (Workflow {
                 name: "wf".to_string(),
+                description: None,
                 schedule: None,
+                types: BTreeMap::new(),
                 tasks,
             })
             .validate(),
@@ -458,7 +637,8 @@ mod tests {
                 job: None,
                 module: None,
                 function: None,
-                input: serde_json::json!({}),
+                input: serde_json::Value::Null,
+                inputs: serde_json::Value::Null,
                 depends_on: Vec::new(),
                 timeout: 300,
                 retries: 0,
@@ -469,7 +649,9 @@ mod tests {
         assert!(matches!(
             (Workflow {
                 name: "wf".to_string(),
+                description: None,
                 schedule: None,
+                types: BTreeMap::new(),
                 tasks,
             })
             .validate(),
@@ -489,7 +671,9 @@ mod tests {
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         // Cycle detection happens before type validation
@@ -525,13 +709,15 @@ tasks:
         let a = process_task(); // no output_type
         let mut b = process_task();
         b.depends_on = vec!["a".to_string()];
-        b.input_type = Some(serde_json::json!({"x": "integer"}));
+        b.input_type = Some(serde_json::json!({"x": "int"}));
         tasks.insert("a".to_string(), a);
         tasks.insert("b".to_string(), b);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(matches!(
@@ -545,7 +731,7 @@ tasks:
     fn test_validate_types_requires_input_type_when_has_depends_on() {
         let mut tasks = IndexMap::new();
         let mut a = process_task();
-        a.output_type = Some(serde_json::json!({"x": "integer"}));
+        a.output_type = Some(serde_json::json!({"x": "int"}));
         let mut b = process_task();
         b.depends_on = vec!["a".to_string()];
         // b has no input_type
@@ -554,7 +740,9 @@ tasks:
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(matches!(
@@ -567,17 +755,19 @@ tasks:
     fn test_validate_types_accepts_valid_typed_workflow() {
         let mut tasks = IndexMap::new();
         let mut extract = process_task();
-        extract.output_type = Some(serde_json::json!({"users": ["string"], "count": "integer"}));
+        extract.output_type = Some(serde_json::json!({"users": ["str"], "count": "int"}));
         let mut transform = process_task();
         transform.depends_on = vec!["extract".to_string()];
         transform.input_type =
-            Some(serde_json::json!({"upstream": {"extract": {"users": ["string"], "count": "integer"}}}));
+            Some(serde_json::json!({"upstream": {"extract": {"users": ["str"], "count": "int"}}}));
         tasks.insert("extract".to_string(), extract);
         tasks.insert("transform".to_string(), transform);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(wf.validate().is_ok());
@@ -591,7 +781,9 @@ tasks:
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(wf.validate().is_ok());
@@ -602,17 +794,19 @@ tasks:
         // A leaf task (nothing depends on it) doesn't need output_type
         let mut tasks = IndexMap::new();
         let mut a = process_task();
-        a.output_type = Some(serde_json::json!({"x": "integer"}));
+        a.output_type = Some(serde_json::json!({"x": "int"}));
         let mut b = process_task();
         b.depends_on = vec!["a".to_string()];
-        b.input_type = Some(serde_json::json!({"upstream": {"a": {"x": "integer"}}}));
+        b.input_type = Some(serde_json::json!({"upstream": {"a": {"x": "int"}}}));
         // b has no output_type — that's fine, nothing depends on b
         tasks.insert("a".to_string(), a);
         tasks.insert("b".to_string(), b);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(wf.validate().is_ok());
@@ -628,8 +822,8 @@ tasks:
     executor: process
     command: "echo extract"
     output_type:
-      users: [string]
-      count: integer
+      users: [str]
+      count: int
   transform:
     executor: process
     command: "echo transform"
@@ -637,8 +831,8 @@ tasks:
     input_type:
       upstream:
         extract:
-          users: [string]
-          count: integer
+          users: [str]
+          count: int
 "#;
         std::io::Write::write_all(&mut file, yaml.as_bytes())
             .expect("yaml content should be written");
@@ -648,7 +842,7 @@ tasks:
         assert!(loaded.tasks["extract"].output_type.is_some());
         assert!(loaded.tasks["transform"].input_type.is_some());
         let output_type = loaded.tasks["extract"].output_type.as_ref().unwrap();
-        assert_eq!(output_type["count"], "integer");
+        assert_eq!(output_type["count"], "int");
     }
 
     // --- Type schema validation tests ---
@@ -657,28 +851,42 @@ tasks:
     fn test_validate_type_schema_rejects_unknown_primitive() {
         let mut tasks = IndexMap::new();
         let mut a = process_task();
-        a.output_type = Some(serde_json::json!({"data": "str"})); // "str" is not valid, must be "string"
+        a.output_type = Some(serde_json::json!({"data": "wat"}));
         tasks.insert("a".to_string(), a);
 
         // Need something to depend on "a" so output_type is checked
         let mut b = process_task();
         b.depends_on = vec!["a".to_string()];
-        b.input_type = Some(serde_json::json!({"upstream": {"a": {"data": "string"}}}));
+        b.input_type = Some(serde_json::json!({"upstream": {"a": {"data": "str"}}}));
         tasks.insert("b".to_string(), b);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         let err = wf.validate().unwrap_err();
-        assert!(matches!(err, WorkflowValidationError::InvalidTypeSchema { .. }));
-        assert!(err.to_string().contains("str"));
+        assert!(matches!(
+            err,
+            WorkflowValidationError::InvalidTypeSchema { .. }
+        ));
+        assert!(err.to_string().contains("wat"));
     }
 
     #[test]
     fn test_validate_type_schema_accepts_all_primitives() {
-        for prim in &["string", "integer", "number", "boolean", "date", "datetime"] {
+        for prim in &[
+            "str",
+            "int",
+            "float",
+            "bool",
+            "date",
+            "datetime_notz",
+            "datetime_tz",
+            "datetime_utc",
+        ] {
             let mut tasks = IndexMap::new();
             let mut a = process_task();
             a.output_type = Some(serde_json::json!({"field": prim}));
@@ -686,10 +894,16 @@ tasks:
 
             let wf = Workflow {
                 name: "wf".to_string(),
+                description: None,
                 schedule: None,
+                types: BTreeMap::new(),
                 tasks,
             };
-            assert!(wf.validate().is_ok(), "primitive '{}' should be valid", prim);
+            assert!(
+                wf.validate().is_ok(),
+                "primitive '{}' should be valid",
+                prim
+            );
         }
     }
 
@@ -697,12 +911,14 @@ tasks:
     fn test_validate_type_schema_accepts_array_types() {
         let mut tasks = IndexMap::new();
         let mut a = process_task();
-        a.output_type = Some(serde_json::json!({"users": ["string"], "scores": ["number"]}));
+        a.output_type = Some(serde_json::json!({"users": ["str"], "scores": ["float"]}));
         tasks.insert("a".to_string(), a);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(wf.validate().is_ok());
@@ -717,11 +933,16 @@ tasks:
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         let err = wf.validate().unwrap_err();
-        assert!(matches!(err, WorkflowValidationError::InvalidTypeSchema { .. }));
+        assert!(matches!(
+            err,
+            WorkflowValidationError::InvalidTypeSchema { .. }
+        ));
         assert!(err.to_string().contains("exactly one element"));
     }
 
@@ -729,16 +950,21 @@ tasks:
     fn test_validate_type_schema_rejects_multi_element_array() {
         let mut tasks = IndexMap::new();
         let mut a = process_task();
-        a.output_type = Some(serde_json::json!({"items": ["string", "integer"]}));
+        a.output_type = Some(serde_json::json!({"items": ["str", "int"]}));
         tasks.insert("a".to_string(), a);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         let err = wf.validate().unwrap_err();
-        assert!(matches!(err, WorkflowValidationError::InvalidTypeSchema { .. }));
+        assert!(matches!(
+            err,
+            WorkflowValidationError::InvalidTypeSchema { .. }
+        ));
     }
 
     #[test]
@@ -747,16 +973,18 @@ tasks:
         let mut a = process_task();
         a.output_type = Some(serde_json::json!({
             "user": {
-                "name": "string",
-                "age": "integer",
-                "tags": ["string"]
+                "name": "str",
+                "age": "int",
+                "tags": ["str"]
             }
         }));
         tasks.insert("a".to_string(), a);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(wf.validate().is_ok());
@@ -771,27 +999,36 @@ tasks:
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         let err = wf.validate().unwrap_err();
-        assert!(matches!(err, WorkflowValidationError::InvalidTypeSchema { .. }));
+        assert!(matches!(
+            err,
+            WorkflowValidationError::InvalidTypeSchema { .. }
+        ));
     }
 
     #[test]
-    fn test_validate_type_schema_accepts_date_and_datetime() {
+    fn test_validate_type_schema_accepts_date_and_datetimes() {
         let mut tasks = IndexMap::new();
         let mut a = process_task();
         a.output_type = Some(serde_json::json!({
             "created": "date",
-            "updated": "datetime",
-            "timestamps": ["datetime"]
+            "updated_local": "datetime_notz",
+            "updated_tz": "datetime_tz",
+            "updated_utc": "datetime_utc",
+            "timestamps": ["datetime_utc"]
         }));
         tasks.insert("a".to_string(), a);
 
         let wf = Workflow {
             name: "wf".to_string(),
+            description: None,
             schedule: None,
+            types: BTreeMap::new(),
             tasks,
         };
         assert!(wf.validate().is_ok());

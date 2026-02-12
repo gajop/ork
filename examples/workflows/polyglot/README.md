@@ -88,7 +88,7 @@ rust_process_raw:
 ```
 
 **Features:**
-- Manual env var parsing (`ORK_UPSTREAM_JSON`)
+- Manual env var parsing (`ORK_INPUT_JSON`)
 - Manual output formatting (`ORK_OUTPUT:`)
 - Maximum control over everything
 - Shows what happens under the hood
@@ -96,8 +96,8 @@ rust_process_raw:
 **Code example:**
 ```rust
 fn main() {
-    let upstream_json = env::var("ORK_UPSTREAM_JSON").expect(...);
-    let upstream: UpstreamData = serde_json::from_str(&upstream_json).expect(...);
+    let input_json = env::var("ORK_INPUT_JSON").expect(...);
+    let input: TaskInput = serde_json::from_str(&input_json).expect(...);
 
     // Your logic
 

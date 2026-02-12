@@ -25,6 +25,7 @@ pub struct CompiledTask {
     pub module: Option<String>,
     pub function: Option<String>,
     pub input: serde_json::Value,
+    pub inputs: serde_json::Value,
     pub depends_on: Vec<usize>,
     pub timeout: u64,
     pub retries: u32,
@@ -90,6 +91,7 @@ impl Workflow {
                 module: task.module.clone(),
                 function: task.function.clone(),
                 input: task.input.clone(),
+                inputs: task.inputs.clone(),
                 depends_on,
                 timeout: task.timeout,
                 retries: task.retries,
@@ -256,8 +258,8 @@ pub fn build_workflow_tasks(compiled: &CompiledWorkflow) -> Vec<NewWorkflowTask>
         };
 
         let mut params = serde_json::Map::new();
-        if !task.input.is_null() {
-            params.insert("task_input".to_string(), task.input.clone());
+        if !task.inputs.is_null() {
+            params.insert("task_bindings".to_string(), task.inputs.clone());
         }
         params.insert(
             "max_retries".to_string(),

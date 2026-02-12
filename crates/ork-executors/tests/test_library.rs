@@ -72,7 +72,7 @@ mod library_tests {
         let lib_path = get_test_library_path();
         let params = serde_json::json!({
             "library_path": lib_path.to_string_lossy(),
-            "upstream": {
+            "task_input": {
                 "py_generate": {
                     "numbers": [1, 2, 3, 4, 5]
                 }
@@ -102,18 +102,13 @@ mod library_tests {
         let output = success.output.as_ref().unwrap();
         assert!(output.get("sum").is_some(), "Output missing 'sum' field");
         assert!(
-            output.get("doubled").is_some(),
-            "Output missing 'doubled' field"
-        );
-        assert!(
-            output.get("method").is_some(),
-            "Output missing 'method' field"
+            output.get("tripled").is_some(),
+            "Output missing 'tripled' field"
         );
 
         // Verify values
         assert_eq!(output["sum"], 15); // 1+2+3+4+5 = 15
-        assert_eq!(output["doubled"], serde_json::json!([2, 4, 6, 8, 10]));
-        assert_eq!(output["method"], "library_executor");
+        assert_eq!(output["tripled"], serde_json::json!([3, 6, 9, 12, 15]));
     }
 
     #[tokio::test]
@@ -177,7 +172,7 @@ mod library_tests {
         let lib_path = get_test_library_path();
         let params = serde_json::json!({
             "library_path": lib_path.to_string_lossy(),
-            "upstream": {
+            "task_input": {
                 "py_generate": {
                     "numbers": []
                 }
@@ -198,7 +193,7 @@ mod library_tests {
 
         let output = success.unwrap().output.as_ref().unwrap();
         assert_eq!(output["sum"], 0);
-        assert_eq!(output["doubled"], serde_json::json!([]));
+        assert_eq!(output["tripled"], serde_json::json!([]));
     }
 
     #[tokio::test]
@@ -212,7 +207,7 @@ mod library_tests {
         let lib_path = get_test_library_path();
         let params = serde_json::json!({
             "library_path": lib_path.to_string_lossy(),
-            "upstream": {
+            "task_input": {
                 "py_generate": {
                     "numbers": [10, 20, 30]
                 }

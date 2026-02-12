@@ -23,8 +23,8 @@ tasks:
     executor: python
     file: {task_file}
     function: {function}
-    input:
-      x: 1
+    input_type: {{}}
+    inputs: {{}}
 "#,
         task_file = task_file,
         function = function

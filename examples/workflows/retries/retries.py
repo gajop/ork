@@ -16,10 +16,9 @@ class HelloOutput(TypedDict):
 
 
 def flakey(fail_times: int = 0) -> FlakeyOutput:
-    """Simulates a flakey operation that fails N times before succeeding"""
+    """Simulates a flakey operation that fails N times before succeeding."""
     attempt = int(os.environ.get("ORK_ATTEMPT", "1"))
 
-    # Simulate work
     time.sleep(2)
 
     if attempt <= fail_times:
@@ -30,8 +29,8 @@ def flakey(fail_times: int = 0) -> FlakeyOutput:
     return result
 
 
-def hello(name: str = "world", delay: float = 1.0, upstream: dict = None) -> HelloOutput:
-    """Generate a greeting message"""
+def hello(name: str = "world", delay: float = 1.0) -> HelloOutput:
+    """Generate a greeting message."""
     if delay > 0:
         time.sleep(delay)
 

@@ -19,16 +19,8 @@ class ShellEchoOutput(TypedDict):
     finished_at: datetime
 
 
-class ComplimentUpstream(TypedDict, total=False):
-    greet: GreetOutput
-
-
-class ShellEchoUpstream(TypedDict, total=False):
-    compliment: ComplimentOutput
-
-
 def greet(name: str = "world", delay: float = 1.0) -> GreetOutput:
-    """Generate a greeting message"""
+    """Generate a greeting message."""
     if delay > 0:
         time.sleep(delay)
 
@@ -38,28 +30,26 @@ def greet(name: str = "world", delay: float = 1.0) -> GreetOutput:
     return result
 
 
-def compliment(adjective: str = "fast", upstream: ComplimentUpstream | None = None) -> ComplimentOutput:
-    """Create a compliment based on upstream greeting"""
-    # Get the greeting from upstream
-    greet_output = upstream.get("greet", {}) if upstream else {}
-    greeting_message = greet_output.get("message", "Hello!")
+def compliment(greet: GreetOutput, adjective: str = "fast") -> ComplimentOutput:
+    """Create a compliment based on greeting output."""
+    greeting_message = greet.get("message", "Hello!")
 
-    # Simulate work
     time.sleep(5)
 
-    line = f"{greeting_message} — you built Ork to be {adjective}!"
+    line = f"{greeting_message} - you built Ork to be {adjective}!"
     result: ComplimentOutput = {"line": line, "adjective": adjective}
     print(result["line"])
     return result
 
 
 def shell_echo(
+    compliment: ComplimentOutput,
     delay: float = 5.0,
     note: str = "python fallback for shell commands",
-    upstream: ShellEchoUpstream | None = None,
 ) -> ShellEchoOutput:
-    """Process a note with some delay"""
+    """Process a note with some delay."""
     time.sleep(delay)
-    result: ShellEchoOutput = {"note": note, "finished_at": datetime.now()}
+    final_note = f"{note}: {compliment['line']}"
+    result: ShellEchoOutput = {"note": final_note, "finished_at": datetime.now()}
     print(result["note"])
     return result

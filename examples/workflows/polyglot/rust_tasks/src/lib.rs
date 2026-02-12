@@ -9,11 +9,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub struct TaskInput {
-    pub upstream: Upstream,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Upstream {
     pub py_generate: NumbersOutput,
 }
 
@@ -29,7 +24,7 @@ pub struct TaskOutput {
 }
 
 pub fn process_via_library(input: TaskInput) -> TaskOutput {
-    let numbers = &input.upstream.py_generate.numbers;
+    let numbers = &input.py_generate.numbers;
     let sum: i32 = numbers.iter().sum();
     let tripled: Vec<i32> = numbers.iter().map(|n| n * 3).collect();
 

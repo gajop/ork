@@ -1,9 +1,19 @@
-"""Python tasks for polyglot workflow example - TypedDict"""
+"""Python tasks for polyglot workflow example - TypedDict."""
 from typing import TypedDict
 
 
 class NumbersOutput(TypedDict):
     numbers: list[int]
+
+
+class RustLibraryOutput(TypedDict):
+    tripled: list[int]
+    sum: int
+
+
+class RustProcessSdkOutput(TypedDict):
+    total: int
+    tripled: list[int]
 
 
 class FormatOutput(TypedDict):
@@ -21,21 +31,19 @@ def generate_numbers(count: int) -> NumbersOutput:
     return {"numbers": numbers}
 
 
-def format_result(multiplier: int, upstream: dict = None) -> FormatOutput:
+def format_result(multiplier: int, rust_process_sdk: RustProcessSdkOutput) -> FormatOutput:
     """Format the final result (Python task 3)."""
     print(f"[Python] Formatting result with multiplier {multiplier}...")
-    print(f"[Python] Received upstream data: {upstream}")
+    print(f"[Python] Received rust_process_sdk data: {rust_process_sdk}")
 
-    # Extract rust_process_sdk output
-    processed = upstream.get("rust_process_sdk", {}) if upstream else {}
-    total = processed.get("total", 0)
-    tripled = processed.get("tripled", [])
+    total = rust_process_sdk.get("total", 0)
+    tripled = rust_process_sdk.get("tripled", [])
 
     result: FormatOutput = {
         "summary": f"Processed {len(tripled)} numbers",
         "total": total,
         "final_value": total * multiplier,
-        "tripled_numbers": tripled
+        "tripled_numbers": tripled,
     }
 
     print(f"[Python] Final result: {result}")
