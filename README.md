@@ -22,33 +22,60 @@ Serverless workflow orchestrator with near-zero idle cost.
 # workflows/etl.yaml
 name: my_etl
 
+types:
+  ExtractResult:
+    raw_path: str
+    user_count: int
+  TransformResult:
+    active_path: str
+    active_count: int
+
 tasks:
   extract:
     executor: python
     file: tasks/etl.py
     function: extract
-    input:
-      api_url: "https://api.example.com/users"
-      raw_path: "/tmp/users_raw.json"
+    input_type:
+      api_url: str
+      raw_path: str
+    output_type: types.ExtractResult
+    inputs:
+      api_url:
+        const: "https://api.example.com/users"
+      raw_path:
+        const: "/tmp/users_raw.json"
     timeout: 600
 
   transform:
     executor: python
     file: tasks/etl.py
     function: transform
-    input:
-      raw_path: "/tmp/users_raw.json"
-      active_path: "/tmp/users_active.json"
     depends_on: [extract]
+    input_type:
+      raw_path: str
+      active_path: str
+    output_type: types.TransformResult
+    inputs:
+      raw_path:
+        ref: tasks.extract.output.raw_path
+      active_path:
+        const: "/tmp/users_active.json"
 
   load:
     executor: python
     file: tasks/etl.py
     function: load
-    input:
-      active_path: "/tmp/users_active.json"
-      output_path: "/data/active_users.json"
     depends_on: [transform]
+    input_type:
+      active_path: str
+      output_path: str
+    output_type:
+      output_path: str
+    inputs:
+      active_path:
+        ref: tasks.transform.output.active_path
+      output_path:
+        const: "/data/active_users.json"
 ```
 
 ### 2. Write tasks
@@ -67,53 +94,89 @@ class User(TypedDict):
     id: int
     status: str
 
-def extract(api_url: str, raw_path: str) -> int:
+def extract(api_url: str, raw_path: str) -> dict[str, object]:
     response = requests.get(api_url, timeout=30)
     response.raise_for_status()
     users: list[User] = response.json()
     raw_file = Path(raw_path)
     raw_file.parent.mkdir(parents=True, exist_ok=True)
     raw_file.write_text(json.dumps(users), encoding="utf-8")
-    return len(users)
+    return {"raw_path": raw_path, "user_count": len(users)}
 
-def transform(raw_path: str, active_path: str) -> int:
+def transform(raw_path: str, active_path: str) -> dict[str, object]:
     users: list[User] = json.loads(Path(raw_path).read_text(encoding="utf-8"))
     active_users = [user for user in users if user["status"] == "active"]
     active_file = Path(active_path)
     active_file.parent.mkdir(parents=True, exist_ok=True)
     active_file.write_text(json.dumps(active_users), encoding="utf-8")
-    return len(active_users)
+    return {"active_path": active_path, "active_count": len(active_users)}
 
-def load(active_path: str, output_path: str) -> str:
+def load(active_path: str, output_path: str) -> dict[str, str]:
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(
         Path(active_path).read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    return output_path
+    return {"output_path": output_path}
 ```
 
 Ork calls your functions directly. Prefer strongly typed, small inputs/outputs (paths, IDs, counts), and avoid passing large payloads between tasks.
 
-### 3. Run the workflow locally
+### 3. Install and run
 
 ```bash
-# One-time local install of the Ork CLI binary from this repo
-just install
+# Install the Ork CLI (requires Rust toolchain)
+cargo install --path .
 
 # Run the workflow end-to-end (defaults to sqlite://./.ork/ork.db?mode=rwc)
 ork run workflows/etl.yaml
 ```
 
-Target package UX for Python users is:
+**First time?** Start the server first to see the UI:
+
+```bash
+# terminal 1 - start the scheduler and UI server
+ork serve
+
+# terminal 2 - run your workflow
+ork run workflows/etl.yaml
+```
+
+Then open [http://127.0.0.1:4000](http://127.0.0.1:4000) to see the workflow execution in the UI.
+
+### 3b. Python package status
+
+Target package UX for Python users (future):
 
 ```bash
 uv add -d ork
 ork run workflows/etl.yaml
 ```
 
-(`uv add -d ork` is not available yet because the package is not published.)
+This is not available yet: `ork` is not published to PyPI today.
+For now, install from source using `cargo install --path .` (requires Rust toolchain).
+
+### 3c. Start the UI and open it in your browser
+
+`ork run workflows/etl.yaml` executes a workflow, but does not start the web UI.
+
+To run the scheduler + UI locally:
+
+```bash
+# terminal 1 - start the scheduler and UI server
+ork serve
+```
+
+Then open:
+
+```text
+http://127.0.0.1:4000
+```
+
+You can keep terminal 1 running, and in terminal 2 run workflows with `ork run workflows/etl.yaml`.
+
+Note: `ork serve` starts the scheduler with the web UI. The database defaults to `sqlite://./.ork/ork.db?mode=rwc`.
 
 For contributor-focused DB-backed scheduler + web UI setup, see [Running Locally](docs/dev/running.md).
 

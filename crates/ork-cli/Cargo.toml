@@ -26,6 +26,7 @@ library = ["ork-executors/library"]
 ork-core = { path = "../ork-core", features = ["sqlx"] }
 ork-state = { path = "../ork-state" }
 ork-executors = { path = "../ork-executors" }
+ork-web = { path = "../ork-web" }
 
 # CLI & async
 clap = { workspace = true }
@@ -33,6 +34,7 @@ tokio = { workspace = true, features = ["full"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+axum = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

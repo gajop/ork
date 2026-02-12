@@ -80,6 +80,7 @@ where
 {
     match command {
         Commands::Init(cmd) => cmd.execute(db).await?,
+        Commands::Serve(cmd) => cmd.execute(db).await?,
         Commands::Run(cmd) => cmd.execute(db).await?,
         Commands::CreateWorkflow(cmd) => cmd.execute(db).await?,
         Commands::CreateWorkflowYaml(cmd) => cmd.execute(db).await?,
@@ -122,7 +123,7 @@ mod tests {
     use super::*;
     use crate::commands::{
         CreateWorkflow, CreateWorkflowYaml, DeleteWorkflow, Execute, Init, ListWorkflows, Run,
-        RunWorkflow, Status, Tasks, Trigger, ValidateWorkflow,
+        RunWorkflow, Serve, Status, Tasks, Trigger, ValidateWorkflow,
     };
     use axum::{Json, Router, extract::Path, routing::get, routing::post};
     use ork_core::database::RunRepository;
@@ -364,17 +365,18 @@ tasks:
 
         let run_err = dispatch_command(
             Commands::Run(Run {
-                file: None,
-                config: Some("/tmp/does-not-exist-config.yaml".to_string()),
+                file: "/tmp/does-not-exist-workflow.yaml".to_string(),
+                config: None,
                 timeout: 300,
             }),
             db.clone(),
         )
         .await
-        .expect_err("missing run config should error");
+        .expect_err("missing workflow file should error");
         assert!(
-            run_err.to_string().contains("No such file")
-                || run_err.to_string().contains("os error")
+            run_err
+                .to_string()
+                .contains("Failed to read workflow file")
         );
 
         let exec_err = dispatch_command(

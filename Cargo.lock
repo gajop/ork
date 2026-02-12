@@ -2456,6 +2456,7 @@ dependencies = [
  "ork-core",
  "ork-executors",
  "ork-state",
+ "ork-web",
  "reqwest 0.13.2",
  "serde",
  "serde_json",

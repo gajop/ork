@@ -8,6 +8,7 @@ pub mod init;
 pub mod list_workflows;
 pub mod run;
 pub mod run_workflow;
+pub mod serve;
 pub mod status;
 pub mod tasks;
 pub mod trigger;
@@ -21,6 +22,7 @@ pub use init::Init;
 pub use list_workflows::ListWorkflows;
 pub use run::Run;
 pub use run_workflow::RunWorkflow;
+pub use serve::Serve;
 pub use status::Status;
 pub use tasks::Tasks;
 pub use trigger::Trigger;
@@ -31,7 +33,10 @@ pub enum Commands {
     /// Initialize the database with migrations
     Init(Init),
 
-    /// Start the scheduler (`ork run`) or execute a workflow file (`ork run <workflow.yaml>`)
+    /// Start the scheduler and web UI server
+    Serve(Serve),
+
+    /// Execute a workflow file locally (create + trigger + run scheduler until complete)
     Run(Run),
 
     /// Create a new workflow
