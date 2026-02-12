@@ -148,9 +148,11 @@ tasks:
     module: "tasks"
     depends_on: ["t1"]
     input_type:
-      upstream:
-        t1:
-          data: str
+      t1:
+        data: str
+    inputs:
+      t1:
+        ref: tasks.t1.output
 "#,
         )
         .expect("write workflow yaml");

@@ -182,13 +182,13 @@ impl Workflow {
 
         for (name, task) in &self.tasks {
             // If any task depends on this one, output_type is REQUIRED
-            if let Some(dependents) = depended_on.get(name.as_str()) {
-                if task.output_type.is_none() {
-                    return Err(WorkflowValidationError::MissingOutputType {
-                        task: name.clone(),
-                        depended_by: dependents[0].to_string(),
-                    });
-                }
+            if let Some(dependents) = depended_on.get(name.as_str())
+                && task.output_type.is_none()
+            {
+                return Err(WorkflowValidationError::MissingOutputType {
+                    task: name.clone(),
+                    depended_by: dependents[0].to_string(),
+                });
             }
 
             // If task has dependencies, input_type is REQUIRED

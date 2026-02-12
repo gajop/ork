@@ -1,6 +1,7 @@
 use super::*;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 use uuid::Uuid;
 
 async fn async_env_lock() -> tokio::sync::MutexGuard<'static, ()> {
@@ -18,6 +19,13 @@ fn restore_env_var(name: &str, previous: Option<String>) {
 }
 
 async fn resolve_test_database_url() -> Option<String> {
+    static RESOLVED_URL: OnceLock<Option<String>> = OnceLock::new();
+    if let Some(cached) = RESOLVED_URL.get() {
+        return cached.clone();
+    }
+
+    // Keep integration tests responsive when local Postgres is down/misconfigured.
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
     let mut candidates = Vec::new();
     if let Ok(url) = std::env::var("ORK_POSTGRES_TEST_URL") {
         candidates.push(url);
@@ -29,18 +37,29 @@ async fn resolve_test_database_url() -> Option<String> {
     candidates.push(perf_support::resolve_database_url());
 
     for candidate in candidates {
-        if PgPool::connect(&candidate).await.is_ok() {
-            return Some(candidate);
+        let connect_result =
+            tokio::time::timeout(CONNECT_TIMEOUT, PgPool::connect(&candidate)).await;
+        if matches!(connect_result, Ok(Ok(_))) {
+            let resolved = Some(candidate);
+            let _ = RESOLVED_URL.set(resolved.clone());
+            return resolved;
         }
     }
+
+    let _ = RESOLVED_URL.set(None);
     None
 }
 
 async fn ensure_perf_tables(database_url: &str) -> bool {
-    let pool = match PgPool::connect(database_url).await {
-        Ok(pool) => pool,
-        Err(err) => {
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+    let pool = match tokio::time::timeout(CONNECT_TIMEOUT, PgPool::connect(database_url)).await {
+        Ok(Ok(pool)) => pool,
+        Ok(Err(err)) => {
             eprintln!("skipping perf-test integration path test: could not connect to db: {err}");
+            return false;
+        }
+        Err(_) => {
+            eprintln!("skipping perf-test integration path test: timed out connecting to db");
             return false;
         }
     };
@@ -72,22 +91,6 @@ async fn ensure_perf_tables(database_url: &str) -> bool {
     .await
     {
         eprintln!("skipping perf-test integration path test: failed to ensure tasks table: {err}");
-        return false;
-    }
-
-    // Keep each test run isolated from historical rows in shared local DBs.
-    if let Err(err) = sqlx::query("DELETE FROM tasks").execute(&pool).await {
-        eprintln!("skipping perf-test integration path test: failed to clear tasks table: {err}");
-        return false;
-    }
-    if let Err(err) = sqlx::query("DELETE FROM runs").execute(&pool).await {
-        eprintln!("skipping perf-test integration path test: failed to clear runs table: {err}");
-        return false;
-    }
-    if let Err(err) = sqlx::query("DELETE FROM workflows").execute(&pool).await {
-        eprintln!(
-            "skipping perf-test integration path test: failed to clear workflows table: {err}"
-        );
         return false;
     }
 
