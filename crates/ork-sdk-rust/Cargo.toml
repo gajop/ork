@@ -2,6 +2,15 @@
 name = "ork-sdk-rust"
 version.workspace = true
 edition.workspace = true
+description = "Rust SDK types for Ork task payload contracts"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+keywords = ["workflow", "orchestration", "sdk"]
+categories = ["api-bindings"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

@@ -10,6 +10,9 @@ This is the complete documentation hierarchy for Ork. Start with the [main READM
 - **[dev/crates.md](dev/crates.md)** - Rust crate structure and module organization
 - **[dev/spec.md](dev/spec.md)** - Technical specifications and algorithms
 - **[dev/performance.md](dev/performance.md)** - Performance testing infrastructure and benchmarks
+- **[dev/running.md](dev/running.md)** - Local developer runbook for scheduler + web UI
+- **[dev/releasing.md](dev/releasing.md)** - Cargo publish prep and crate release order
+- **[dev/release-checklist.md](dev/release-checklist.md)** - Step-by-step release execution checklist
 - **[design/workflow-schema.md](design/workflow-schema.md)** - Strict workflow YAML schema and validator rules
 
 ## 🚀 Deployment

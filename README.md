@@ -127,11 +127,13 @@ Ork calls your functions directly. Prefer strongly typed, small inputs/outputs (
 
 ```bash
 # Install the Ork CLI (requires Rust toolchain)
-cargo install --path .
+cargo install --git https://github.com/gajop/ork.git ork-cli --bin ork --no-default-features --features sqlite,process --locked
 
 # Run the workflow end-to-end (defaults to sqlite://./.ork/ork.db?mode=rwc)
 ork run workflows/etl.yaml
 ```
+
+For contributors installing from a local clone, use `just install` (see [docs/dev/running.md](docs/dev/running.md)).
 
 **First time?** Start the server first to see the UI:
 
@@ -155,7 +157,7 @@ ork run workflows/etl.yaml
 ```
 
 This is not available yet: `ork` is not published to PyPI today.
-For now, install from source using `cargo install --path .` (requires Rust toolchain).
+For now, install from Git using `cargo install --git https://github.com/gajop/ork.git ork-cli --bin ork --no-default-features --features sqlite,process --locked` (requires Rust toolchain).
 
 ### 3c. Start the UI and open it in your browser
 
@@ -210,6 +212,8 @@ See [Deployment](docs/deployment.md) for deployment options.
 **Developer Docs:**
 - [Architecture](docs/dev/architecture.md) - System overview, components, data flow
 - [Running Locally](docs/dev/running.md) - One-command boot + example execution
+- [Releasing](docs/dev/releasing.md) - Cargo publish prep and release order
+- [Release Checklist](docs/dev/release-checklist.md) - Step-by-step release execution checklist
 - [Schema](docs/dev/schema.md) - Database structure, object storage, JSON formats
 - [Spec](docs/dev/spec.md) - Algorithms, state machines, distributed coordination
 - [Crates](docs/dev/crates.md) - Rust crate structure and interfaces

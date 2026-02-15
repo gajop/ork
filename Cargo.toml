@@ -13,8 +13,21 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/gajop/ork"
+homepage = "https://github.com/gajop/ork"
+documentation = "https://github.com/gajop/ork/tree/main/docs"
+rust-version = "1.85"
+authors = ["Ork contributors"]
 
 [workspace.dependencies]
+ork-core = { version = "0.1.0", path = "crates/ork-core" }
+ork-state = { version = "0.1.0", path = "crates/ork-state" }
+ork-executors = { version = "0.1.0", path = "crates/ork-executors" }
+ork-web = { version = "0.1.0", path = "crates/ork-web" }
+ork-sdk-rust = { version = "0.1.0", path = "crates/ork-sdk-rust" }
+ork-worker = { version = "0.1.0", path = "crates/ork-worker" }
+ork-cli = { version = "0.1.0", path = "crates/ork-cli" }
 anyhow = "1.0.101"
 axum = { version = "0.8", default-features = false, features = [
     "http1",
@@ -66,3 +79,12 @@ url = "2.5"
 
 [workspace.lints.clippy]
 too_many_arguments = "allow"
+
+[patch.crates-io]
+ork-core = { path = "crates/ork-core" }
+ork-state = { path = "crates/ork-state" }
+ork-executors = { path = "crates/ork-executors" }
+ork-web = { path = "crates/ork-web" }
+ork-sdk-rust = { path = "crates/ork-sdk-rust" }
+ork-worker = { path = "crates/ork-worker" }
+ork-cli = { path = "crates/ork-cli" }

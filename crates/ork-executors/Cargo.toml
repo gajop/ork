@@ -2,6 +2,15 @@
 name = "ork-executors"
 version.workspace = true
 edition.workspace = true
+description = "Executor backends used by Ork for local and cloud task execution"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+keywords = ["workflow", "orchestration", "executors"]
+categories = ["development-tools"]
 
 [features]
 default = ["process", "library"]
@@ -15,7 +24,7 @@ fargate = []  # Future
 lambda = []   # Future
 
 [dependencies]
-ork-core = { path = "../ork-core" }
+ork-core = { workspace = true }
 
 # Core async dependencies
 tokio = { workspace = true, features = ["process", "sync", "time", "fs", "rt", "macros", "io-util"] }

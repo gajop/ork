@@ -2,6 +2,15 @@
 name = "ork-core"
 version.workspace = true
 edition.workspace = true
+description = "Core domain models, traits, and scheduler runtime for Ork"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+keywords = ["workflow", "orchestration", "scheduler"]
+categories = ["development-tools"]
 
 [features]
 default = ["gcp"]
@@ -42,8 +51,8 @@ google-cloud-run-v2 = { workspace = true, optional = true }
 google-cloud-dataproc-v1 = { workspace = true, optional = true }
 
 [dev-dependencies]
-ork-state = { path = "../ork-state", features = ["sqlite"] }
-ork-executors = { path = "../ork-executors", features = ["process"] }
+ork-state = { workspace = true, features = ["sqlite"] }
+ork-executors = { workspace = true, features = ["process"] }
 tempfile = "3.24.0"
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "uuid", "chrono", "json"] }
 axum = { workspace = true }

@@ -2,6 +2,15 @@
 name = "ork-state"
 version.workspace = true
 edition.workspace = true
+description = "Database backends for Ork state storage"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+keywords = ["workflow", "orchestration", "database"]
+categories = ["database", "development-tools"]
 
 [features]
 default = []
@@ -14,7 +23,7 @@ async-trait = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-ork-core = { path = "../ork-core" }
+ork-core = { workspace = true }
 chrono = { workspace = true, default-features = false, features = ["clock", "serde"] }
 fs2 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }

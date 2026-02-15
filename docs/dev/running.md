@@ -2,6 +2,14 @@
 
 These are contributor/developer instructions for the full local stack (DB-backed scheduler + web UI).
 
+## 0) Install the CLI from your local clone
+
+```bash
+just install
+```
+
+This installs the local `ork` binary from `crates/ork-cli` with `sqlite,process` features.
+
 ## 1) Boot services (Postgres + Docker)
 
 In terminal 1:
@@ -41,3 +49,5 @@ This runs `examples/workflows/simple/simple.yaml` via `ork execute` using the lo
 
 - Change the DB connection: `DATABASE_URL=postgres://... just up`
 - List all workflows: `cargo run -p ork-cli --bin ork -- list-workflows`
+- Run release-prep checks locally: `just publish-prep`
+- Run full publish dry-run checks (after bootstrap): `just publish-prep-full`

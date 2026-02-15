@@ -2,10 +2,19 @@
 name = "ork-worker"
 version.workspace = true
 edition.workspace = true
+description = "Stateless worker server for Ork compile/execute task paths"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+keywords = ["workflow", "orchestration", "worker"]
+categories = ["network-programming", "development-tools"]
 
 [dependencies]
-ork-core = { path = "../ork-core", features = ["sqlx"] }
-ork-executors = { path = "../ork-executors", features = ["process", "library"] }
+ork-core = { workspace = true, features = ["sqlx"] }
+ork-executors = { workspace = true, features = ["process", "library"] }
 
 axum = { workspace = true }
 tokio = { workspace = true }

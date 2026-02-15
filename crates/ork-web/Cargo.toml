@@ -2,6 +2,15 @@
 name = "ork-web"
 version.workspace = true
 edition.workspace = true
+description = "Web UI and API server for Ork"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+keywords = ["workflow", "orchestration", "web"]
+categories = ["web-programming", "development-tools"]
 
 [features]
 default = ["postgres"]
@@ -21,11 +30,11 @@ chrono = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
-ork-core = { path = "../ork-core", features = ["sqlx"] }
-ork-state = { path = "../ork-state" }
+ork-core = { workspace = true, features = ["sqlx"] }
+ork-state = { workspace = true }
 
 [dev-dependencies]
-ork-state = { path = "../ork-state", features = ["sqlite"] }
+ork-state = { workspace = true, features = ["sqlite"] }
 tower = { workspace = true }
 tokio-tungstenite = "0.28"
 reqwest = { workspace = true }

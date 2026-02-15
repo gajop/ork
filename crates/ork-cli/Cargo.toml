@@ -2,6 +2,16 @@
 name = "ork-cli"
 version.workspace = true
 edition.workspace = true
+description = "Ork CLI and scheduler host process"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+readme = "README.md"
+keywords = ["workflow", "orchestration", "scheduler", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "ork"
@@ -23,10 +33,10 @@ library = ["ork-executors/library"]
 
 [dependencies]
 # Core orchestration
-ork-core = { path = "../ork-core", features = ["sqlx"] }
-ork-state = { path = "../ork-state" }
-ork-executors = { path = "../ork-executors" }
-ork-web = { path = "../ork-web" }
+ork-core = { workspace = true, features = ["sqlx"] }
+ork-state = { workspace = true }
+ork-executors = { workspace = true }
+ork-web = { workspace = true }
 
 # CLI & async
 clap = { workspace = true }
@@ -51,7 +61,7 @@ sysinfo = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 
 [dev-dependencies]
-ork-state = { path = "../ork-state", features = ["sqlite"] }
+ork-state = { workspace = true, features = ["sqlite"] }
 indexmap = { workspace = true }
 axum = { workspace = true }
 

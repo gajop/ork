@@ -125,6 +125,22 @@ lint:
     ./scripts/check-loc.py
     ./scripts/check-docs.py --check
 
+# Validate crate packaging + publish dry-run in publish order.
+publish-prep:
+    ./scripts/publish-prep.sh
+
+# Local variant for uncommitted changes.
+publish-prep-dirty:
+    ORK_ALLOW_DIRTY=1 ./scripts/publish-prep.sh
+
+# Local/offline-ish variant when only packaging should be checked.
+publish-prep-package-only:
+    ORK_ALLOW_DIRTY=1 ORK_SKIP_PUBLISH_DRY_RUN=1 ./scripts/publish-prep.sh
+
+# Full flow (includes cargo publish --dry-run; useful after bootstrap publish order exists).
+publish-prep-full:
+    ORK_ALLOW_DIRTY=1 ORK_RUN_PUBLISH_DRY_RUN=1 ./scripts/publish-prep.sh
+
 # Run lint checks in autofix mode where possible, then enforce non-fixable checks.
 lint-fix:
     cargo check --workspace
